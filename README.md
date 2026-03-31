@@ -1,19 +1,19 @@
-# CS2 Selfiestick DLL
+# CS2 Selfiestick
 
-`selfiestick` is a Counter-Strike 2 spectator camera DLL for `HLAE`.
+`CS2-selfiestick` is a Counter-Strike 2 spectator camera DLL for `HLAE`.
 
-This repository is organized to keep the **source code and documentation** in Git, while excluding generated binaries and intermediate build output.
+It gives you a standalone control panel and a gun-mounted selfie camera workflow for cinematic spectator shots in CS2.
 
-## What It Does
+## Highlights
 
-- Injects as a DLL through `HLAE`
-- Opens a standalone movable / resizable control panel
-- Supports `FOLLOW / LOCK CURRENT / CLEAR`
-- Supports `SELFIE LEFT / SELFIE RIGHT / FORWARD`
-- Supports local trim controls: `R / B / U`
-- Saves the panel toggle key to `selfiestick.ini`
-- Stabilizes gun-mounted camera shake while firing
-- Preserves the original FOV while spectating a scoped `AWP`
+- DLL-based workflow for `HLAE`
+- Standalone movable and resizable control panel
+- `FOLLOW / LOCK CURRENT / CLEAR` target control
+- `SELFIE LEFT / SELFIE RIGHT / FORWARD` look modes
+- Local trim controls: `R / B / U`
+- Persisted panel hotkey via `selfiestick.ini`
+- Gun camera shake damping while firing
+- Preserves unscoped framing and FOV while spectating an `AWP`
 
 ## Current Supported Weapons
 
@@ -22,22 +22,40 @@ This repository is organized to keep the **source code and documentation** in Gi
 - `M4A1-S`
 - `AWP`
 
-## Repository Layout
+## Download
 
-- `native_dll/`
-  Visual Studio solution and C++ source code
-- `build_dll.bat`
-  Release build script
-- `使用说明.md`
-  Main Chinese development / usage notes
-- `release/zh-CN/操作手册.md`
-  Chinese end-user manual
-- `release/en-US/Manual.md`
-  English end-user manual
-- `selfiestick_bind.cfg`
-  Reference hotkey hints
+- Source code: this repository
+- Prebuilt binaries: GitHub Releases
 
-## Build
+If you only want to use the DLL, download the latest release package instead of building from source.
+
+## Quick Start
+
+1. Download a release package.
+2. Copy either `zh-CN` or `en-US` to a stable location.
+3. Start `HLAE` and enter `CS2`.
+4. Load the DLL in the HLAE console.
+
+Chinese DLL example:
+
+```cfg
+mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
+```
+
+English DLL example:
+
+```cfg
+mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
+```
+
+Default hotkeys:
+
+- `Ins`: show / hide panel
+- `F8`: enable / disable selfiestick
+- `F9`: lock current target
+- `F10`: return to follow mode
+
+## Build From Source
 
 Requirements:
 
@@ -50,25 +68,20 @@ Build both localized release packages:
 build_dll.bat
 ```
 
-The Visual Studio solution is:
+Main solution:
 
 ```text
 native_dll/selfiestick_hlae.sln
 ```
 
-## Load In HLAE
+## Repository Layout
 
-Example:
-
-```cfg
-mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
-```
-
-or:
-
-```cfg
-mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
-```
+- `native_dll/` - Visual Studio solution and C++ source code
+- `build_dll.bat` - build script for localized release packages
+- `使用说明.md` - Chinese project notes and usage details
+- `release/zh-CN/操作手册.md` - Chinese end-user manual
+- `release/en-US/Manual.md` - English end-user manual
+- `selfiestick_bind.cfg` - hotkey reference
 
 ## Documentation
 
@@ -76,11 +89,16 @@ mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 - Chinese manual: [release/zh-CN/操作手册.md](./release/zh-CN/操作手册.md)
 - English manual: [release/en-US/Manual.md](./release/en-US/Manual.md)
 
-## Notes
+## Source Notes
 
-- This repo intentionally does **not** track compiled DLLs, PDBs, zip packages, or Visual Studio intermediate files.
-- The runtime implementation is currently centered in:
+- This repository tracks source code, project files, and documentation.
+- Compiled DLLs, PDBs, zip packages, and Visual Studio intermediates are intentionally excluded from Git.
+- The current runtime implementation is centered in:
 
 ```text
 native_dll/selfiestick_hlae/selfiestick_hlae.cpp
 ```
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE).
