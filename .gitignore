@@ -1,4 +1,5 @@
 bin/
+dist/
 
 bin_temp/
 *.zip
