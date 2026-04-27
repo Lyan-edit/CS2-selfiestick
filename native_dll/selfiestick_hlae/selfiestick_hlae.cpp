@@ -15,11 +15,18 @@
 #include <cwctype>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include "compatibility_gate.h"
+#include "schema_probe.h"
+#include "setup_view_hook.h"
 
 #pragma comment(lib, "Comctl32.lib")
 
@@ -28,14 +35,17 @@ namespace selfiestick {
 constexpr wchar_t kClientModuleName[] = L"client.dll";
 constexpr wchar_t kSchemaModuleName[] = L"schemasystem.dll";
 constexpr wchar_t kTier0ModuleName[] = L"tier0.dll";
+constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
 constexpr char kBuildTag[] = __DATE__ " " __TIME__;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v20-left-selfie-offset-tune";
 
 constexpr char kAnchorAttachmentName[] = "weapon_hand_r";
 constexpr char kGunSideAttachmentName[] = "weapon_hand_l";
 constexpr char kGunAnchorAttachmentName[] = "muzzle_flash";
 constexpr char kSource2ClientVersion[] = "Source2Client002";
+constexpr char kSchemaSystemVersion[] = "SchemaSystem_001";
 
 constexpr UINT_PTR kOverlayTimerId = 1;
 constexpr UINT kOverlayTimerIntervalMs = 33;
@@ -55,6 +65,18 @@ constexpr DWORD kOverlayWindowExStyle = WS_EX_CONTROLPARENT;
 constexpr wchar_t kSettingsFileName[] = L"selfiestick.ini";
 constexpr wchar_t kSettingsSectionHotkeys[] = L"Hotkeys";
 constexpr wchar_t kSettingsKeyPanelToggleVirtualKey[] = L"PanelToggleVirtualKey";
+constexpr wchar_t kSettingsSectionDebug[] = L"Debug";
+constexpr wchar_t kSettingsKeyTraceEnabled[] = L"TraceEnabled";
+constexpr wchar_t kSettingsKeyDisableScopedFovOverride[] = L"DisableScopedFovOverride";
+constexpr wchar_t kSettingsKeyDisableGunStabilization[] = L"DisableGunStabilization";
+constexpr wchar_t kTraceFileName[] = L"selfiestick_trace.log";
+constexpr unsigned long long kSchemaResolveRetryIntervalMs = 500ull;
+constexpr unsigned long long kSchemaResolveStartupWaitTimeoutMs = 10000ull;
+constexpr unsigned long kSchemaResolveStartupWaitSleepMs = 25ul;
+constexpr std::uint16_t kMaxReasonableSchemaFieldCount = 2048u;
+constexpr std::size_t kMaxSchemaNameLength = 256u;
+constexpr std::size_t kSchemaDiagnosticStringSlotLimit = 0x80u;
+constexpr std::size_t kSchemaDiagnosticPayloadSampleLimit = 16u;
 
 constexpr COLORREF kColorPanel = RGB(13, 17, 23);
 constexpr COLORREF kColorPanelStrong = RGB(18, 25, 35);
@@ -80,6 +102,7 @@ constexpr char kPatternGetSplitScreenPlayer[] = "48 83 EC ?? 83 F9 ?? 75 ?? 48 8
 constexpr char kPatternAttachmentAccess[] = "E8 ?? ?? ?? ?? 80 BD ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 0F B6 95 ?? ?? ?? ?? 84 D2 0F 84 ?? ?? ?? ?? 4C 8D 45 ?? 48 8B CF E8 ?? ?? ?? ??";
 constexpr char kPatternSchemaSystem[] = "48 89 05 ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 33 C0 48 C7 05";
 constexpr char kPatternSetupViewPatch[] = "BA FF FF FF FF 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 85 C0 75 0B 48 8B 05 ?? ?? ?? ?? 48 8B 40 08 4C 8D AE A0 04 00 00 48 8D 9E B8 04 00 00 44 38 20 75 2F";
+constexpr char kPatternSchemaQualifiedClassLookup[] = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B DA 48 8B F1 BA 21 00 00 00 49 8B C8 49 8B F8 E8 ?? ?? ?? ?? 48 8B E8 48 8B CE 48 8B 06 48 85 ED 75 15 FF 50 58 4C 8B C7 48 8B D3 48 8B C8 4C 8B 08 41 FF 51 18 EB 23 45 33 C0 48 8B D7 FF 50 68 48 8B C8 48 85 C0 75 05 48 89 03 EB 0D 48 8B 00 4C 8D 45 01 48 8B D3 FF 50 18";
 
 constexpr std::uint32_t kInvalidHandleValue = 0xFFFFFFFFu;
 constexpr int kEntityHandleIndexMask = 0x7FFF;
@@ -143,12 +166,15 @@ constexpr WeaponAttachmentSpec kSupportedWeaponSpecs[] = {
 };
 
 constexpr Vec3 kCombatBaseOffset{ 8.0f, 18.0f, 6.0f };
+constexpr Vec3 kKnifeFallbackHandAnchorOffset{ 10.0f, 12.0f, -18.0f };
+constexpr Vec3 kSyntheticFallbackSelfieBaseOffset{ 6.0f, 12.0f, 10.0f };
 constexpr Vec3 kGunSelfieBaseOffset{ 10.5f, 12.5f, 6.75f };
 constexpr Vec3 kGunForwardBaseOffset{ 6.5f, 16.25f, -2.5f };
 constexpr Vec3 kWorldUp{ 0.0f, 0.0f, 1.0f };
 constexpr float kGunUpperBodyTargetBlendFactor = 0.34f;
 constexpr float kGunSelfieTargetCrossBias = 3.75f;
 constexpr float kGunSelfieTargetUpBias = 0.15f;
+constexpr float kFallbackEyeOriginHeight = 64.0f;
 
 struct EntityHandle {
     std::uint32_t raw{kInvalidHandleValue};
@@ -171,6 +197,7 @@ struct WeaponFrameBasis {
     HeldItemKind heldItemKind{HeldItemKind::Unknown};
     EntityHandle weaponHandle{};
     SupportedWeaponId supportedWeaponId{SupportedWeaponId::None};
+    bool syntheticFallbackHandAnchor{false};
 };
 
 enum class LookMode {
@@ -596,12 +623,14 @@ struct ClientOffsets {
     std::ptrdiff_t pawnCameraServices{};
     std::ptrdiff_t pawnWeaponServices{};
     std::ptrdiff_t pawnControllerHandle{};
+    std::ptrdiff_t pawnEyeAngles{};
     std::ptrdiff_t observerMode{};
     std::ptrdiff_t observerTarget{};
     std::ptrdiff_t cameraViewEntity{};
     std::ptrdiff_t activeWeapon{};
     std::ptrdiff_t sceneNode{};
     std::ptrdiff_t sceneAbsOrigin{};
+    std::ptrdiff_t renderWithViewModels{};
 };
 
 struct SchemaField {
@@ -612,45 +641,32 @@ struct SchemaField {
     void* metadata;
 };
 
-struct SchemaClass {
-    void* vtable;
+template <typename T>
+struct SchemaArray {
+    T* elements;
+    std::uint32_t count;
+    std::uint32_t reserved;
+};
+
+struct SchemaFieldModern {
+    void* type;
     const char* name;
-    const char* moduleName;
-    std::uint32_t size;
-    std::uint16_t numFields;
-    std::byte padding0[2];
-    std::uint16_t staticSize;
-    std::uint16_t metadataSize;
-    std::byte padding1[4];
-    SchemaField* fields;
+    std::uint32_t offset;
+    std::byte padding0[0xC];
 };
 
-struct SchemaDeclaredClass {
-    void* vtable;
-    const char* name;
-    const char* moduleName;
-    const char* unknown;
-    SchemaClass* schemaClass;
+struct SchemaClassInfoModern {
+    std::byte nameStorage[0x18];
+    std::uint32_t sizeOf;
+    std::uint32_t alignOf;
+    SchemaArray<SchemaFieldModern> fields;
 };
 
-struct SchemaDeclaredClassEntry {
-    std::uint64_t hash[2];
-    SchemaDeclaredClass* declaredClass;
-};
-
-struct SchemaTypeScope {
-    void* vtable;
-    char name[256];
-    std::byte padding[0x368];
-    std::uint16_t numDeclaredClasses;
-    std::byte padding1[6];
-    SchemaDeclaredClassEntry* declaredClasses;
-};
-
-struct SchemaSystem {
-    std::byte padding[0x190];
-    std::uint64_t scopeSize;
-    SchemaTypeScope** scopeArray;
+struct SchemaClassInfoLegacy {
+    std::byte padding0[0x1C];
+    std::uint16_t fieldCount;
+    std::byte padding1[0xA];
+    SchemaFieldModern* fields;
 };
 
 struct RuntimeState {
@@ -702,6 +718,13 @@ struct ScopedFovOverrideState {
     EntityHandle weaponHandle{};
     float unzoomedFov{kFallbackUnscopedFov};
     bool valid{false};
+};
+
+struct ViewModelSuppressionState {
+    EntityHandle weaponHandle{};
+    void* weaponEntity{};
+    bool previousRenderWithViewModels{};
+    bool active{false};
 };
 
 enum OverlayControlId : int {
@@ -758,6 +781,12 @@ struct OverlayUiState {
     std::atomic<bool> dirty{true};
 };
 
+struct DebugOptions {
+    bool traceEnabled{true};
+    bool disableScopedFovOverride{false};
+    bool disableGunStabilization{false};
+};
+
 using CreateInterfaceFn = void* (*)(const char* name, int* returnCode);
 using GetHighestEntityIndexFn = int(__fastcall*)(void* entityList, bool includeUnknown);
 using GetEntityFromIndexFn = void* (__fastcall*)(void* entityList, int index);
@@ -766,6 +795,10 @@ using GetAttachmentFn = bool(__fastcall*)(void* entity, std::uint8_t attachmentI
 using GetSplitScreenPlayerFn = void* (__fastcall*)(int slot);
 using FrameStageNotifyFn = void(__fastcall*)(void* thisPointer, int stage);
 using Tier0MsgFn = void(__cdecl*)(const char*, ...);
+using FindTypeScopeForModuleFn = void* (__fastcall*)(void* schemaSystem, const char* moduleName, void* unused);
+using FindDeclaredClassInTypeScopeFn = void* (__fastcall*)(void* typeScope, const char* className);
+using FindDeclaredClassOutParamFn = void(__fastcall*)(void* typeScope, void** outClassInfo, const char* className);
+using FindDeclaredClassByQualifiedNameFn = void* (__fastcall*)(void* schemaSystem, void** outClassInfo, const char* qualifiedClassName);
 
 HMODULE g_module{};
 HMODULE g_clientModule{};
@@ -783,29 +816,295 @@ std::vector<GetSplitScreenPlayerFn> g_getSplitScreenPlayerCandidates{};
 FrameStageNotifyFn g_originalFrameStageNotify{};
 void* g_setupViewPatchAddress{};
 void* g_setupViewDetourStub{};
-std::array<std::uint8_t, 17> g_setupViewOriginalBytes{};
+std::array<std::uint8_t, hook::kSetUpViewPatchSize> g_setupViewOriginalBytes{};
 Tier0MsgFn g_tier0Msg{};
+FindDeclaredClassByQualifiedNameFn g_findDeclaredClassByQualifiedName{};
+std::uintptr_t g_schemaQualifiedClassLookupAddress{};
 ClientOffsets g_offsets{};
+compat::RuntimeCompatibility g_runtimeCompatibility{};
 
 std::mutex g_stateMutex;
 std::mutex g_gunBasisContinuityMutex;
 std::mutex g_gunAnchorStabilityMutex;
 std::mutex g_scopedFovOverrideMutex;
+std::mutex g_viewModelSuppressionMutex;
 std::mutex g_solidBrushCacheMutex;
 RuntimeState g_state;
 OverlayUiState g_ui;
 GunBasisContinuityState g_gunBasisContinuity;
 GunAnchorStabilityState g_gunAnchorStability;
 ScopedFovOverrideState g_scopedFovOverride;
+ViewModelSuppressionState g_viewModelSuppression;
+DebugOptions g_debugOptions;
 std::atomic<bool> g_uiThreadStarted{false};
 std::atomic<bool> g_setupViewCallbackObserved{false};
 std::atomic<bool> g_enabledSetUpViewObserved{false};
+std::atomic<unsigned long long> g_setupViewBridgeCounter{0};
+std::atomic<unsigned long long> g_traceFrameCounter{0};
+std::atomic<unsigned long long> g_followResolutionTraceCounter{0};
+std::atomic<unsigned long long> g_controllerPawnFallbackTraceCounter{0};
+std::atomic<unsigned long long> g_knifeFallbackAnchorTraceCounter{0};
+std::atomic<int> g_initStage{0};
+std::atomic<bool> g_schemaOffsetsResolved{false};
+std::atomic<bool> g_schemaResolveInProgress{false};
+std::atomic<unsigned long long> g_lastSchemaResolveAttemptTickMs{0};
 std::unordered_map<COLORREF, HBRUSH> g_solidBrushCache;
+std::mutex g_traceMutex;
+std::mutex g_schemaResolveMutex;
+std::string g_schemaResolveFailureReason{};
 
 void RefreshStatusTextLocked();
 RuntimeState SnapshotState();
 void ConsolePrintf(const char* format, ...);
+void TracePrintf(const char* format, ...);
 void MarkOverlayDirty();
+std::string TryGetEntityRttiClassName(void* entity);
+bool TryGetEntityAbsOrigin(void* entity, Vec3& origin, std::string& failure);
+bool TryReadViewSetupOrigin(void* viewSetup, Vec3& origin);
+bool TryReadViewSetupAngles(void* viewSetup, Vec3& angles);
+bool IsFiniteVec3(const Vec3& value);
+const char* InitStageToString(int stage) noexcept;
+bool StartBackgroundSchemaResolve(const char* caller, bool traceAttempt);
+DWORD WINAPI SchemaResolveWorkerThreadMain(LPVOID);
+
+std::string FormatIncompatibleBuildReason(const char* detail) {
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    return std::string("当前 CS2 版本不兼容: ") + detail;
+#else
+    return std::string("incompatible CS2 build: ") + detail;
+#endif
+}
+
+bool IsExecutableProtection(DWORD protection) {
+    const DWORD normalized = protection & 0xFFu;
+    return normalized == PAGE_EXECUTE
+        || normalized == PAGE_EXECUTE_READ
+        || normalized == PAGE_EXECUTE_READWRITE
+        || normalized == PAGE_EXECUTE_WRITECOPY;
+}
+
+bool IsReadableProtection(DWORD protection) {
+    const DWORD normalized = protection & 0xFFu;
+    return normalized == PAGE_READONLY
+        || normalized == PAGE_READWRITE
+        || normalized == PAGE_WRITECOPY
+        || normalized == PAGE_EXECUTE_READ
+        || normalized == PAGE_EXECUTE_READWRITE
+        || normalized == PAGE_EXECUTE_WRITECOPY;
+}
+
+bool IsAddressInModuleWithProtection(HMODULE module, const void* address, bool requireExecutable) {
+    if (module == nullptr || address == nullptr) {
+        return false;
+    }
+
+    MEMORY_BASIC_INFORMATION memoryInfo{};
+    if (VirtualQuery(address, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || memoryInfo.AllocationBase != module) {
+        return false;
+    }
+
+    if ((memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
+        return false;
+    }
+
+    return requireExecutable ? IsExecutableProtection(memoryInfo.Protect) : IsReadableProtection(memoryInfo.Protect);
+}
+
+bool IsAddressExecutableInModule(HMODULE module, const void* address) {
+    return IsAddressInModuleWithProtection(module, address, true);
+}
+
+bool IsAddressReadableInModule(HMODULE module, const void* address) {
+    return IsAddressInModuleWithProtection(module, address, false);
+}
+
+bool TryInvokeSplitScreenPlayer(GetSplitScreenPlayerFn function, int slot, void*& entity) {
+    entity = nullptr;
+    if (function == nullptr) {
+        return false;
+    }
+
+    __try {
+        entity = function(slot);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        entity = nullptr;
+        return false;
+    }
+}
+
+bool TryInvokeGetEntityFromIndex(void* entityList, int index, void*& entity) {
+    entity = nullptr;
+    if (entityList == nullptr || g_getEntityFromIndex == nullptr) {
+        return false;
+    }
+
+    __try {
+        entity = g_getEntityFromIndex(entityList, index);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        entity = nullptr;
+        return false;
+    }
+}
+
+bool TryInvokeRenderEyeOrigin(void* entity, void* functionAddress, float output[3]) {
+    if (entity == nullptr || functionAddress == nullptr || output == nullptr) {
+        return false;
+    }
+
+    auto function = reinterpret_cast<void(__fastcall*)(void*, float output[3])>(functionAddress);
+    __try {
+        function(entity, output);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool TryInvokeLookupAttachment(void* entity, LookupAttachmentFn function, std::uint8_t& attachmentIndex, const char* attachmentName) {
+    if (entity == nullptr || function == nullptr || attachmentName == nullptr) {
+        return false;
+    }
+
+    __try {
+        function(entity, attachmentIndex, attachmentName);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        attachmentIndex = 0xFFu;
+        return false;
+    }
+}
+
+bool TryInvokeGetAttachment(void* entity, GetAttachmentFn function, std::uint8_t attachmentIndex, void* outputTransform, bool& result) {
+    result = false;
+    if (entity == nullptr || function == nullptr || outputTransform == nullptr) {
+        return false;
+    }
+
+    __try {
+        result = function(entity, attachmentIndex, outputTransform);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool TryReadFloatPointer(const float* address, float& value) {
+    value = 0.0f;
+    if (address == nullptr) {
+        return false;
+    }
+
+    __try {
+        value = *address;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        value = 0.0f;
+        return false;
+    }
+}
+
+bool TryReadViewSetupOrigin(void* viewSetup, Vec3& origin) {
+    origin = {};
+    if (viewSetup == nullptr) {
+        return false;
+    }
+
+    auto* viewOrigin = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupOriginOffset);
+    if (!TryReadFloatPointer(viewOrigin + 0, origin.x)
+        || !TryReadFloatPointer(viewOrigin + 1, origin.y)
+        || !TryReadFloatPointer(viewOrigin + 2, origin.z)
+        || !IsFiniteVec3(origin)) {
+        origin = {};
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadViewSetupAngles(void* viewSetup, Vec3& angles) {
+    angles = {};
+    if (viewSetup == nullptr) {
+        return false;
+    }
+
+    auto* viewAngles = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupAnglesOffset);
+    if (!TryReadFloatPointer(viewAngles + 0, angles.x)
+        || !TryReadFloatPointer(viewAngles + 1, angles.y)
+        || !TryReadFloatPointer(viewAngles + 2, angles.z)
+        || !IsFiniteVec3(angles)) {
+        angles = {};
+        return false;
+    }
+
+    return true;
+}
+
+template <typename T>
+bool TryReadMemoryValue(const T* address, T& value) {
+    value = T{};
+    if (address == nullptr) {
+        return false;
+    }
+
+    __try {
+        value = *address;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        value = T{};
+        return false;
+    }
+}
+
+bool TryCopyCString(const char* source, std::string& value, std::size_t maxLength = kMaxSchemaNameLength) {
+    value.clear();
+    if (source == nullptr) {
+        return false;
+    }
+
+    __try {
+        for (std::size_t index = 0; index < maxLength; ++index) {
+            const char character = source[index];
+            if ('\0' == character) {
+                return true;
+            }
+            value.push_back(character);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        value.clear();
+        return false;
+    }
+
+    value.clear();
+    return false;
+}
+
+bool TryWriteViewSetupPose(float* origin, float* angles, const Vec3& cameraPosition, float pitch, float yaw) {
+    if (origin == nullptr || angles == nullptr) {
+        return false;
+    }
+
+    __try {
+        origin[0] = cameraPosition.x;
+        origin[1] = cameraPosition.y;
+        origin[2] = cameraPosition.z;
+        angles[0] = pitch;
+        angles[1] = yaw;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 bool IsFiniteVec3(const Vec3& value) {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -879,6 +1178,10 @@ Vec3 ComposeBasisPoint(const Vec3& origin, const Vec3& right, const Vec3& forwar
 }
 
 void StabilizeGunBasisRightAxis(EntityHandle targetHandle, WeaponFrameBasis& basis) {
+    if (g_debugOptions.disableGunStabilization) {
+        return;
+    }
+
     if (!targetHandle.IsValid()) {
         return;
     }
@@ -897,6 +1200,10 @@ void StabilizeGunBasisRightAxis(EntityHandle targetHandle, WeaponFrameBasis& bas
 }
 
 Vec3 StabilizeGunAnchorOrigin(EntityHandle targetHandle, EntityHandle weaponHandle, const Vec3& handMidpoint, const WeaponFrameBasis& basis, const Vec3& rawAnchorOrigin) {
+    if (g_debugOptions.disableGunStabilization) {
+        return rawAnchorOrigin;
+    }
+
     if (!targetHandle.IsValid() || !weaponHandle.IsValid()) {
         return rawAnchorOrigin;
     }
@@ -1225,6 +1532,57 @@ bool WriteProcessMemoryProtected(void* address, const void* bytes, std::size_t s
     return true;
 }
 
+std::uintptr_t AlignDown(std::uintptr_t value, std::uintptr_t alignment) {
+    return value & ~(alignment - 1u);
+}
+
+void* AllocateExecutableMemoryNearAddress(const void* address, std::size_t size) {
+    if (address == nullptr || size == 0u) {
+        return nullptr;
+    }
+
+    SYSTEM_INFO systemInfo{};
+    GetSystemInfo(&systemInfo);
+    const std::uintptr_t granularity = static_cast<std::uintptr_t>(systemInfo.dwAllocationGranularity);
+    if (granularity == 0u) {
+        return nullptr;
+    }
+
+    constexpr std::uintptr_t kMaxRel32Distance = 0x7FFF0000ull;
+    const auto target = reinterpret_cast<std::uintptr_t>(address);
+    const auto minAddress = target > kMaxRel32Distance ? target - kMaxRel32Distance : granularity;
+    const auto maxAddress = target < (std::numeric_limits<std::uintptr_t>::max() - kMaxRel32Distance)
+        ? target + kMaxRel32Distance
+        : std::numeric_limits<std::uintptr_t>::max() - granularity;
+
+    auto tryAllocate = [size](std::uintptr_t candidate) -> void* {
+        return VirtualAlloc(reinterpret_cast<void*>(candidate), size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    };
+
+    const auto alignedTarget = AlignDown(target, granularity);
+    for (std::uintptr_t distance = 0u; distance <= kMaxRel32Distance; distance += granularity) {
+        const auto upCandidate = alignedTarget + distance;
+        if (upCandidate >= alignedTarget && upCandidate <= maxAddress) {
+            if (void* allocation = tryAllocate(upCandidate)) {
+                return allocation;
+            }
+        }
+
+        if (distance == 0u || alignedTarget <= minAddress + distance) {
+            continue;
+        }
+
+        const auto downCandidate = alignedTarget - distance;
+        if (downCandidate >= minAddress) {
+            if (void* allocation = tryAllocate(downCandidate)) {
+                return allocation;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 std::vector<int> ParsePattern(const char* pattern) {
     std::vector<int> bytes;
     const char* cursor = pattern;
@@ -1373,88 +1731,2119 @@ bool LoadInterfaces() {
     return true;
 }
 
-bool ResolveSchemaOffsets() {
-    const auto schemaInstruction = FindPattern(g_schemaModule, kPatternSchemaSystem);
-    if (schemaInstruction == 0) {
-        SetInitialized(false, Texts().reasonSchemaPatternMissing);
+bool TryInvokeFindTypeScopeForModule(FindTypeScopeForModuleFn function, void* schemaSystem, const char* moduleName, void*& scope) {
+    scope = nullptr;
+    if (function == nullptr || schemaSystem == nullptr || moduleName == nullptr) {
         return false;
     }
 
-    auto* schemaSystem = reinterpret_cast<SchemaSystem*>(schemaInstruction + *reinterpret_cast<std::int32_t*>(schemaInstruction + 3) + 7);
-    if (schemaSystem == nullptr || schemaSystem->scopeArray == nullptr) {
-        SetInitialized(false, Texts().reasonSchemaSystemUnavailable);
-        return false;
-    }
-
-    std::unordered_map<std::string, std::unordered_map<std::string, std::ptrdiff_t>> fields;
-
-    for (std::uint64_t scopeIndex = 0; scopeIndex < schemaSystem->scopeSize; ++scopeIndex) {
-        auto* scope = schemaSystem->scopeArray[scopeIndex];
-        if (scope == nullptr || scope->declaredClasses == nullptr) {
-            continue;
-        }
-
-        if (std::strcmp(scope->name, "client.dll") != 0) {
-            continue;
-        }
-
-        for (std::uint16_t classIndex = 0; classIndex < scope->numDeclaredClasses; ++classIndex) {
-            auto* declaredClass = scope->declaredClasses[classIndex].declaredClass;
-            if (declaredClass == nullptr || declaredClass->schemaClass == nullptr || declaredClass->schemaClass->fields == nullptr) {
-                continue;
-            }
-
-            auto* schemaClass = declaredClass->schemaClass;
-            if (schemaClass->name == nullptr) {
-                continue;
-            }
-
-            auto& classFields = fields[schemaClass->name];
-            for (std::uint16_t fieldIndex = 0; fieldIndex < schemaClass->numFields; ++fieldIndex) {
-                const auto& field = schemaClass->fields[fieldIndex];
-                if (field.name == nullptr) {
-                    continue;
-                }
-                classFields[field.name] = field.offset;
-            }
-        }
-    }
-
-    auto getOffset = [&fields](const char* className, const char* fieldName, std::ptrdiff_t& target) -> bool {
-        const auto classIt = fields.find(className);
-        if (classIt == fields.end()) {
-            return false;
-        }
-
-        const auto fieldIt = classIt->second.find(fieldName);
-        if (fieldIt == classIt->second.end()) {
-            return false;
-        }
-
-        target = fieldIt->second;
+    __try {
+        scope = function(schemaSystem, moduleName, nullptr);
         return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        scope = nullptr;
+        return false;
+    }
+}
+
+bool TryInvokeFindDeclaredClassByQualifiedName(
+    FindDeclaredClassByQualifiedNameFn function,
+    void* schemaSystem,
+    const char* qualifiedClassName,
+    void*& classInfo
+) {
+    classInfo = nullptr;
+    if (function == nullptr || schemaSystem == nullptr || qualifiedClassName == nullptr || *qualifiedClassName == '\0') {
+        return false;
+    }
+
+    __try {
+        function(schemaSystem, &classInfo, qualifiedClassName);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        classInfo = nullptr;
+        return false;
+    }
+}
+
+bool ResolveSchemaQualifiedClassLookupEntry(std::string& failure) {
+    failure.clear();
+    if (g_findDeclaredClassByQualifiedName != nullptr && g_schemaQualifiedClassLookupAddress != 0u) {
+        return true;
+    }
+
+    const auto matches = FindPatterns(g_schemaModule, kPatternSchemaQualifiedClassLookup, 4);
+    TracePrintf(
+        "schema-entry scan name=qualified-class matches=%u traceVersion=%s",
+        static_cast<unsigned>(matches.size()),
+        kSchemaProbeTraceVersion
+    );
+    if (matches.empty()) {
+        failure = Texts().reasonSchemaPatternMissing;
+        return false;
+    }
+
+    std::uintptr_t selectedAddress = 0u;
+    for (const auto match : matches) {
+        TracePrintf("schema-entry candidate name=qualified-class address=%p", reinterpret_cast<void*>(match));
+        if (0u == selectedAddress && IsAddressExecutableInModule(g_schemaModule, reinterpret_cast<void*>(match))) {
+            selectedAddress = match;
+        }
+    }
+
+    if (0u == selectedAddress) {
+        failure = FormatIncompatibleBuildReason("schema qualified class entry is outside schemasystem.dll");
+        return false;
+    }
+
+    g_schemaQualifiedClassLookupAddress = selectedAddress;
+    g_findDeclaredClassByQualifiedName = reinterpret_cast<FindDeclaredClassByQualifiedNameFn>(selectedAddress);
+    TracePrintf(
+        "schema-entry pattern-hit name=qualified-class address=%p matches=%u",
+        reinterpret_cast<void*>(g_schemaQualifiedClassLookupAddress),
+        static_cast<unsigned>(matches.size())
+    );
+    return true;
+}
+
+enum class TypeScopeClassLookupMode {
+    Unknown,
+    ReturnValue,
+    OutParam
+};
+
+const char* TypeScopeClassLookupModeToString(TypeScopeClassLookupMode mode) noexcept {
+    switch (mode) {
+    case TypeScopeClassLookupMode::ReturnValue:
+        return "return";
+    case TypeScopeClassLookupMode::OutParam:
+        return "outparam";
+    default:
+        return "unknown";
+    }
+}
+
+int g_typeScopeClassLookupVtableIndex = -1;
+TypeScopeClassLookupMode g_typeScopeClassLookupMode = TypeScopeClassLookupMode::Unknown;
+
+bool TryInvokeTypeScopeClassLookupSlot(
+    void* scope,
+    std::size_t slotIndex,
+    TypeScopeClassLookupMode mode,
+    const char* className,
+    void*& classInfo
+);
+bool ResolveTypeScopeClassLookup(void* scope);
+
+bool TryInvokeFindDeclaredClassInTypeScope(void* scope, const char* className, void*& classInfo) {
+    if (!ResolveTypeScopeClassLookup(scope)) {
+        TracePrintf(
+            "schema-lookup resolve-failed class=%s scope=%p cachedSlot=%d cachedMode=%s",
+            className != nullptr ? className : "<null>",
+            scope,
+            g_typeScopeClassLookupVtableIndex,
+            TypeScopeClassLookupModeToString(g_typeScopeClassLookupMode)
+        );
+        return false;
+    }
+
+    const bool invoked = TryInvokeTypeScopeClassLookupSlot(
+        scope,
+        static_cast<std::size_t>(g_typeScopeClassLookupVtableIndex),
+        g_typeScopeClassLookupMode,
+        className,
+        classInfo
+    );
+    if (!invoked || classInfo == nullptr) {
+        TracePrintf(
+            "schema-lookup call-miss class=%s scope=%p slot=%d mode=%s invoked=%d classInfo=%p",
+            className != nullptr ? className : "<null>",
+            scope,
+            g_typeScopeClassLookupVtableIndex,
+            TypeScopeClassLookupModeToString(g_typeScopeClassLookupMode),
+            invoked ? 1 : 0,
+            classInfo
+        );
+    }
+
+    return invoked;
+}
+
+bool TryReadSchemaFieldSpanModern(const void* classInfo, SchemaFieldModern*& fields, std::uint32_t& count) {
+    fields = nullptr;
+    count = 0u;
+    if (classInfo == nullptr) {
+        return false;
+    }
+
+    SchemaClassInfoModern info{};
+    if (!TryReadMemoryValue(reinterpret_cast<const SchemaClassInfoModern*>(classInfo), info)) {
+        return false;
+    }
+
+    if (info.fields.elements == nullptr || info.fields.count == 0u || info.fields.count > kMaxReasonableSchemaFieldCount) {
+        return false;
+    }
+
+    fields = info.fields.elements;
+    count = info.fields.count;
+    return true;
+}
+
+bool TryReadSchemaFieldSpanLegacy(const void* classInfo, SchemaFieldModern*& fields, std::uint32_t& count) {
+    fields = nullptr;
+    count = 0u;
+    if (classInfo == nullptr) {
+        return false;
+    }
+
+    SchemaClassInfoLegacy info{};
+    if (!TryReadMemoryValue(reinterpret_cast<const SchemaClassInfoLegacy*>(classInfo), info)) {
+        return false;
+    }
+
+    if (info.fields == nullptr || info.fieldCount == 0u || info.fieldCount > kMaxReasonableSchemaFieldCount) {
+        return false;
+    }
+
+    fields = info.fields;
+    count = static_cast<std::uint32_t>(info.fieldCount);
+    return true;
+}
+
+bool TryReadSchemaFieldArrayInfo(const void* fieldArrayInfo, SchemaFieldModern*& fields, std::uint32_t& count) {
+    fields = nullptr;
+    count = 0u;
+    if (fieldArrayInfo == nullptr) {
+        return false;
+    }
+
+    SchemaArray<SchemaFieldModern> fieldArray{};
+    if (!TryReadMemoryValue(reinterpret_cast<const SchemaArray<SchemaFieldModern>*>(fieldArrayInfo), fieldArray)) {
+        return false;
+    }
+
+    if (fieldArray.elements == nullptr || fieldArray.count == 0u || fieldArray.count > kMaxReasonableSchemaFieldCount) {
+        return false;
+    }
+
+    SchemaFieldModern firstField{};
+    if (!TryReadMemoryValue(fieldArray.elements, firstField) || firstField.name == nullptr) {
+        return false;
+    }
+
+    std::string firstFieldName;
+    if (!TryCopyCString(firstField.name, firstFieldName, 128u) || firstFieldName.empty()) {
+        return false;
+    }
+
+    fields = fieldArray.elements;
+    count = fieldArray.count;
+    return true;
+}
+
+bool TryReadSchemaFieldSpanDeclaredPayload(const void* payload, SchemaFieldModern*& fields, std::uint32_t& count, const char*& layoutName) {
+    fields = nullptr;
+    count = 0u;
+    layoutName = nullptr;
+    if (payload == nullptr) {
+        return false;
+    }
+
+    void* schemaClass = nullptr;
+    __try {
+        if (!schema::TryGetSchemaClassFromDeclaredClassPayload(payload, schemaClass) || schemaClass == nullptr) {
+            return false;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+
+    if (TryReadSchemaFieldArrayInfo(schemaClass, fields, count)) {
+        layoutName = "declared-field-array";
+        return true;
+    }
+
+    if (TryReadSchemaFieldSpanModern(schemaClass, fields, count)) {
+        layoutName = "declared-modern";
+        return true;
+    }
+
+    return false;
+}
+
+bool TryReadSchemaFieldSpan(const void* classInfo, SchemaFieldModern*& fields, std::uint32_t& count, const char*& layoutName) {
+    if (TryReadSchemaFieldArrayInfo(classInfo, fields, count)) {
+        layoutName = "field-array";
+        return true;
+    }
+
+    if (TryReadSchemaFieldSpanModern(classInfo, fields, count)) {
+        layoutName = "modern";
+        return true;
+    }
+
+    if (TryReadSchemaFieldSpanDeclaredPayload(classInfo, fields, count, layoutName)) {
+        return true;
+    }
+
+    layoutName = "unknown";
+    fields = nullptr;
+    count = 0u;
+    return false;
+}
+
+bool ContainsSchemaFieldName(SchemaFieldModern* fields, std::uint32_t fieldCount, const char* expectedFieldName) {
+    if (fields == nullptr || fieldCount == 0u || expectedFieldName == nullptr || *expectedFieldName == '\0') {
+        return false;
+    }
+
+    for (std::uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+        SchemaFieldModern field{};
+        if (!TryReadMemoryValue(fields + fieldIndex, field) || field.name == nullptr) {
+            continue;
+        }
+
+        std::string resolvedFieldName;
+        if (!TryCopyCString(field.name, resolvedFieldName) || resolvedFieldName.empty()) {
+            continue;
+        }
+
+        if (resolvedFieldName == expectedFieldName) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ValidateTypeScopeLookupCandidate(
+    void* scope,
+    std::size_t slotIndex,
+    TypeScopeClassLookupMode mode,
+    const char*& acceptedProbeClass,
+    void*& acceptedClassInfo,
+    const char*& acceptedLayoutName,
+    std::uint32_t& acceptedFieldCount
+) {
+    struct ProbeRequirement {
+        const char* className;
+        const char* expectedFieldName;
     };
 
-    bool ok = true;
-    ok = ok && getOffset("CEntityInstance", "m_pEntity", g_offsets.entityInstanceToIdentity);
-    ok = ok && getOffset("CBasePlayerController", "m_hPawn", g_offsets.controllerPawnHandle);
-    ok = ok && getOffset("C_BasePlayerPawn", "m_pObserverServices", g_offsets.pawnObserverServices);
-    ok = ok && getOffset("C_BasePlayerPawn", "m_pCameraServices", g_offsets.pawnCameraServices);
-    ok = ok && getOffset("C_BasePlayerPawn", "m_pWeaponServices", g_offsets.pawnWeaponServices);
-    ok = ok && getOffset("C_BasePlayerPawn", "m_hController", g_offsets.pawnControllerHandle);
-    ok = ok && getOffset("CPlayer_ObserverServices", "m_iObserverMode", g_offsets.observerMode);
-    ok = ok && getOffset("CPlayer_ObserverServices", "m_hObserverTarget", g_offsets.observerTarget);
-    ok = ok && getOffset("CPlayer_CameraServices", "m_hViewEntity", g_offsets.cameraViewEntity);
-    ok = ok && getOffset("CPlayer_WeaponServices", "m_hActiveWeapon", g_offsets.activeWeapon);
-    ok = ok && getOffset("C_BaseEntity", "m_pGameSceneNode", g_offsets.sceneNode);
-    ok = ok && getOffset("CGameSceneNode", "m_vecAbsOrigin", g_offsets.sceneAbsOrigin);
+    constexpr ProbeRequirement kRequirements[] = {
+        { "C_CSPlayerPawn", "m_angEyeAngles" },
+        { "C_BaseEntity", "m_pGameSceneNode" },
+        { "C_BasePlayerPawn", "m_pObserverServices" },
+        { "CBasePlayerController", "m_hPawn" }
+    };
 
-    if (!ok) {
-        SetInitialized(false, Texts().reasonRequiredSchemaOffsetsMissing);
+    acceptedProbeClass = nullptr;
+    acceptedClassInfo = nullptr;
+    acceptedLayoutName = nullptr;
+    acceptedFieldCount = 0u;
+
+    unsigned matchedCount = 0u;
+    for (const auto& requirement : kRequirements) {
+        void* classInfoA = nullptr;
+        if (!TryInvokeTypeScopeClassLookupSlot(scope, slotIndex, mode, requirement.className, classInfoA) || classInfoA == nullptr) {
+            TracePrintf(
+                "schema-lookup reject slot=%u mode=%s probeClass=%s reason=lookup-miss",
+                static_cast<unsigned>(slotIndex),
+                TypeScopeClassLookupModeToString(mode),
+                requirement.className
+            );
+            return false;
+        }
+
+        void* classInfoB = nullptr;
+        if (!TryInvokeTypeScopeClassLookupSlot(scope, slotIndex, mode, requirement.className, classInfoB) || classInfoB == nullptr) {
+            TracePrintf(
+                "schema-lookup reject slot=%u mode=%s probeClass=%s reason=lookup-unstable-second-call classInfoA=%p",
+                static_cast<unsigned>(slotIndex),
+                TypeScopeClassLookupModeToString(mode),
+                requirement.className,
+                classInfoA
+            );
+            return false;
+        }
+
+        if (classInfoA != classInfoB) {
+            TracePrintf(
+                "schema-lookup reject slot=%u mode=%s probeClass=%s reason=lookup-unstable-pointer classInfoA=%p classInfoB=%p",
+                static_cast<unsigned>(slotIndex),
+                TypeScopeClassLookupModeToString(mode),
+                requirement.className,
+                classInfoA,
+                classInfoB
+            );
+            return false;
+        }
+
+        SchemaFieldModern* fields = nullptr;
+        std::uint32_t fieldCount = 0u;
+        const char* layoutName = nullptr;
+        if (!TryReadSchemaFieldSpan(classInfoA, fields, fieldCount, layoutName)) {
+            TracePrintf(
+                "schema-lookup reject slot=%u mode=%s probeClass=%s reason=field-span-unreadable classInfo=%p",
+                static_cast<unsigned>(slotIndex),
+                TypeScopeClassLookupModeToString(mode),
+                requirement.className,
+                classInfoA
+            );
+            return false;
+        }
+
+        if (!ContainsSchemaFieldName(fields, fieldCount, requirement.expectedFieldName)) {
+            TracePrintf(
+                "schema-lookup reject slot=%u mode=%s probeClass=%s classInfo=%p layout=%s fields=%u expectedField=%s reason=missing-expected-field",
+                static_cast<unsigned>(slotIndex),
+                TypeScopeClassLookupModeToString(mode),
+                requirement.className,
+                classInfoA,
+                layoutName,
+                static_cast<unsigned>(fieldCount),
+                requirement.expectedFieldName
+            );
+            return false;
+        }
+
+        if (acceptedProbeClass == nullptr) {
+            acceptedProbeClass = requirement.className;
+            acceptedClassInfo = classInfoA;
+            acceptedLayoutName = layoutName;
+            acceptedFieldCount = fieldCount;
+        }
+
+        ++matchedCount;
+    }
+
+    return matchedCount == std::size(kRequirements);
+}
+
+bool TryInvokeTypeScopeClassLookupSlot(
+    void* scope,
+    std::size_t slotIndex,
+    TypeScopeClassLookupMode mode,
+    const char* className,
+    void*& classInfo
+) {
+    classInfo = nullptr;
+    if (scope == nullptr || className == nullptr || *className == '\0') {
+        return false;
+    }
+
+    void** vtable = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<void***>(scope), vtable) || vtable == nullptr) {
+        return false;
+    }
+
+    void* functionAddress = nullptr;
+    if (!TryReadMemoryValue(vtable + slotIndex, functionAddress) || functionAddress == nullptr) {
+        return false;
+    }
+
+    if (!IsAddressExecutableInModule(g_schemaModule, functionAddress)) {
+        return false;
+    }
+
+    __try {
+        switch (mode) {
+        case TypeScopeClassLookupMode::ReturnValue: {
+            auto function = reinterpret_cast<FindDeclaredClassInTypeScopeFn>(functionAddress);
+            classInfo = function(scope, className);
+            return true;
+        }
+        case TypeScopeClassLookupMode::OutParam: {
+            auto function = reinterpret_cast<FindDeclaredClassOutParamFn>(functionAddress);
+            function(scope, &classInfo, className);
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        classInfo = nullptr;
+        return false;
+    }
+}
+
+bool ResolveTypeScopeClassLookup(void* scope) {
+    if (g_typeScopeClassLookupVtableIndex >= 0 && g_typeScopeClassLookupMode != TypeScopeClassLookupMode::Unknown) {
+        TracePrintf(
+            "schema-lookup cached scope=%p slot=%d mode=%s",
+            scope,
+            g_typeScopeClassLookupVtableIndex,
+            TypeScopeClassLookupModeToString(g_typeScopeClassLookupMode)
+        );
+        return true;
+    }
+
+    constexpr const char* kProbeClasses[] = {
+        "C_CSPlayerPawn",
+        "C_BaseEntity",
+        "C_BasePlayerPawn",
+        "CCSPlayerController"
+    };
+    const std::size_t slotLimit = schema::DetermineTypeScopeLookupProbeSlotLimit();
+    TracePrintf(
+        "schema-lookup enter scope=%p probeSlots=%u traceVersion=%s",
+        scope,
+        static_cast<unsigned>(slotLimit),
+        kSchemaProbeTraceVersion
+    );
+
+    for (std::size_t slotIndex = 0; slotIndex < slotLimit; ++slotIndex) {
+        if (slotIndex < 8u || 0u == (slotIndex % 8u)) {
+            TracePrintf(
+                "schema-lookup probe slot=%u modes=return,outparam",
+                static_cast<unsigned>(slotIndex)
+            );
+        }
+        for (const auto mode : { TypeScopeClassLookupMode::ReturnValue, TypeScopeClassLookupMode::OutParam }) {
+            const char* probeClass = nullptr;
+            void* classInfo = nullptr;
+            const char* layoutName = nullptr;
+            std::uint32_t fieldCount = 0u;
+            if (ValidateTypeScopeLookupCandidate(
+                scope,
+                slotIndex,
+                mode,
+                probeClass,
+                classInfo,
+                layoutName,
+                fieldCount
+            )) {
+                g_typeScopeClassLookupVtableIndex = static_cast<int>(slotIndex);
+                g_typeScopeClassLookupMode = mode;
+                TracePrintf(
+                    "schema-lookup resolved slot=%u mode=%s probeClass=%s classInfo=%p layout=%s fields=%u",
+                    static_cast<unsigned>(slotIndex),
+                    TypeScopeClassLookupModeToString(mode),
+                    probeClass,
+                    classInfo,
+                    layoutName,
+                    static_cast<unsigned>(fieldCount)
+                );
+                return true;
+            }
+        }
+    }
+
+    TracePrintf("schema-lookup unresolved scope=%p", scope);
+    return false;
+}
+
+bool TryResolveSchemaSystemFromPattern(void*& schemaSystem, std::string& failure) {
+    schemaSystem = nullptr;
+    failure.clear();
+
+    const auto schemaInstruction = FindPattern(g_schemaModule, kPatternSchemaSystem);
+    if (schemaInstruction == 0u) {
+        failure = Texts().reasonSchemaPatternMissing;
+        TracePrintf("schema-entry pattern-miss name=raw-system");
+        return false;
+    }
+
+    std::int32_t displacement = 0;
+    if (!TryReadMemoryValue(reinterpret_cast<const std::int32_t*>(schemaInstruction + 3u), displacement)) {
+        failure = Texts().reasonSchemaSystemUnavailable;
+        TracePrintf("schema-entry pattern-hit name=raw-system instruction=%p reason=displacement-unreadable", reinterpret_cast<void*>(schemaInstruction));
+        return false;
+    }
+
+    schemaSystem = reinterpret_cast<void*>(schemaInstruction + static_cast<std::intptr_t>(displacement) + 7u);
+    TracePrintf(
+        "schema-entry pattern-hit name=raw-system instruction=%p schemaSystem=%p",
+        reinterpret_cast<void*>(schemaInstruction),
+        schemaSystem
+    );
+    if (schemaSystem == nullptr || !IsAddressReadableInModule(g_schemaModule, schemaSystem)) {
+        schemaSystem = nullptr;
+        failure = Texts().reasonSchemaSystemUnavailable;
         return false;
     }
 
     return true;
+}
+
+bool TryReadSchemaScopeName(void* scope, std::string& scopeName) {
+    scopeName.clear();
+    if (scope == nullptr) {
+        return false;
+    }
+
+    const auto* scopeNameAddress = reinterpret_cast<const char*>(reinterpret_cast<const std::byte*>(scope) + sizeof(void*));
+    return TryCopyCString(scopeNameAddress, scopeName);
+}
+
+bool TryResolveClientSchemaTypeScopeRaw(void* schemaSystem, void*& scope) {
+    scope = nullptr;
+    if (schemaSystem == nullptr) {
+        return false;
+    }
+
+    const auto layout = schema::GetSchemaRawScanLayout();
+    if (layout.schemaSystemScopeArrayOffset < static_cast<std::ptrdiff_t>(sizeof(std::uint64_t))) {
+        return false;
+    }
+
+    const auto* schemaBytes = reinterpret_cast<const std::byte*>(schemaSystem);
+    const auto scopeCountOffset = layout.schemaSystemScopeArrayOffset - static_cast<std::ptrdiff_t>(sizeof(std::uint64_t));
+
+    std::uint64_t scopeCount = 0u;
+    void** scopeArray = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<const std::uint64_t*>(schemaBytes + scopeCountOffset), scopeCount)
+        || !TryReadMemoryValue(reinterpret_cast<void***>(const_cast<std::byte*>(schemaBytes) + layout.schemaSystemScopeArrayOffset), scopeArray)
+        || scopeArray == nullptr
+        || scopeCount == 0u
+        || scopeCount > 0x400u) {
+        TracePrintf(
+            "schema-scope raw-system-invalid schemaSystem=%p scopeCount=%llu scopeArray=%p",
+            schemaSystem,
+            static_cast<unsigned long long>(scopeCount),
+            scopeArray
+        );
+        return false;
+    }
+
+    for (std::uint64_t scopeIndex = 0; scopeIndex < scopeCount; ++scopeIndex) {
+        void* candidateScope = nullptr;
+        if (!TryReadMemoryValue(scopeArray + scopeIndex, candidateScope) || candidateScope == nullptr) {
+            continue;
+        }
+
+        std::string scopeName;
+        if (!TryReadSchemaScopeName(candidateScope, scopeName)) {
+            continue;
+        }
+
+        if (scopeName != kClientSchemaScopeName) {
+            continue;
+        }
+
+        scope = candidateScope;
+        TracePrintf(
+            "schema-scope raw-hit schemaSystem=%p scope=%p scopeIndex=%llu name=%s",
+            schemaSystem,
+            scope,
+            static_cast<unsigned long long>(scopeIndex),
+            scopeName.c_str()
+        );
+        return true;
+    }
+
+    TracePrintf(
+        "schema-scope raw-miss schemaSystem=%p scopeCount=%llu target=%s",
+        schemaSystem,
+        static_cast<unsigned long long>(scopeCount),
+        kClientSchemaScopeName
+    );
+    return false;
+}
+
+bool TryCollectTypeScopeClassPayloads(void* scope, std::vector<void*>& payloads) {
+    payloads.clear();
+    if (scope == nullptr) {
+        return false;
+    }
+
+    const auto layout = schema::GetSchemaRawScanLayout();
+    const auto* scopeBytes = reinterpret_cast<const std::byte*>(scope);
+    std::int32_t declaredClassCountSigned = 0;
+    if (!TryReadMemoryValue(
+        reinterpret_cast<const std::int32_t*>(scopeBytes + layout.typeScopeDeclaredClassCountOffset),
+        declaredClassCountSigned
+    )) {
+        TracePrintf("schema-bucket unreadable-count scope=%p", scope);
+        return false;
+    }
+
+    const std::uint32_t declaredClassCount = declaredClassCountSigned > 0
+        ? static_cast<std::uint32_t>(declaredClassCountSigned)
+        : 0u;
+    const std::size_t payloadLimit = static_cast<std::size_t>(schema::DetermineDeclaredClassScanLimit(declaredClassCount));
+    const auto* bucketBase = scopeBytes + layout.typeScopeBucketTableOffset;
+
+    std::unordered_set<void*> seenNodes;
+    std::unordered_set<void*> seenPayloads;
+    std::size_t traversedNodes = 0u;
+    const std::size_t nodeLimit = payloadLimit * 4u;
+
+    for (std::size_t bucketIndex = 0; bucketIndex < layout.typeScopeBucketCount; ++bucketIndex) {
+        const auto* bucket = bucketBase + (bucketIndex * static_cast<std::size_t>(layout.typeScopeBucketStride));
+        void* node = nullptr;
+        if (!TryReadMemoryValue(reinterpret_cast<void* const*>(bucket + layout.typeScopeBucketHeadOffset), node) || node == nullptr) {
+            continue;
+        }
+
+        while (node != nullptr && traversedNodes < nodeLimit) {
+            if (!seenNodes.insert(node).second) {
+                break;
+            }
+
+            ++traversedNodes;
+            const auto* nodeBytes = reinterpret_cast<const std::byte*>(node);
+
+            void* payload = nullptr;
+            if (TryReadMemoryValue(reinterpret_cast<void* const*>(nodeBytes + layout.typeScopeBucketNodePayloadOffset), payload)
+                && payload != nullptr
+                && seenPayloads.insert(payload).second) {
+                payloads.push_back(payload);
+                if (payloads.size() >= payloadLimit) {
+                    break;
+                }
+            }
+
+            void* next = nullptr;
+            if (!TryReadMemoryValue(reinterpret_cast<void* const*>(nodeBytes + layout.typeScopeBucketNodeNextOffset), next)) {
+                break;
+            }
+
+            node = next;
+        }
+
+        if (payloads.size() >= payloadLimit || traversedNodes >= nodeLimit) {
+            break;
+        }
+    }
+
+    TracePrintf(
+        "schema-bucket collect scope=%p declaredCount=%u payloadLimit=%u payloads=%u traversedNodes=%u",
+        scope,
+        static_cast<unsigned>(declaredClassCount),
+        static_cast<unsigned>(payloadLimit),
+        static_cast<unsigned>(payloads.size()),
+        static_cast<unsigned>(traversedNodes)
+    );
+    return !payloads.empty();
+}
+
+bool TryGetSchemaFieldOffsetFromClassInfo(
+    void* classInfo,
+    const char* fieldName,
+    std::ptrdiff_t& target,
+    const char*& layoutName,
+    std::uint32_t& fieldCount
+) {
+    target = 0;
+    layoutName = nullptr;
+    fieldCount = 0u;
+    if (classInfo == nullptr || fieldName == nullptr || *fieldName == '\0') {
+        return false;
+    }
+
+    SchemaFieldModern* fields = nullptr;
+    if (!TryReadSchemaFieldSpan(classInfo, fields, fieldCount, layoutName)) {
+        return false;
+    }
+
+    for (std::uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+        SchemaFieldModern field{};
+        if (!TryReadMemoryValue(fields + fieldIndex, field) || field.name == nullptr) {
+            continue;
+        }
+
+        std::string resolvedFieldName;
+        if (!TryCopyCString(field.name, resolvedFieldName) || resolvedFieldName.empty()) {
+            continue;
+        }
+
+        if (resolvedFieldName != fieldName) {
+            continue;
+        }
+
+        target = static_cast<std::ptrdiff_t>(field.offset);
+        return true;
+    }
+
+    return false;
+}
+
+bool TryGetSchemaFieldOffsetFromSpan(
+    SchemaFieldModern* fields,
+    std::uint32_t fieldCount,
+    const char* fieldName,
+    std::ptrdiff_t& target
+) {
+    target = 0;
+    if (fields == nullptr || fieldCount == 0u || fieldName == nullptr || *fieldName == '\0') {
+        return false;
+    }
+
+    for (std::uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+        SchemaFieldModern field{};
+        if (!TryReadMemoryValue(fields + fieldIndex, field) || field.name == nullptr) {
+            continue;
+        }
+
+        std::string resolvedFieldName;
+        if (!TryCopyCString(field.name, resolvedFieldName) || resolvedFieldName.empty()) {
+            continue;
+        }
+
+        if (resolvedFieldName != fieldName) {
+            continue;
+        }
+
+        target = static_cast<std::ptrdiff_t>(field.offset);
+        return true;
+    }
+
+    return false;
+}
+
+bool RawFieldCandidateMatches(
+    SchemaFieldModern* fields,
+    std::uint32_t fieldCount,
+    const char* fieldName,
+    std::initializer_list<const char*> requiredFields,
+    std::ptrdiff_t& target
+) {
+    if (fields == nullptr || fieldCount == 0u) {
+        return false;
+    }
+
+    for (const char* requiredField : requiredFields) {
+        if (!ContainsSchemaFieldName(fields, fieldCount, requiredField)) {
+            return false;
+        }
+    }
+
+    return TryGetSchemaFieldOffsetFromSpan(fields, fieldCount, fieldName, target);
+}
+
+bool TryReadSchemaFieldSpanAtPayloadPointerOffset(
+    void* payload,
+    std::size_t pointerOffset,
+    SchemaFieldModern*& fields,
+    std::uint32_t& fieldCount,
+    const char*& layoutName
+) {
+    fields = nullptr;
+    fieldCount = 0u;
+    layoutName = nullptr;
+    if (payload == nullptr) {
+        return false;
+    }
+
+    const auto* payloadBytes = reinterpret_cast<const std::byte*>(payload);
+    void* schemaClass = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<void* const*>(payloadBytes + pointerOffset), schemaClass)
+        || schemaClass == nullptr
+        || schemaClass == payload) {
+        return false;
+    }
+
+    if (TryReadSchemaFieldArrayInfo(schemaClass, fields, fieldCount)) {
+        layoutName = "declared-field-array";
+        return true;
+    }
+
+    if (TryReadSchemaFieldSpanModern(schemaClass, fields, fieldCount)) {
+        layoutName = "declared-modern";
+        return true;
+    }
+
+    return false;
+}
+
+bool IsLikelySchemaName(const std::string& value) {
+    if (value.empty() || value.size() > kMaxSchemaNameLength) {
+        return false;
+    }
+
+    for (const char character : value) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (byte < 0x20u || byte > 0x7Eu) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadStringPointerAtOffset(const void* base, std::size_t pointerOffset, std::string& value, const char*& stringPointer) {
+    value.clear();
+    stringPointer = nullptr;
+    if (base == nullptr) {
+        return false;
+    }
+
+    const auto* bytes = static_cast<const std::byte*>(base);
+    const char* candidate = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<const char* const*>(bytes + pointerOffset), candidate) || candidate == nullptr) {
+        return false;
+    }
+
+    std::string resolved;
+    if (!TryCopyCString(candidate, resolved, 128u) || !IsLikelySchemaName(resolved)) {
+        return false;
+    }
+
+    value = resolved;
+    stringPointer = candidate;
+    return true;
+}
+
+bool PayloadStringMatchesClassName(void* payload, const char* className, std::size_t& stringPointerOffset, std::string& matchedValue) {
+    stringPointerOffset = 0u;
+    matchedValue.clear();
+    if (payload == nullptr || className == nullptr || *className == '\0') {
+        return false;
+    }
+
+    for (std::size_t pointerOffset = 0u; pointerOffset <= kSchemaDiagnosticStringSlotLimit; pointerOffset += sizeof(void*)) {
+        const char* stringPointer = nullptr;
+        std::string value;
+        if (!TryReadStringPointerAtOffset(payload, pointerOffset, value, stringPointer)) {
+            continue;
+        }
+
+        if (value == className || value.find(className) != std::string::npos) {
+            stringPointerOffset = pointerOffset;
+            matchedValue = value;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool PayloadStringEqualsClassName(void* payload, const char* className) {
+    if (payload == nullptr || className == nullptr || *className == '\0') {
+        return false;
+    }
+
+    for (std::size_t pointerOffset = 0u; pointerOffset <= kSchemaDiagnosticStringSlotLimit; pointerOffset += sizeof(void*)) {
+        const char* stringPointer = nullptr;
+        std::string value;
+        if (!TryReadStringPointerAtOffset(payload, pointerOffset, value, stringPointer)) {
+            continue;
+        }
+
+        if (value == className) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool TryReadPointerAtOffset(const void* base, std::size_t pointerOffset, void*& value) {
+    value = nullptr;
+    if (base == nullptr) {
+        return false;
+    }
+
+    const auto* bytes = static_cast<const std::byte*>(base);
+    return TryReadMemoryValue(reinterpret_cast<void* const*>(bytes + pointerOffset), value) && value != nullptr;
+}
+
+std::string FormatSchemaFieldSampleByStride(
+    void* fieldBase,
+    std::uint32_t fieldCount,
+    std::size_t fieldStride,
+    std::size_t fieldNameOffset,
+    std::size_t fieldOffsetOffset
+) {
+    std::ostringstream stream;
+    std::uint32_t emitted = 0u;
+    const auto sampleCount = fieldCount < 8u ? fieldCount : 8u;
+    const auto* fieldBytes = static_cast<const std::byte*>(fieldBase);
+
+    for (std::uint32_t fieldIndex = 0u; fieldIndex < sampleCount; ++fieldIndex) {
+        const auto* entry = fieldBytes + (static_cast<std::size_t>(fieldIndex) * fieldStride);
+        const char* fieldNamePointer = nullptr;
+        if (!TryReadMemoryValue(reinterpret_cast<const char* const*>(entry + fieldNameOffset), fieldNamePointer)
+            || fieldNamePointer == nullptr) {
+            continue;
+        }
+
+        std::string fieldName;
+        if (!TryCopyCString(fieldNamePointer, fieldName, 128u) || !IsLikelySchemaName(fieldName)) {
+            continue;
+        }
+
+        std::uint32_t fieldOffset = 0u;
+        if (!TryReadMemoryValue(reinterpret_cast<const std::uint32_t*>(entry + fieldOffsetOffset), fieldOffset)) {
+            fieldOffset = 0u;
+        }
+
+        if (emitted > 0u) {
+            stream << ",";
+        }
+        stream << fieldName << "@0x" << std::hex << std::uppercase << fieldOffset << std::dec;
+        ++emitted;
+    }
+
+    if (emitted == 0u) {
+        return {};
+    }
+
+    return stream.str();
+}
+
+std::string FormatSchemaFieldSampleModern(SchemaFieldModern* fields, std::uint32_t fieldCount) {
+    std::ostringstream stream;
+    std::uint32_t emitted = 0u;
+    const auto sampleCount = fieldCount < 8u ? fieldCount : 8u;
+    for (std::uint32_t fieldIndex = 0u; fieldIndex < sampleCount; ++fieldIndex) {
+        SchemaFieldModern field{};
+        if (!TryReadMemoryValue(fields + fieldIndex, field) || field.name == nullptr) {
+            continue;
+        }
+
+        std::string fieldName;
+        if (!TryCopyCString(field.name, fieldName, 128u) || !IsLikelySchemaName(fieldName)) {
+            continue;
+        }
+
+        if (emitted > 0u) {
+            stream << ",";
+        }
+        stream << fieldName << "@0x" << std::hex << std::uppercase << field.offset << std::dec;
+        ++emitted;
+    }
+
+    return stream.str();
+}
+
+void TraceGenericSchemaFieldArrayCandidates(void* payload, const char* className, void* classInfo, const char* classInfoSource) {
+    if (classInfo == nullptr) {
+        return;
+    }
+
+    constexpr std::array<std::size_t, 5> kFieldStrides{ 0x20u, 0x28u, 0x30u, 0x38u, 0x40u };
+    constexpr std::array<std::size_t, 4> kFieldNameOffsets{ 0x00u, 0x08u, 0x10u, 0x18u };
+    constexpr std::array<std::size_t, 5> kFieldOffsetOffsets{ 0x0Cu, 0x10u, 0x14u, 0x18u, 0x20u };
+
+    std::uint32_t emittedCandidates = 0u;
+    const auto* classBytes = static_cast<const std::byte*>(classInfo);
+    for (std::size_t arrayOffset = 0u; arrayOffset <= 0x120u && emittedCandidates < 6u; arrayOffset += 4u) {
+        void* fieldBase = nullptr;
+        std::uint32_t fieldCount = 0u;
+        if (!TryReadMemoryValue(reinterpret_cast<void* const*>(classBytes + arrayOffset), fieldBase)
+            || !TryReadMemoryValue(reinterpret_cast<const std::uint32_t*>(classBytes + arrayOffset + sizeof(void*)), fieldCount)
+            || fieldBase == nullptr
+            || fieldCount == 0u
+            || fieldCount > kMaxReasonableSchemaFieldCount) {
+            continue;
+        }
+
+        for (const std::size_t fieldStride : kFieldStrides) {
+            for (const std::size_t fieldNameOffset : kFieldNameOffsets) {
+                for (const std::size_t fieldOffsetOffset : kFieldOffsetOffsets) {
+                    const auto sample = FormatSchemaFieldSampleByStride(
+                        fieldBase,
+                        fieldCount,
+                        fieldStride,
+                        fieldNameOffset,
+                        fieldOffsetOffset
+                    );
+                    if (sample.empty()) {
+                        continue;
+                    }
+
+                    TracePrintf(
+                        "schema-diag array class=%s payload=%p classInfo=%p source=%s arrayOffset=0x%llX fields=%u stride=0x%llX nameOff=0x%llX offsetOff=0x%llX sample=%s",
+                        className != nullptr ? className : "<unknown>",
+                        payload,
+                        classInfo,
+                        classInfoSource != nullptr ? classInfoSource : "<unknown>",
+                        static_cast<unsigned long long>(arrayOffset),
+                        static_cast<unsigned>(fieldCount),
+                        static_cast<unsigned long long>(fieldStride),
+                        static_cast<unsigned long long>(fieldNameOffset),
+                        static_cast<unsigned long long>(fieldOffsetOffset),
+                        sample.c_str()
+                    );
+
+                    ++emittedCandidates;
+                    if (emittedCandidates >= 6u) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool TryReadSchemaFieldArrayAtOffset(
+    const void* classInfo,
+    std::size_t arrayOffset,
+    void*& fieldBase,
+    std::uint32_t& fieldCount
+) {
+    fieldBase = nullptr;
+    fieldCount = 0u;
+    if (classInfo == nullptr) {
+        return false;
+    }
+
+    const auto* classBytes = static_cast<const std::byte*>(classInfo);
+    if (!TryReadMemoryValue(reinterpret_cast<void* const*>(classBytes + arrayOffset), fieldBase)
+        || !TryReadMemoryValue(reinterpret_cast<const std::uint32_t*>(classBytes + arrayOffset + sizeof(void*)), fieldCount)
+        || fieldBase == nullptr
+        || fieldCount == 0u
+        || fieldCount > kMaxReasonableSchemaFieldCount) {
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadGenericSchemaFieldName(
+    void* fieldBase,
+    std::uint32_t fieldCount,
+    std::size_t fieldStride,
+    std::size_t fieldNameOffset,
+    std::uint32_t fieldIndex,
+    std::string& fieldName
+) {
+    fieldName.clear();
+    if (fieldBase == nullptr || fieldIndex >= fieldCount) {
+        return false;
+    }
+
+    const auto* fieldBytes = static_cast<const std::byte*>(fieldBase);
+    const auto* entry = fieldBytes + (static_cast<std::size_t>(fieldIndex) * fieldStride);
+    const char* fieldNamePointer = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<const char* const*>(entry + fieldNameOffset), fieldNamePointer)
+        || fieldNamePointer == nullptr) {
+        return false;
+    }
+
+    return TryCopyCString(fieldNamePointer, fieldName, 128u) && IsLikelySchemaName(fieldName);
+}
+
+bool ContainsGenericSchemaFieldName(
+    void* fieldBase,
+    std::uint32_t fieldCount,
+    std::size_t fieldStride,
+    std::size_t fieldNameOffset,
+    const char* expectedFieldName
+) {
+    if (expectedFieldName == nullptr || *expectedFieldName == '\0') {
+        return false;
+    }
+
+    for (std::uint32_t fieldIndex = 0u; fieldIndex < fieldCount; ++fieldIndex) {
+        std::string fieldName;
+        if (!TryReadGenericSchemaFieldName(fieldBase, fieldCount, fieldStride, fieldNameOffset, fieldIndex, fieldName)) {
+            continue;
+        }
+
+        if (fieldName == expectedFieldName) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool TryGetGenericSchemaFieldOffset(
+    void* fieldBase,
+    std::uint32_t fieldCount,
+    std::size_t fieldStride,
+    std::size_t fieldNameOffset,
+    std::size_t fieldOffsetOffset,
+    const char* fieldName,
+    std::initializer_list<const char*> requiredFields,
+    std::ptrdiff_t& target
+) {
+    target = 0;
+    if (fieldBase == nullptr || fieldName == nullptr || *fieldName == '\0') {
+        return false;
+    }
+
+    for (const char* requiredField : requiredFields) {
+        if (!ContainsGenericSchemaFieldName(fieldBase, fieldCount, fieldStride, fieldNameOffset, requiredField)) {
+            return false;
+        }
+    }
+
+    const auto* fieldBytes = static_cast<const std::byte*>(fieldBase);
+    for (std::uint32_t fieldIndex = 0u; fieldIndex < fieldCount; ++fieldIndex) {
+        std::string resolvedFieldName;
+        if (!TryReadGenericSchemaFieldName(fieldBase, fieldCount, fieldStride, fieldNameOffset, fieldIndex, resolvedFieldName)
+            || resolvedFieldName != fieldName) {
+            continue;
+        }
+
+        const auto* entry = fieldBytes + (static_cast<std::size_t>(fieldIndex) * fieldStride);
+        std::uint32_t resolvedOffset = 0u;
+        if (!TryReadMemoryValue(reinterpret_cast<const std::uint32_t*>(entry + fieldOffsetOffset), resolvedOffset)) {
+            continue;
+        }
+
+        if (resolvedOffset == 0u || resolvedOffset > 0x5000u) {
+            continue;
+        }
+
+        target = static_cast<std::ptrdiff_t>(resolvedOffset);
+        return true;
+    }
+
+    return false;
+}
+
+bool TryGetSchemaFieldOffsetFromGenericRawPayloads(
+    const std::vector<void*>& payloads,
+    const char* traceClassName,
+    const char* fieldName,
+    std::initializer_list<const char*> requiredFields,
+    std::ptrdiff_t& target
+) {
+    struct GenericMatch {
+        void* payload{};
+        void* classInfo{};
+        std::ptrdiff_t offset{};
+        std::uint32_t fieldCount{};
+        std::size_t wrapperOffset{};
+        std::size_t arrayOffset{};
+        std::size_t fieldStride{};
+        std::size_t fieldNameOffset{};
+        std::size_t fieldOffsetOffset{};
+    };
+
+    if (traceClassName == nullptr || *traceClassName == '\0' || fieldName == nullptr || *fieldName == '\0') {
+        return false;
+    }
+
+    std::array<schema::GenericRawFieldArrayLayoutCandidate, 12> layouts{};
+    const std::size_t layoutCount = schema::BuildFocusedGenericRawFieldArrayLayoutCandidates(layouts);
+    GenericMatch match{};
+    std::size_t matchCount = 0u;
+    bool ambiguousDifferentOffset = false;
+
+    for (void* payload : payloads) {
+        if (!PayloadStringEqualsClassName(payload, traceClassName)) {
+            continue;
+        }
+
+        for (std::size_t layoutIndex = 0u; layoutIndex < layoutCount; ++layoutIndex) {
+            const auto& layout = layouts[layoutIndex];
+            void* classInfo = payload;
+            if (layout.wrapperOffset != 0u) {
+                void* wrappedClassInfo = nullptr;
+                if (!TryReadPointerAtOffset(payload, layout.wrapperOffset, wrappedClassInfo) || wrappedClassInfo == payload) {
+                    continue;
+                }
+                classInfo = wrappedClassInfo;
+            }
+
+            void* fieldBase = nullptr;
+            std::uint32_t fieldCount = 0u;
+            if (!TryReadSchemaFieldArrayAtOffset(classInfo, layout.arrayOffset, fieldBase, fieldCount)) {
+                continue;
+            }
+
+            std::ptrdiff_t resolvedOffset = 0;
+            const bool resolvedWithRequiredFields = TryGetGenericSchemaFieldOffset(
+                fieldBase,
+                fieldCount,
+                layout.fieldStride,
+                layout.fieldNameOffset,
+                layout.fieldOffsetOffset,
+                fieldName,
+                requiredFields,
+                resolvedOffset
+            );
+            const bool resolvedWithoutRequiredFields = !resolvedWithRequiredFields
+                && requiredFields.size() > 1u
+                && TryGetGenericSchemaFieldOffset(
+                    fieldBase,
+                    fieldCount,
+                    layout.fieldStride,
+                    layout.fieldNameOffset,
+                    layout.fieldOffsetOffset,
+                    fieldName,
+                    {},
+                    resolvedOffset
+                );
+            if (!resolvedWithRequiredFields && !resolvedWithoutRequiredFields) {
+                continue;
+            }
+
+            if (matchCount > 0u && match.offset != resolvedOffset) {
+                ambiguousDifferentOffset = true;
+                break;
+            }
+
+            ++matchCount;
+            match = GenericMatch{
+                .payload = payload,
+                .classInfo = classInfo,
+                .offset = resolvedOffset,
+                .fieldCount = fieldCount,
+                .wrapperOffset = layout.wrapperOffset,
+                .arrayOffset = layout.arrayOffset,
+                .fieldStride = layout.fieldStride,
+                .fieldNameOffset = layout.fieldNameOffset,
+                .fieldOffsetOffset = layout.fieldOffsetOffset
+            };
+        }
+
+        if (ambiguousDifferentOffset) {
+            break;
+        }
+    }
+
+    if (matchCount > 0u && !ambiguousDifferentOffset) {
+        target = match.offset;
+        TracePrintf(
+            "schema-raw field=%s traceClass=%s payload=%p classInfo=%p layout=focused-generic-field-array fields=%u target=0x%llX matches=%u wrapperOffset=0x%llX arrayOffset=0x%llX stride=0x%llX nameOff=0x%llX offsetOff=0x%llX",
+            fieldName,
+            traceClassName,
+            match.payload,
+            match.classInfo,
+            static_cast<unsigned>(match.fieldCount),
+            static_cast<unsigned long long>(target),
+            static_cast<unsigned>(matchCount),
+            static_cast<unsigned long long>(match.wrapperOffset),
+            static_cast<unsigned long long>(match.arrayOffset),
+            static_cast<unsigned long long>(match.fieldStride),
+            static_cast<unsigned long long>(match.fieldNameOffset),
+            static_cast<unsigned long long>(match.fieldOffsetOffset)
+        );
+        return true;
+    }
+
+    if (matchCount > 0u || ambiguousDifferentOffset) {
+        TracePrintf(
+            "schema-raw generic-ambiguous traceClass=%s field=%s matches=%u",
+            traceClassName,
+            fieldName,
+            static_cast<unsigned>(matchCount)
+        );
+    }
+
+    return false;
+}
+
+void TraceSchemaClassCandidateDiagnostics(void* payload, const char* className, void* classInfo, const char* sourceName) {
+    if (classInfo == nullptr) {
+        return;
+    }
+
+    SchemaFieldModern* fields = nullptr;
+    std::uint32_t fieldCount = 0u;
+    if (TryReadSchemaFieldSpanModern(classInfo, fields, fieldCount)) {
+        const auto sample = FormatSchemaFieldSampleModern(fields, fieldCount);
+        TracePrintf(
+            "schema-diag span class=%s payload=%p classInfo=%p source=%s layout=modern fields=%u sample=%s",
+            className != nullptr ? className : "<unknown>",
+            payload,
+            classInfo,
+            sourceName != nullptr ? sourceName : "<unknown>",
+            static_cast<unsigned>(fieldCount),
+            sample.empty() ? "<none>" : sample.c_str()
+        );
+    }
+
+    if (TryReadSchemaFieldSpanLegacy(classInfo, fields, fieldCount)) {
+        const auto sample = FormatSchemaFieldSampleModern(fields, fieldCount);
+        TracePrintf(
+            "schema-diag span class=%s payload=%p classInfo=%p source=%s layout=legacy fields=%u sample=%s",
+            className != nullptr ? className : "<unknown>",
+            payload,
+            classInfo,
+            sourceName != nullptr ? sourceName : "<unknown>",
+            static_cast<unsigned>(fieldCount),
+            sample.empty() ? "<none>" : sample.c_str()
+        );
+    }
+
+    TraceGenericSchemaFieldArrayCandidates(payload, className, classInfo, sourceName);
+}
+
+void TraceSchemaRawPayloadDiagnostics(const std::vector<void*>& payloads) {
+    constexpr std::array<const char*, 9> kTargetClasses{
+        "CEntityInstance",
+        "CBasePlayerController",
+        "C_BasePlayerPawn",
+        "C_CSPlayerPawn",
+        "CPlayer_ObserverServices",
+        "CPlayer_CameraServices",
+        "CPlayer_WeaponServices",
+        "C_BaseEntity",
+        "CGameSceneNode"
+    };
+
+    const std::size_t sampleLimit = payloads.size() < kSchemaDiagnosticPayloadSampleLimit
+        ? payloads.size()
+        : kSchemaDiagnosticPayloadSampleLimit;
+    for (std::size_t payloadIndex = 0u; payloadIndex < sampleLimit; ++payloadIndex) {
+        void* payload = payloads[payloadIndex];
+        std::ostringstream slots;
+        std::uint32_t emittedSlots = 0u;
+        for (std::size_t pointerOffset = 0u; pointerOffset <= kSchemaDiagnosticStringSlotLimit; pointerOffset += sizeof(void*)) {
+            const char* stringPointer = nullptr;
+            std::string value;
+            if (!TryReadStringPointerAtOffset(payload, pointerOffset, value, stringPointer)) {
+                continue;
+            }
+
+            if (emittedSlots > 0u) {
+                slots << ",";
+            }
+            slots << "0x" << std::hex << std::uppercase << pointerOffset << std::dec << "=" << value;
+            ++emittedSlots;
+            if (emittedSlots >= 8u) {
+                break;
+            }
+        }
+
+        TracePrintf(
+            "schema-diag sample payloadIndex=%u payload=%p stringSlots=%s",
+            static_cast<unsigned>(payloadIndex),
+            payload,
+            emittedSlots == 0u ? "<none>" : slots.str().c_str()
+        );
+    }
+
+    std::array<std::size_t, 8> wrapperOffsets{};
+    const std::size_t wrapperOffsetCount = schema::BuildDeclaredClassSchemaClassPointerOffsets(wrapperOffsets);
+
+    for (const char* targetClassName : kTargetClasses) {
+        std::uint32_t classHits = 0u;
+        for (void* payload : payloads) {
+            std::size_t stringPointerOffset = 0u;
+            std::string matchedValue;
+            if (!PayloadStringMatchesClassName(payload, targetClassName, stringPointerOffset, matchedValue)) {
+                continue;
+            }
+
+            ++classHits;
+            TracePrintf(
+                "schema-diag target-hit class=%s payload=%p nameSlot=0x%llX value=%s",
+                targetClassName,
+                payload,
+                static_cast<unsigned long long>(stringPointerOffset),
+                matchedValue.c_str()
+            );
+
+            TraceSchemaClassCandidateDiagnostics(payload, targetClassName, payload, "payload-direct");
+            for (std::size_t offsetIndex = 0u; offsetIndex < wrapperOffsetCount; ++offsetIndex) {
+                void* classInfo = nullptr;
+                const std::size_t wrapperOffset = wrapperOffsets[offsetIndex];
+                if (!TryReadPointerAtOffset(payload, wrapperOffset, classInfo) || classInfo == payload) {
+                    continue;
+                }
+
+                char sourceName[32]{};
+                std::snprintf(sourceName, sizeof(sourceName), "payload+0x%llX", static_cast<unsigned long long>(wrapperOffset));
+                TracePrintf(
+                    "schema-diag classptr class=%s payload=%p wrapperOffset=0x%llX classInfo=%p",
+                    targetClassName,
+                    payload,
+                    static_cast<unsigned long long>(wrapperOffset),
+                    classInfo
+                );
+                TraceSchemaClassCandidateDiagnostics(payload, targetClassName, classInfo, sourceName);
+            }
+
+            if (classHits >= 3u) {
+                break;
+            }
+        }
+
+        TracePrintf(
+            "schema-diag target-summary class=%s hits=%u payloads=%u",
+            targetClassName,
+            static_cast<unsigned>(classHits),
+            static_cast<unsigned>(payloads.size())
+        );
+    }
+}
+
+bool TryGetSchemaFieldOffsetFromRawPayloads(
+    const std::vector<void*>& payloads,
+    const char* traceClassName,
+    const char* fieldName,
+    std::initializer_list<const char*> requiredFields,
+    std::ptrdiff_t& target
+) {
+    std::size_t matchCount = 0u;
+    std::ptrdiff_t resolvedTarget = 0;
+    const char* resolvedLayoutName = nullptr;
+    void* resolvedPayload = nullptr;
+    std::uint32_t resolvedFieldCount = 0u;
+    std::size_t resolvedPointerOffset = 0u;
+
+    for (void* payload : payloads) {
+        SchemaFieldModern* fields = nullptr;
+        std::uint32_t fieldCount = 0u;
+        const char* layoutName = nullptr;
+
+        auto acceptCandidate = [&](const char* candidateLayoutName, std::size_t pointerOffset) -> bool {
+            ++matchCount;
+            resolvedTarget = target;
+            resolvedLayoutName = candidateLayoutName;
+            resolvedPayload = payload;
+            resolvedFieldCount = fieldCount;
+            resolvedPointerOffset = pointerOffset;
+            return true;
+        };
+
+        if (TryReadSchemaFieldSpanModern(payload, fields, fieldCount)
+            && RawFieldCandidateMatches(fields, fieldCount, fieldName, requiredFields, target)
+            && acceptCandidate("modern", 0u)) {
+            continue;
+        }
+
+        std::array<std::size_t, 8> pointerOffsets{};
+        const std::size_t pointerOffsetCount = schema::BuildDeclaredClassSchemaClassPointerOffsets(pointerOffsets);
+        for (std::size_t pointerOffsetIndex = 0u; pointerOffsetIndex < pointerOffsetCount; ++pointerOffsetIndex) {
+            const std::size_t pointerOffset = pointerOffsets[pointerOffsetIndex];
+            if (!TryReadSchemaFieldSpanAtPayloadPointerOffset(payload, pointerOffset, fields, fieldCount, layoutName)) {
+                continue;
+            }
+
+            if (!RawFieldCandidateMatches(fields, fieldCount, fieldName, requiredFields, target)) {
+                continue;
+            }
+
+            acceptCandidate(layoutName, pointerOffset);
+            break;
+        }
+    }
+
+    if (schema::IsUniqueRawSchemaCandidateCount(matchCount)) {
+        target = resolvedTarget;
+        TracePrintf(
+            "schema-raw field=%s traceClass=%s classInfo=%p layout=%s fields=%u matches=%u wrapperOffset=0x%llX",
+            fieldName,
+            traceClassName != nullptr ? traceClassName : "<unknown>",
+            resolvedPayload,
+            resolvedLayoutName != nullptr ? resolvedLayoutName : "unknown",
+            static_cast<unsigned>(resolvedFieldCount),
+            static_cast<unsigned>(matchCount),
+            static_cast<unsigned long long>(resolvedPointerOffset)
+        );
+        return true;
+    }
+
+    if (matchCount > 1u) {
+        TracePrintf(
+            "schema-raw ambiguous traceClass=%s field=%s matches=%u requiredCount=%u",
+            traceClassName != nullptr ? traceClassName : "<unknown>",
+            fieldName != nullptr ? fieldName : "<null>",
+            static_cast<unsigned>(matchCount),
+            static_cast<unsigned>(requiredFields.size())
+        );
+        return false;
+    }
+
+    if (TryGetSchemaFieldOffsetFromGenericRawPayloads(payloads, traceClassName, fieldName, requiredFields, target)) {
+        return true;
+    }
+
+    if (schema::TryGetKnownClientSchemaFieldOffsetFallback(traceClassName, fieldName, target)) {
+        TracePrintf(
+            "schema-raw field=%s traceClass=%s layout=known-cs2-client-fallback target=0x%llX reason=schema-field-omitted-or-unresolved",
+            fieldName,
+            traceClassName,
+            static_cast<unsigned long long>(target)
+        );
+        return true;
+    }
+
+    TracePrintf(
+        "schema-raw missing traceClass=%s field=%s requiredCount=%u",
+        traceClassName != nullptr ? traceClassName : "<unknown>",
+        fieldName != nullptr ? fieldName : "<null>",
+        static_cast<unsigned>(requiredFields.size())
+    );
+    return false;
+}
+
+template <typename T>
+bool TryReadOffsetValue(const void* base, std::ptrdiff_t offset, T& value) {
+    if (base == nullptr || offset == 0) {
+        value = T{};
+        return false;
+    }
+
+    const auto* address = reinterpret_cast<const T*>(reinterpret_cast<const std::uint8_t*>(base) + offset);
+    return TryReadMemoryValue(address, value);
+}
+
+template <typename T>
+bool TryWriteOffsetValue(void* base, std::ptrdiff_t offset, const T& value) {
+    if (base == nullptr || offset == 0) {
+        return false;
+    }
+
+    auto* address = reinterpret_cast<T*>(reinterpret_cast<std::uint8_t*>(base) + offset);
+    __try {
+        *address = value;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool TryReadOffsetPointer(const void* base, std::ptrdiff_t offset, void*& value) {
+    value = nullptr;
+    return TryReadOffsetValue(base, offset, value);
+}
+
+bool TryReadOffsetHandle(const void* base, std::ptrdiff_t offset, EntityHandle& handle) {
+    std::uint32_t rawHandle = kInvalidHandleValue;
+    if (!TryReadOffsetValue(base, offset, rawHandle)) {
+        handle = {};
+        return false;
+    }
+
+    handle = EntityHandle{ rawHandle };
+    return true;
+}
+
+bool ResolveSchemaOffsetsNow(std::string& failure) {
+    failure.clear();
+
+    void* rawSchemaSystem = nullptr;
+    std::string rawSchemaFailure;
+    bool rawScopeFound = false;
+    bool rawPayloadsCollected = false;
+    if (TryResolveSchemaSystemFromPattern(rawSchemaSystem, rawSchemaFailure) && rawSchemaSystem != nullptr) {
+        void* rawScope = nullptr;
+        if (TryResolveClientSchemaTypeScopeRaw(rawSchemaSystem, rawScope) && rawScope != nullptr) {
+            rawScopeFound = true;
+            std::vector<void*> rawPayloads;
+            if (TryCollectTypeScopeClassPayloads(rawScope, rawPayloads)) {
+                rawPayloadsCollected = true;
+                TraceSchemaRawPayloadDiagnostics(rawPayloads);
+                ClientOffsets rawResolvedOffsets{};
+                bool rawOk = true;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CEntityInstance",
+                    "m_pEntity",
+                    { "m_pEntity" },
+                    rawResolvedOffsets.entityInstanceToIdentity
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CBasePlayerController",
+                    "m_hPawn",
+                    { "m_hPawn" },
+                    rawResolvedOffsets.controllerPawnHandle
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BasePlayerPawn",
+                    "m_pObserverServices",
+                    { "m_pObserverServices", "m_pCameraServices", "m_pWeaponServices", "m_hController" },
+                    rawResolvedOffsets.pawnObserverServices
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BasePlayerPawn",
+                    "m_pCameraServices",
+                    { "m_pObserverServices", "m_pCameraServices", "m_pWeaponServices", "m_hController" },
+                    rawResolvedOffsets.pawnCameraServices
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BasePlayerPawn",
+                    "m_pWeaponServices",
+                    { "m_pObserverServices", "m_pCameraServices", "m_pWeaponServices", "m_hController" },
+                    rawResolvedOffsets.pawnWeaponServices
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BasePlayerPawn",
+                    "m_hController",
+                    { "m_pObserverServices", "m_pCameraServices", "m_pWeaponServices", "m_hController" },
+                    rawResolvedOffsets.pawnControllerHandle
+                ) && rawOk;
+                TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_CSPlayerPawn",
+                    "m_angEyeAngles",
+                    { "m_angEyeAngles" },
+                    rawResolvedOffsets.pawnEyeAngles
+                );
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CPlayer_ObserverServices",
+                    "m_iObserverMode",
+                    { "m_iObserverMode", "m_hObserverTarget" },
+                    rawResolvedOffsets.observerMode
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CPlayer_ObserverServices",
+                    "m_hObserverTarget",
+                    { "m_iObserverMode", "m_hObserverTarget" },
+                    rawResolvedOffsets.observerTarget
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CPlayer_CameraServices",
+                    "m_hViewEntity",
+                    { "m_hViewEntity" },
+                    rawResolvedOffsets.cameraViewEntity
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CPlayer_WeaponServices",
+                    "m_hActiveWeapon",
+                    { "m_hActiveWeapon" },
+                    rawResolvedOffsets.activeWeapon
+                ) && rawOk;
+                rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BaseEntity",
+                    "m_pGameSceneNode",
+                    { "m_pGameSceneNode" },
+                    rawResolvedOffsets.sceneNode
+                ) && rawOk;
+                bool sceneOriginOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "CGameSceneNode",
+                    "m_vecAbsOrigin",
+                    { "m_vecAbsOrigin" },
+                    rawResolvedOffsets.sceneAbsOrigin
+                );
+                if (!sceneOriginOk) {
+                    sceneOriginOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                        rawPayloads,
+                        "CGameSceneNode",
+                        "m_vecOrigin",
+                        { "m_vecOrigin" },
+                        rawResolvedOffsets.sceneAbsOrigin
+                    );
+                }
+                if (!sceneOriginOk) {
+                    sceneOriginOk = TryGetSchemaFieldOffsetFromRawPayloads(
+                        rawPayloads,
+                        "CGameSceneNode",
+                        "local.origin",
+                        { "local.origin" },
+                        rawResolvedOffsets.sceneAbsOrigin
+                    );
+                }
+                rawOk = sceneOriginOk && rawOk;
+                TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BaseModelEntity",
+                    "m_bRenderWithViewModels",
+                    { "m_bRenderWithViewModels" },
+                    rawResolvedOffsets.renderWithViewModels
+                );
+
+                if (rawOk) {
+                    g_offsets = rawResolvedOffsets;
+                    TracePrintf(
+                        "schema-resolve raw-success schemaSystem=%p scope=%p payloads=%u",
+                        rawSchemaSystem,
+                        rawScope,
+                        static_cast<unsigned>(rawPayloads.size())
+                    );
+                    return true;
+                }
+
+                TracePrintf(
+                    "schema-resolve raw-incomplete schemaSystem=%p scope=%p payloads=%u",
+                    rawSchemaSystem,
+                    rawScope,
+                    static_cast<unsigned>(rawPayloads.size())
+                );
+            }
+        }
+    }
+    else if (!rawSchemaFailure.empty()) {
+        TracePrintf("schema-resolve raw-unavailable reason=%s", rawSchemaFailure.c_str());
+    }
+
+    if (!schema::ShouldUseSchemaInterfaceFallback(rawScopeFound, rawPayloadsCollected, false)) {
+        failure = Texts().reasonRequiredSchemaOffsetsMissing;
+        TracePrintf(
+            "schema-resolve fallback-skipped rawScope=%d rawPayloads=%d reason=raw-schema-incomplete",
+            rawScopeFound ? 1 : 0,
+            rawPayloadsCollected ? 1 : 0
+        );
+        return false;
+    }
+
+    auto schemaFactory = GetCreateInterface(g_schemaModule);
+    TracePrintf("schema-resolve factory=%p", reinterpret_cast<void*>(schemaFactory));
+    if (schemaFactory == nullptr) {
+        failure = Texts().reasonCreateInterfaceMissing;
+        return false;
+    }
+
+    void* schemaSystem = schemaFactory(kSchemaSystemVersion, nullptr);
+    TracePrintf("schema-resolve interface=%p version=%s", schemaSystem, kSchemaSystemVersion);
+    if (schemaSystem == nullptr) {
+        failure = Texts().reasonSchemaSystemUnavailable;
+        return false;
+    }
+
+    std::string qualifiedLookupFailure;
+    const bool qualifiedLookupReady = ResolveSchemaQualifiedClassLookupEntry(qualifiedLookupFailure);
+    if (!qualifiedLookupReady) {
+        TracePrintf(
+            "schema-entry pattern-miss name=qualified-class reason=%s",
+            qualifiedLookupFailure.empty() ? "<unknown>" : qualifiedLookupFailure.c_str()
+        );
+    }
+
+    void** vtable = nullptr;
+    void* findTypeScopeAddress = nullptr;
+    void* scope = nullptr;
+    bool scopeReady = false;
+    if (TryReadMemoryValue(reinterpret_cast<void***>(schemaSystem), vtable) && vtable != nullptr) {
+        if (TryReadMemoryValue(vtable + 13, findTypeScopeAddress) && findTypeScopeAddress != nullptr) {
+            TracePrintf("schema-resolve vtable=%p slot13=%p", vtable, findTypeScopeAddress);
+            if (IsAddressExecutableInModule(g_schemaModule, findTypeScopeAddress)) {
+                auto findTypeScopeForModule = reinterpret_cast<FindTypeScopeForModuleFn>(findTypeScopeAddress);
+                if (TryInvokeFindTypeScopeForModule(findTypeScopeForModule, schemaSystem, kClientSchemaScopeName, scope) && scope != nullptr) {
+                    scopeReady = true;
+                    TracePrintf(
+                        "schema-resolve scope=%p traceVersion=%s cachedSlot=%d cachedMode=%s probeSlots=%u",
+                        scope,
+                        kSchemaProbeTraceVersion,
+                        g_typeScopeClassLookupVtableIndex,
+                        TypeScopeClassLookupModeToString(g_typeScopeClassLookupMode),
+                        static_cast<unsigned>(schema::DetermineTypeScopeLookupProbeSlotLimit())
+                    );
+                }
+                else {
+                    TracePrintf("schema-resolve scope-fallback faulted slot13=%p", findTypeScopeAddress);
+                }
+            }
+            else {
+                TracePrintf("schema-resolve scope-fallback untrusted slot13=%p", findTypeScopeAddress);
+            }
+        }
+        else {
+            TracePrintf("schema-resolve scope-fallback missing-slot13 vtable=%p", vtable);
+        }
+    }
+    else {
+        TracePrintf("schema-resolve scope-fallback unreadable-vtable interface=%p", schemaSystem);
+    }
+
+    if (!qualifiedLookupReady && !scopeReady) {
+        failure = !qualifiedLookupFailure.empty()
+            ? qualifiedLookupFailure
+            : FormatIncompatibleBuildReason("schema class lookup entry missing");
+        return false;
+    }
+
+    ClientOffsets resolvedOffsets{};
+    auto findClassInfo = [schemaSystem, scope, scopeReady, qualifiedLookupReady](const char* className, void*& classInfo) -> bool {
+        classInfo = nullptr;
+
+        std::array<std::string, 2> lookupCandidates;
+        const auto lookupCandidateCount = schema::BuildSchemaClassLookupCandidates(
+            kClientSchemaScopeName,
+            className,
+            lookupCandidates
+        );
+        if (qualifiedLookupReady) {
+            for (std::size_t candidateIndex = 0; candidateIndex < lookupCandidateCount; ++candidateIndex) {
+                const auto& lookupName = lookupCandidates[candidateIndex];
+                if (lookupName.empty()) {
+                    continue;
+                }
+
+                if (TryInvokeFindDeclaredClassByQualifiedName(
+                    g_findDeclaredClassByQualifiedName,
+                    schemaSystem,
+                    lookupName.c_str(),
+                    classInfo
+                ) && classInfo != nullptr) {
+                    TracePrintf(
+                        "schema-qualified class=%s query=%s classInfo=%p entry=%p candidate=%u",
+                        className,
+                        lookupName.c_str(),
+                        classInfo,
+                        reinterpret_cast<void*>(g_schemaQualifiedClassLookupAddress),
+                        static_cast<unsigned>(candidateIndex)
+                    );
+                    return true;
+                }
+
+                TracePrintf(
+                    "schema-qualified miss class=%s query=%s classInfo=%p entry=%p candidate=%u",
+                    className,
+                    lookupName.c_str(),
+                    classInfo,
+                    reinterpret_cast<void*>(g_schemaQualifiedClassLookupAddress),
+                    static_cast<unsigned>(candidateIndex)
+                );
+            }
+        }
+
+        if (scopeReady && TryInvokeFindDeclaredClassInTypeScope(scope, className, classInfo) && classInfo != nullptr) {
+            TracePrintf(
+                "schema-class fallback class=%s classInfo=%p scope=%p slot=%d mode=%s",
+                className,
+                classInfo,
+                scope,
+                g_typeScopeClassLookupVtableIndex,
+                TypeScopeClassLookupModeToString(g_typeScopeClassLookupMode)
+            );
+            return true;
+        }
+
+        TracePrintf("schema-class missing class=%s", className);
+        return false;
+    };
+
+    auto getOffset = [&findClassInfo](const char* className, const char* fieldName, std::ptrdiff_t& target) -> bool {
+        void* classInfo = nullptr;
+        if (!findClassInfo(className, classInfo) || classInfo == nullptr) {
+            return false;
+        }
+
+        SchemaFieldModern* fields = nullptr;
+        std::uint32_t fieldCount = 0u;
+        const char* layoutName = nullptr;
+        if (!TryReadSchemaFieldSpan(classInfo, fields, fieldCount, layoutName)) {
+            TracePrintf("schema-class unreadable class=%s classInfo=%p", className, classInfo);
+            return false;
+        }
+
+        TracePrintf(
+            "schema-class class=%s classInfo=%p layout=%s fields=%u fieldData=%p",
+            className,
+            classInfo,
+            layoutName,
+            static_cast<unsigned>(fieldCount),
+            fields
+        );
+
+        for (std::uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+            SchemaFieldModern field{};
+            if (!TryReadMemoryValue(fields + fieldIndex, field) || field.name == nullptr) {
+                continue;
+            }
+
+            std::string resolvedFieldName;
+            if (!TryCopyCString(field.name, resolvedFieldName) || resolvedFieldName.empty()) {
+                continue;
+            }
+
+            if (resolvedFieldName != fieldName) {
+                continue;
+            }
+
+            target = static_cast<std::ptrdiff_t>(field.offset);
+            TracePrintf(
+                "schema-field class=%s field=%s offset=0x%llX layout=%s",
+                className,
+                fieldName,
+                static_cast<unsigned long long>(static_cast<std::uint64_t>(field.offset)),
+                layoutName
+            );
+            return true;
+        }
+
+        TracePrintf("schema-field missing class=%s field=%s", className, fieldName);
+        return false;
+    };
+
+    bool ok = true;
+    ok = ok && getOffset("CEntityInstance", "m_pEntity", resolvedOffsets.entityInstanceToIdentity);
+    ok = ok && getOffset("CBasePlayerController", "m_hPawn", resolvedOffsets.controllerPawnHandle);
+    ok = ok && getOffset("C_BasePlayerPawn", "m_pObserverServices", resolvedOffsets.pawnObserverServices);
+    ok = ok && getOffset("C_BasePlayerPawn", "m_pCameraServices", resolvedOffsets.pawnCameraServices);
+    ok = ok && getOffset("C_BasePlayerPawn", "m_pWeaponServices", resolvedOffsets.pawnWeaponServices);
+    ok = ok && getOffset("C_BasePlayerPawn", "m_hController", resolvedOffsets.pawnControllerHandle);
+    getOffset("C_CSPlayerPawn", "m_angEyeAngles", resolvedOffsets.pawnEyeAngles);
+    ok = ok && getOffset("CPlayer_ObserverServices", "m_iObserverMode", resolvedOffsets.observerMode);
+    ok = ok && getOffset("CPlayer_ObserverServices", "m_hObserverTarget", resolvedOffsets.observerTarget);
+    ok = ok && getOffset("CPlayer_CameraServices", "m_hViewEntity", resolvedOffsets.cameraViewEntity);
+    ok = ok && getOffset("CPlayer_WeaponServices", "m_hActiveWeapon", resolvedOffsets.activeWeapon);
+    ok = ok && getOffset("C_BaseEntity", "m_pGameSceneNode", resolvedOffsets.sceneNode);
+    bool sceneOriginOk = getOffset("CGameSceneNode", "m_vecAbsOrigin", resolvedOffsets.sceneAbsOrigin);
+    if (!sceneOriginOk) {
+        sceneOriginOk = getOffset("CGameSceneNode", "m_vecOrigin", resolvedOffsets.sceneAbsOrigin);
+    }
+    if (!sceneOriginOk) {
+        sceneOriginOk = getOffset("CGameSceneNode", "local.origin", resolvedOffsets.sceneAbsOrigin);
+    }
+    ok = ok && sceneOriginOk;
+    getOffset("C_BaseModelEntity", "m_bRenderWithViewModels", resolvedOffsets.renderWithViewModels);
+
+    if (!ok) {
+        failure = Texts().reasonRequiredSchemaOffsetsMissing;
+        return false;
+    }
+
+    g_offsets = resolvedOffsets;
+    return true;
+}
+
+DWORD WINAPI SchemaResolveWorkerThreadMain(LPVOID) {
+    TracePrintf("schema-async worker enter");
+
+    std::string resolveFailure;
+    if (!ResolveSchemaOffsetsNow(resolveFailure)) {
+        g_runtimeCompatibility.schemaOffsetsReady = false;
+        {
+            std::lock_guard lock(g_schemaResolveMutex);
+            g_schemaResolveFailureReason = resolveFailure;
+        }
+        TracePrintf(
+            "schema-async worker failed reason=%s",
+            resolveFailure.empty() ? "<unknown>" : resolveFailure.c_str()
+        );
+        g_schemaResolveInProgress.store(false, std::memory_order_release);
+        return 0;
+    }
+
+    g_runtimeCompatibility.schemaOffsetsReady = true;
+    {
+        std::lock_guard lock(g_schemaResolveMutex);
+        g_schemaResolveFailureReason.clear();
+    }
+    g_schemaOffsetsResolved.store(true, std::memory_order_release);
+    TracePrintf("schema-async worker ok");
+    g_schemaResolveInProgress.store(false, std::memory_order_release);
+    return 0;
+}
+
+bool StartBackgroundSchemaResolve(const char* caller, bool traceAttempt) {
+    if (g_schemaOffsetsResolved.load(std::memory_order_acquire)) {
+        return true;
+    }
+
+    const unsigned long long now = GetTickCount64();
+    bool shouldStart = false;
+    {
+        std::lock_guard lock(g_schemaResolveMutex);
+        if (g_schemaOffsetsResolved.load(std::memory_order_acquire)) {
+            return true;
+        }
+
+        const bool inProgress = g_schemaResolveInProgress.load(std::memory_order_acquire);
+        const bool hasRecentFailure = !g_schemaResolveFailureReason.empty();
+        const unsigned long long lastAttempt = g_lastSchemaResolveAttemptTickMs.load(std::memory_order_relaxed);
+        const unsigned long long millisSinceLastAttempt =
+            (lastAttempt != 0ull && now >= lastAttempt) ? (now - lastAttempt) : kSchemaResolveRetryIntervalMs;
+
+        shouldStart = schema::ShouldStartBackgroundSchemaResolve(
+            false,
+            inProgress,
+            hasRecentFailure,
+            millisSinceLastAttempt,
+            kSchemaResolveRetryIntervalMs
+        );
+        if (!shouldStart) {
+            return inProgress || !hasRecentFailure;
+        }
+
+        g_schemaResolveInProgress.store(true, std::memory_order_release);
+        g_lastSchemaResolveAttemptTickMs.store(now, std::memory_order_relaxed);
+        g_schemaResolveFailureReason.clear();
+    }
+
+    HANDLE thread = CreateThread(nullptr, 0, &SchemaResolveWorkerThreadMain, nullptr, 0, nullptr);
+    if (thread == nullptr) {
+        g_schemaResolveInProgress.store(false, std::memory_order_release);
+        {
+            std::lock_guard lock(g_schemaResolveMutex);
+            g_schemaResolveFailureReason = FormatIncompatibleBuildReason("schema resolve worker creation failed");
+        }
+        return false;
+    }
+
+    CloseHandle(thread);
+    if (traceAttempt) {
+        TracePrintf("schema-async caller=%s started", caller != nullptr ? caller : "<null>");
+    }
+    return true;
+}
+
+bool WaitForStartupSchemaResolve(const char* caller) {
+    const unsigned long long start = GetTickCount64();
+    while (!g_schemaOffsetsResolved.load(std::memory_order_acquire)) {
+        if (!g_schemaResolveInProgress.load(std::memory_order_acquire)) {
+            std::string failure;
+            {
+                std::lock_guard lock(g_schemaResolveMutex);
+                failure = g_schemaResolveFailureReason;
+            }
+            TracePrintf(
+                "schema-wait caller=%s result=not-ready elapsed=%llu reason=%s",
+                caller != nullptr ? caller : "<unknown>",
+                static_cast<unsigned long long>(GetTickCount64() - start),
+                failure.empty() ? "<none>" : failure.c_str()
+            );
+            return false;
+        }
+
+        const unsigned long long now = GetTickCount64();
+        if (now - start >= kSchemaResolveStartupWaitTimeoutMs) {
+            TracePrintf(
+                "schema-wait caller=%s result=timeout elapsed=%llu",
+                caller != nullptr ? caller : "<unknown>",
+                static_cast<unsigned long long>(now - start)
+            );
+            return false;
+        }
+
+        Sleep(kSchemaResolveStartupWaitSleepMs);
+    }
+
+    TracePrintf(
+        "schema-wait caller=%s result=ready elapsed=%llu",
+        caller != nullptr ? caller : "<unknown>",
+        static_cast<unsigned long long>(GetTickCount64() - start)
+    );
+    return true;
+}
+
+bool EnsureSchemaOffsetsResolved(const char* caller, bool traceAttempt, std::string& failure) {
+    failure.clear();
+    if (g_schemaOffsetsResolved.load(std::memory_order_acquire)) {
+        return true;
+    }
+
+    const bool startIssued = StartBackgroundSchemaResolve(caller, traceAttempt);
+    if (g_schemaOffsetsResolved.load(std::memory_order_acquire)) {
+        return true;
+    }
+
+    {
+        std::lock_guard lock(g_schemaResolveMutex);
+        if (g_schemaOffsetsResolved.load(std::memory_order_acquire)) {
+            return true;
+        }
+
+        if (!g_schemaResolveFailureReason.empty()) {
+            failure = g_schemaResolveFailureReason;
+        }
+        else if (g_schemaResolveInProgress.load(std::memory_order_acquire) || startIssued) {
+            failure = FormatIncompatibleBuildReason("schema offsets still resolving");
+        }
+        else {
+            failure = FormatIncompatibleBuildReason("schema offsets unavailable");
+        }
+    }
+
+    if (traceAttempt) {
+        TracePrintf(
+            "schema-lazy caller=%s pending inProgress=%d reason=%s",
+            caller != nullptr ? caller : "<null>",
+            g_schemaResolveInProgress.load(std::memory_order_acquire) ? 1 : 0,
+            failure.empty() ? "<none>" : failure.c_str()
+        );
+    }
+    return false;
 }
 
 bool ResolveEntityAccess() {
@@ -1474,6 +3863,10 @@ bool ResolveEntityAccess() {
     }
 
     g_getEntityFromIndex = reinterpret_cast<GetEntityFromIndexFn>(getEntityFromIndex);
+    if (!IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(g_getEntityFromIndex))) {
+        SetInitialized(false, FormatIncompatibleBuildReason("GetEntityFromIndex pointer is outside client.dll"));
+        return false;
+    }
 
     const auto splitScreenPlayers = FindPatterns(g_clientModule, kPatternGetSplitScreenPlayer);
     if (splitScreenPlayers.empty()) {
@@ -1483,69 +3876,162 @@ bool ResolveEntityAccess() {
 
     g_getSplitScreenPlayerCandidates.clear();
     for (const auto splitScreenPlayer : splitScreenPlayers) {
-        g_getSplitScreenPlayerCandidates.push_back(reinterpret_cast<GetSplitScreenPlayerFn>(splitScreenPlayer));
+        auto candidate = reinterpret_cast<GetSplitScreenPlayerFn>(splitScreenPlayer);
+        if (IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(candidate))) {
+            g_getSplitScreenPlayerCandidates.push_back(candidate);
+        }
+    }
+    if (g_getSplitScreenPlayerCandidates.empty()) {
+        SetInitialized(false, FormatIncompatibleBuildReason("GetSplitScreenPlayer candidates are not trusted"));
+        return false;
     }
     g_getSplitScreenPlayer = g_getSplitScreenPlayerCandidates.front();
     if (g_getSplitScreenPlayerCandidates.size() > 1) {
         ConsolePrintf(Texts().logSplitScreenMatches, g_getSplitScreenPlayerCandidates.size());
     }
 
+    g_lookupAttachment = nullptr;
+    g_getAttachment = nullptr;
     const auto attachmentPattern = FindPattern(g_clientModule, kPatternAttachmentAccess);
     if (attachmentPattern == 0) {
-        SetInitialized(false, Texts().reasonAttachmentAccessPatternMissing);
+        TracePrintf("attachment-pattern missing, enabling eye-angle fallback");
+    }
+    else {
+        auto lookupAttachment = reinterpret_cast<LookupAttachmentFn>(attachmentPattern + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 1));
+        auto getAttachment = reinterpret_cast<GetAttachmentFn>(attachmentPattern + 40 + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 40 + 1));
+        if (!IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(lookupAttachment))
+            || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(getAttachment))) {
+            TracePrintf("attachment-accessors untrusted, enabling eye-angle fallback");
+        }
+        else {
+            g_lookupAttachment = lookupAttachment;
+            g_getAttachment = getAttachment;
+        }
+    }
+
+    if (!IsAddressReadableInModule(g_clientModule, g_entityListStorage)) {
+        SetInitialized(false, FormatIncompatibleBuildReason("entity list storage is outside client.dll"));
         return false;
     }
 
-    g_lookupAttachment = reinterpret_cast<LookupAttachmentFn>(attachmentPattern + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 1));
-    g_getAttachment = reinterpret_cast<GetAttachmentFn>(attachmentPattern + 40 + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 40 + 1));
+    g_runtimeCompatibility.entityAccessReady = g_entityListStorage != nullptr
+        && g_getEntityFromIndex != nullptr
+        && g_getHighestEntityIndex != nullptr;
+    g_runtimeCompatibility.schemaOffsetsReady = g_schemaOffsetsResolved.load(std::memory_order_acquire);
+    g_runtimeCompatibility.splitScreenAccessorReady = g_getSplitScreenPlayer != nullptr;
 
-    return g_entityListStorage != nullptr && g_getHighestEntityIndex != nullptr && g_getEntityFromIndex != nullptr && g_lookupAttachment != nullptr && g_getAttachment != nullptr && g_getSplitScreenPlayer != nullptr;
+    return g_runtimeCompatibility.entityAccessReady && g_runtimeCompatibility.splitScreenAccessorReady;
 }
 
 bool EntityIsPlayerPawn(void* entity) {
-    if (entity == nullptr) {
-        return false;
-    }
-    MEMORY_BASIC_INFORMATION memoryInfo{};
-    if (VirtualQuery(entity, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return false;
-    }
-
-    auto** vtable = *reinterpret_cast<void***>(entity);
-    if (vtable == nullptr) {
-        return false;
-    }
-    auto function = reinterpret_cast<bool(__fastcall*)(void*)>(vtable[151]);
-    return function(entity);
+    return compat::ClassifyEntityClassName(TryGetEntityRttiClassName(entity)) == compat::ClientEntityKind::PlayerPawn;
 }
 
 bool EntityIsPlayerController(void* entity) {
-    if (entity == nullptr) {
-        return false;
-    }
-    MEMORY_BASIC_INFORMATION memoryInfo{};
-    if (VirtualQuery(entity, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return false;
-    }
-
-    auto** vtable = *reinterpret_cast<void***>(entity);
-    if (vtable == nullptr) {
-        return false;
-    }
-    auto function = reinterpret_cast<bool(__fastcall*)(void*)>(vtable[152]);
-    return function(entity);
+    return compat::ClassifyEntityClassName(TryGetEntityRttiClassName(entity)) == compat::ClientEntityKind::PlayerController;
 }
 
-void EntityGetRenderEyeOrigin(void* entity, float output[3]) {
-    if (entity == nullptr) {
-        output[0] = 0.0f;
-        output[1] = 0.0f;
-        output[2] = 0.0f;
-        return;
+const char* ClientEntityKindToTraceString(compat::ClientEntityKind kind) {
+    switch (kind) {
+    case compat::ClientEntityKind::PlayerPawn:
+        return "pawn";
+    case compat::ClientEntityKind::PlayerController:
+        return "controller";
+    default:
+        return "unknown";
     }
+}
+
+bool TryEntityGetRenderEyeOrigin(void* entity, float output[3], std::string& failure) {
+    output[0] = 0.0f;
+    output[1] = 0.0f;
+    output[2] = 0.0f;
+    if (entity == nullptr) {
+        failure = Texts().reasonInvalidEyeOrigin;
+        return false;
+    }
+
     auto** vtable = *reinterpret_cast<void***>(entity);
-    auto function = reinterpret_cast<void(__fastcall*)(void*, float output[3])>(vtable[166]);
-    function(entity, output);
+    if (vtable == nullptr || !IsAddressExecutableInModule(g_clientModule, vtable[166])) {
+        failure = FormatIncompatibleBuildReason("RenderEyeOrigin vtable slot changed");
+        TracePrintf("eye-origin-slot-invalid entity=%p slot=%p", entity, vtable == nullptr ? nullptr : vtable[166]);
+        return false;
+    }
+
+    if (!TryInvokeRenderEyeOrigin(entity, vtable[166], output)) {
+        failure = FormatIncompatibleBuildReason("RenderEyeOrigin call faulted");
+        TracePrintf("eye-origin-call-fault entity=%p slot=%p", entity, vtable[166]);
+        return false;
+    }
+    if (!IsFiniteVec3(Vec3{ output[0], output[1], output[2] })) {
+        failure = Texts().reasonInvalidEyeOrigin;
+        return false;
+    }
+
+    return true;
+}
+
+bool TryGetEntityEyeOrigin(void* entity, const Vec3* viewSetupEyeOrigin, float output[3], std::string& failure) {
+    if (TryEntityGetRenderEyeOrigin(entity, output, failure)) {
+        return true;
+    }
+
+    const std::string renderFailure = failure;
+    Vec3 sceneOrigin{};
+    std::string sceneFailure;
+    const bool sceneOriginAvailable = TryGetEntityAbsOrigin(entity, sceneOrigin, sceneFailure);
+    if (compat::ShouldUseSceneOriginEyeFallback(false, sceneOriginAvailable)) {
+        output[0] = sceneOrigin.x;
+        output[1] = sceneOrigin.y;
+        output[2] = sceneOrigin.z + kFallbackEyeOriginHeight;
+        if (!IsFiniteVec3(Vec3{ output[0], output[1], output[2] })) {
+            failure = Texts().reasonInvalidEyeOrigin;
+            return false;
+        }
+
+        TracePrintf(
+            "eye-origin-fallback entity=%p renderFailure=%s scene=(%.3f,%.3f,%.3f) eye=(%.3f,%.3f,%.3f)",
+            entity,
+            renderFailure.c_str(),
+            sceneOrigin.x,
+            sceneOrigin.y,
+            sceneOrigin.z,
+            output[0],
+            output[1],
+            output[2]
+        );
+        failure.clear();
+        return true;
+    }
+
+    if (!sceneFailure.empty()) {
+        TracePrintf("eye-origin-scene-failed entity=%p renderFailure=%s sceneFailure=%s", entity, renderFailure.c_str(), sceneFailure.c_str());
+    }
+
+    const bool viewSetupOriginAvailable = viewSetupEyeOrigin != nullptr && IsFiniteVec3(*viewSetupEyeOrigin);
+    if (!compat::ShouldUseViewSetupEyeFallback(false, sceneOriginAvailable, viewSetupOriginAvailable)) {
+        return false;
+    }
+
+    output[0] = viewSetupEyeOrigin->x;
+    output[1] = viewSetupEyeOrigin->y;
+    output[2] = viewSetupEyeOrigin->z;
+    if (!IsFiniteVec3(Vec3{ output[0], output[1], output[2] })) {
+        failure = Texts().reasonInvalidEyeOrigin;
+        return false;
+    }
+
+    TracePrintf(
+        "eye-origin-viewsetup-fallback entity=%p renderFailure=%s sceneFailure=%s eye=(%.3f,%.3f,%.3f)",
+        entity,
+        renderFailure.c_str(),
+        sceneFailure.c_str(),
+        output[0],
+        output[1],
+        output[2]
+    );
+    failure.clear();
+    return true;
 }
 
 EntityHandle EntityGetHandle(void* entity) {
@@ -1553,37 +4039,122 @@ EntityHandle EntityGetHandle(void* entity) {
         return {};
     }
 
-    auto* identity = *reinterpret_cast<std::uint8_t**>(reinterpret_cast<std::uint8_t*>(entity) + g_offsets.entityInstanceToIdentity);
+    void* identityVoid = nullptr;
+    if (!TryReadOffsetPointer(entity, g_offsets.entityInstanceToIdentity, identityVoid)) {
+        return {};
+    }
+
+    auto* identity = reinterpret_cast<std::uint8_t*>(identityVoid);
     if (identity == nullptr) {
         return {};
     }
 
-    return EntityHandle{ *reinterpret_cast<std::uint32_t*>(identity + 0x10) };
+    EntityHandle handle{};
+    if (!TryReadOffsetHandle(identity, 0x10, handle)) {
+        return {};
+    }
+
+    return handle;
 }
 
 EntityHandle ControllerGetPawnHandle(void* controller) {
     if (controller == nullptr || !EntityIsPlayerController(controller)) {
         return {};
     }
-    return EntityHandle{ *reinterpret_cast<std::uint32_t*>(reinterpret_cast<std::uint8_t*>(controller) + g_offsets.controllerPawnHandle) };
+
+    EntityHandle handle{};
+    if (!TryReadOffsetHandle(controller, g_offsets.controllerPawnHandle, handle)) {
+        return {};
+    }
+
+    return handle;
+}
+
+EntityHandle ControllerGetPawnHandleAtOffset(void* controller, std::ptrdiff_t offset) {
+    if (controller == nullptr || !EntityIsPlayerController(controller)) {
+        return {};
+    }
+
+    EntityHandle handle{};
+    if (!TryReadOffsetHandle(controller, offset, handle)) {
+        return {};
+    }
+
+    return handle;
 }
 
 bool TryGetEntityAbsOrigin(void* entity, Vec3& origin, std::string& failure) {
+    static std::atomic<unsigned long long> traceCounter{0};
+    const auto shouldTraceFailure = [&]() {
+        const unsigned long long traceIndex = traceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+        return traceIndex <= 20u || 0u == (traceIndex % 60u);
+    };
+
     if (entity == nullptr) {
         failure = Texts().reasonWeaponEntityMissing;
+        if (shouldTraceFailure()) {
+            TracePrintf("abs-origin-failed entity=%p reason=null-entity", entity);
+        }
         return false;
     }
 
-    auto* sceneNode = *reinterpret_cast<void**>(reinterpret_cast<std::uint8_t*>(entity) + g_offsets.sceneNode);
+    void* sceneNode = nullptr;
+    if (!TryReadOffsetPointer(entity, g_offsets.sceneNode, sceneNode)) {
+        failure = FormatIncompatibleBuildReason("scene node read faulted");
+        if (shouldTraceFailure()) {
+            TracePrintf("abs-origin-failed entity=%p sceneNodeOffset=0x%llX reason=scene-node-read-fault", entity, static_cast<unsigned long long>(g_offsets.sceneNode));
+        }
+        return false;
+    }
+
     if (sceneNode == nullptr) {
         failure = Texts().reasonWeaponSceneNodeMissing;
+        if (shouldTraceFailure()) {
+            TracePrintf("abs-origin-failed entity=%p sceneNodeOffset=0x%llX sceneNode=%p reason=scene-node-null", entity, static_cast<unsigned long long>(g_offsets.sceneNode), sceneNode);
+        }
         return false;
     }
 
-    auto* sceneOrigin = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(sceneNode) + g_offsets.sceneAbsOrigin);
-    origin = Vec3{ sceneOrigin[0], sceneOrigin[1], sceneOrigin[2] };
-    if (!IsFiniteVec3(origin)) {
+    auto* originBase = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(sceneNode) + g_offsets.sceneAbsOrigin);
+    const bool readX = TryReadFloatPointer(originBase + 0, origin.x);
+    const bool readY = TryReadFloatPointer(originBase + 1, origin.y);
+    const bool readZ = TryReadFloatPointer(originBase + 2, origin.z);
+    if (!readX || !readY || !readZ || !IsFiniteVec3(origin)) {
         failure = Texts().reasonWeaponOriginInvalid;
+        if (shouldTraceFailure()) {
+            TracePrintf(
+                "abs-origin-failed entity=%p sceneNodeOffset=0x%llX sceneNode=%p originOffset=0x%llX read=(%d,%d,%d) origin=(%.3f,%.3f,%.3f) reason=origin-invalid",
+                entity,
+                static_cast<unsigned long long>(g_offsets.sceneNode),
+                sceneNode,
+                static_cast<unsigned long long>(g_offsets.sceneAbsOrigin),
+                readX ? 1 : 0,
+                readY ? 1 : 0,
+                readZ ? 1 : 0,
+                origin.x,
+                origin.y,
+                origin.z
+            );
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool TryGetPawnEyeAngles(void* pawn, Vec3& angles, std::string& failure) {
+    angles = {};
+    if (pawn == nullptr || !EntityIsPlayerPawn(pawn) || g_offsets.pawnEyeAngles == 0) {
+        failure = FormatIncompatibleBuildReason("eye angles offset unavailable");
+        return false;
+    }
+
+    auto* eyeAngles = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(pawn) + g_offsets.pawnEyeAngles);
+    if (!TryReadFloatPointer(eyeAngles + 0, angles.x)
+        || !TryReadFloatPointer(eyeAngles + 1, angles.y)
+        || !TryReadFloatPointer(eyeAngles + 2, angles.z)
+        || !IsFiniteVec3(angles)) {
+        failure = FormatIncompatibleBuildReason("eye angles read faulted");
         return false;
     }
 
@@ -1595,12 +4166,21 @@ EntityHandle PawnGetActiveWeaponHandle(void* pawn) {
         return {};
     }
 
-    auto* weaponServices = *reinterpret_cast<void**>(reinterpret_cast<std::uint8_t*>(pawn) + g_offsets.pawnWeaponServices);
+    void* weaponServices = nullptr;
+    if (!TryReadOffsetPointer(pawn, g_offsets.pawnWeaponServices, weaponServices)) {
+        return {};
+    }
+
     if (weaponServices == nullptr) {
         return {};
     }
 
-    return EntityHandle{ *reinterpret_cast<std::uint32_t*>(reinterpret_cast<std::uint8_t*>(weaponServices) + g_offsets.activeWeapon) };
+    EntityHandle handle{};
+    if (!TryReadOffsetHandle(weaponServices, g_offsets.activeWeapon, handle)) {
+        return {};
+    }
+
+    return handle;
 }
 
 std::string TryGetEntityRttiClassName(void* entity) {
@@ -1741,18 +4321,227 @@ EntityHandle PawnGetObserverTarget(void* pawn) {
     if (pawn == nullptr || !EntityIsPlayerPawn(pawn)) {
         return {};
     }
-    auto* observerServices = *reinterpret_cast<void**>(reinterpret_cast<std::uint8_t*>(pawn) + g_offsets.pawnObserverServices);
+    void* observerServices = nullptr;
+    if (!TryReadOffsetPointer(pawn, g_offsets.pawnObserverServices, observerServices)) {
+        return {};
+    }
+
     if (observerServices == nullptr) {
         return {};
     }
-    return EntityHandle{ *reinterpret_cast<std::uint32_t*>(reinterpret_cast<std::uint8_t*>(observerServices) + g_offsets.observerTarget) };
+
+    EntityHandle handle{};
+    if (!TryReadOffsetHandle(observerServices, g_offsets.observerTarget, handle)) {
+        return {};
+    }
+
+    return handle;
+}
+
+bool TryPawnGetObserverMode(void* pawn, int& observerMode) {
+    observerMode = -1;
+    if (pawn == nullptr || !EntityIsPlayerPawn(pawn)) {
+        return false;
+    }
+
+    void* observerServices = nullptr;
+    if (!TryReadOffsetPointer(pawn, g_offsets.pawnObserverServices, observerServices)) {
+        return false;
+    }
+
+    if (observerServices == nullptr) {
+        return false;
+    }
+
+    return TryReadOffsetValue(observerServices, g_offsets.observerMode, observerMode);
 }
 
 void* ResolveHandleToEntity(EntityHandle handle) {
     if (!handle.IsValid() || g_entityListStorage == nullptr || *g_entityListStorage == nullptr || g_getEntityFromIndex == nullptr) {
         return nullptr;
     }
-    return g_getEntityFromIndex(*g_entityListStorage, handle.Index());
+
+    void* entity = nullptr;
+    if (!TryInvokeGetEntityFromIndex(*g_entityListStorage, handle.Index(), entity)) {
+        return nullptr;
+    }
+
+    return entity;
+}
+
+void RestoreSuppressedRenderWithViewModels() {
+    std::lock_guard lock(g_viewModelSuppressionMutex);
+    if (!g_viewModelSuppression.active) {
+        return;
+    }
+
+    void* weaponEntity = ResolveHandleToEntity(g_viewModelSuppression.weaponHandle);
+    if (weaponEntity == nullptr) {
+        weaponEntity = g_viewModelSuppression.weaponEntity;
+    }
+
+    const std::uint8_t restoreValue = g_viewModelSuppression.previousRenderWithViewModels ? 1u : 0u;
+    const bool restored = TryWriteOffsetValue(weaponEntity, g_offsets.renderWithViewModels, restoreValue);
+    TracePrintf(
+        "viewmodel-restore weapon=%u entity=%p offset=0x%llX value=%u restored=%d",
+        g_viewModelSuppression.weaponHandle.raw,
+        weaponEntity,
+        static_cast<unsigned long long>(g_offsets.renderWithViewModels),
+        static_cast<unsigned>(restoreValue),
+        restored ? 1 : 0
+    );
+
+    g_viewModelSuppression = {};
+}
+
+void UpdateRenderWithViewModelsSuppression(
+    const WeaponFrameBasis& basis,
+    bool overrideSucceeded,
+    bool traceFrame,
+    unsigned long long frameIndex
+) {
+    const bool shouldSuppress = compat::ShouldSuppressRenderWithViewModels(
+        overrideSucceeded,
+        basis.weaponHandle.IsValid(),
+        g_offsets.renderWithViewModels != 0,
+        basis.heldItemKind != HeldItemKind::Unknown
+    );
+    if (!shouldSuppress) {
+        RestoreSuppressedRenderWithViewModels();
+        return;
+    }
+
+    void* weaponEntity = ResolveHandleToEntity(basis.weaponHandle);
+    if (weaponEntity == nullptr) {
+        if (traceFrame) {
+            TracePrintf("viewmodel-suppress-skip idx=%llu reason=weapon-unresolved weapon=%u", frameIndex, basis.weaponHandle.raw);
+        }
+        RestoreSuppressedRenderWithViewModels();
+        return;
+    }
+
+    std::uint8_t currentValue = 0u;
+    if (!TryReadOffsetValue(weaponEntity, g_offsets.renderWithViewModels, currentValue)) {
+        if (traceFrame) {
+            TracePrintf(
+                "viewmodel-suppress-skip idx=%llu reason=read-failed weapon=%u entity=%p offset=0x%llX",
+                frameIndex,
+                basis.weaponHandle.raw,
+                weaponEntity,
+                static_cast<unsigned long long>(g_offsets.renderWithViewModels)
+            );
+        }
+        RestoreSuppressedRenderWithViewModels();
+        return;
+    }
+
+    bool alreadyActiveForWeapon = false;
+    {
+        std::lock_guard lock(g_viewModelSuppressionMutex);
+        alreadyActiveForWeapon = g_viewModelSuppression.active
+            && g_viewModelSuppression.weaponHandle.raw == basis.weaponHandle.raw;
+    }
+    if (!alreadyActiveForWeapon) {
+        RestoreSuppressedRenderWithViewModels();
+    }
+
+    const std::uint8_t suppressedValue = 0u;
+    if (!TryWriteOffsetValue(weaponEntity, g_offsets.renderWithViewModels, suppressedValue)) {
+        if (traceFrame) {
+            TracePrintf(
+                "viewmodel-suppress-failed idx=%llu weapon=%u entity=%p offset=0x%llX",
+                frameIndex,
+                basis.weaponHandle.raw,
+                weaponEntity,
+                static_cast<unsigned long long>(g_offsets.renderWithViewModels)
+            );
+        }
+        return;
+    }
+
+    if (!alreadyActiveForWeapon) {
+        std::lock_guard lock(g_viewModelSuppressionMutex);
+        g_viewModelSuppression.weaponHandle = basis.weaponHandle;
+        g_viewModelSuppression.weaponEntity = weaponEntity;
+        g_viewModelSuppression.previousRenderWithViewModels = currentValue != 0u;
+        g_viewModelSuppression.active = true;
+    }
+
+    if (traceFrame) {
+        TracePrintf(
+            "viewmodel-suppress-ok idx=%llu weapon=%u entity=%p offset=0x%llX previous=%u",
+            frameIndex,
+            basis.weaponHandle.raw,
+            weaponEntity,
+            static_cast<unsigned long long>(g_offsets.renderWithViewModels),
+            static_cast<unsigned>(currentValue)
+        );
+    }
+}
+
+void* ResolveControllerPawnEntity(void* controller) {
+    const EntityHandle primaryHandle = ControllerGetPawnHandle(controller);
+    void* primaryEntity = ResolveHandleToEntity(primaryHandle);
+    if (EntityIsPlayerPawn(primaryEntity)) {
+        if (g_debugOptions.traceEnabled) {
+            const unsigned long long fallbackIndex = g_controllerPawnFallbackTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+            if (fallbackIndex <= 20u || 0u == (fallbackIndex % 30u)) {
+                TracePrintf(
+                    "follow-controller-pawn-primary idx=%llu controller=%p offset=0x%llX handle=%u pawn=%p class=%s",
+                    fallbackIndex,
+                    controller,
+                    static_cast<unsigned long long>(g_offsets.controllerPawnHandle),
+                    primaryHandle.raw,
+                    primaryEntity,
+                    TryGetEntityRttiClassName(primaryEntity).c_str()
+                );
+            }
+        }
+        return primaryEntity;
+    }
+
+    std::ptrdiff_t fallbackOffset = 0;
+    if (schema::TryGetKnownClientSchemaFieldOffsetFallback("CBasePlayerController", "m_hPawn", fallbackOffset)
+        && fallbackOffset != 0
+        && fallbackOffset != g_offsets.controllerPawnHandle) {
+        const EntityHandle fallbackHandle = ControllerGetPawnHandleAtOffset(controller, fallbackOffset);
+        void* fallbackEntity = ResolveHandleToEntity(fallbackHandle);
+        if (EntityIsPlayerPawn(fallbackEntity)) {
+            if (g_debugOptions.traceEnabled) {
+                const unsigned long long fallbackIndex = g_controllerPawnFallbackTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+                if (fallbackIndex <= 20u || 0u == (fallbackIndex % 30u)) {
+                    TracePrintf(
+                        "follow-controller-pawn-fallback idx=%llu controller=%p primaryOffset=0x%llX primaryHandle=%u fallbackOffset=0x%llX fallbackHandle=%u pawn=%p",
+                        fallbackIndex,
+                        controller,
+                        static_cast<unsigned long long>(g_offsets.controllerPawnHandle),
+                        primaryHandle.raw,
+                        static_cast<unsigned long long>(fallbackOffset),
+                        fallbackHandle.raw,
+                        fallbackEntity
+                    );
+                }
+            }
+            return fallbackEntity;
+        }
+    }
+
+    if (g_debugOptions.traceEnabled) {
+        const unsigned long long fallbackIndex = g_controllerPawnFallbackTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+        if (fallbackIndex <= 20u || 0u == (fallbackIndex % 30u)) {
+            TracePrintf(
+                "follow-controller-pawn-missing idx=%llu controller=%p primaryOffset=0x%llX primaryHandle=%u primaryEntity=%p primaryClass=%s",
+                fallbackIndex,
+                controller,
+                static_cast<unsigned long long>(g_offsets.controllerPawnHandle),
+                primaryHandle.raw,
+                primaryEntity,
+                primaryEntity != nullptr ? TryGetEntityRttiClassName(primaryEntity).c_str() : "<null>"
+            );
+        }
+    }
+
+    return nullptr;
 }
 
 HeldItemKind GetHeldItemKindForPawn(void* pawn) {
@@ -1774,6 +4563,14 @@ Vec3 GetBaseOffsetForHeldItem(HeldItemKind kind, LookMode lookMode) {
     }
 
     return kCombatBaseOffset;
+}
+
+Vec3 GetBaseOffsetForBasis(const WeaponFrameBasis& basis, LookMode lookMode) {
+    if (basis.syntheticFallbackHandAnchor && IsSelfieLookMode(lookMode)) {
+        return kSyntheticFallbackSelfieBaseOffset;
+    }
+
+    return GetBaseOffsetForHeldItem(basis.heldItemKind, lookMode);
 }
 
 float GetUpperBodyTargetBlendForHeldItem(HeldItemKind kind) {
@@ -1823,22 +4620,7 @@ bool IsLikelyClientEntity(void* entity) {
         return false;
     }
 
-    auto* fieldAddress = reinterpret_cast<std::uint8_t*>(entity) + g_offsets.entityInstanceToIdentity;
-    MEMORY_BASIC_INFORMATION memoryInfo{};
-    if (VirtualQuery(fieldAddress, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return false;
-    }
-
-    auto* identity = *reinterpret_cast<std::uint8_t**>(fieldAddress);
-    if (identity == nullptr) {
-        return false;
-    }
-
-    if (VirtualQuery(identity + 0x10, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return false;
-    }
-
-    const EntityHandle handle{ *reinterpret_cast<std::uint32_t*>(identity + 0x10) };
+    const EntityHandle handle = EntityGetHandle(entity);
     if (!handle.IsValid()) {
         return false;
     }
@@ -1852,7 +4634,10 @@ void* ResolveSplitScreenPlayerEntity() {
     }
 
     if (g_getSplitScreenPlayer != nullptr) {
-        void* entity = g_getSplitScreenPlayer(0);
+        void* entity = nullptr;
+        if (!TryInvokeSplitScreenPlayer(g_getSplitScreenPlayer, 0, entity)) {
+            entity = nullptr;
+        }
         if (entity != nullptr && (EntityIsPlayerController(entity) || EntityIsPlayerPawn(entity))) {
             return entity;
         }
@@ -1864,7 +4649,10 @@ void* ResolveSplitScreenPlayerEntity() {
             continue;
         }
 
-        void* entity = candidate(0);
+        void* entity = nullptr;
+        if (!TryInvokeSplitScreenPlayer(candidate, 0, entity)) {
+            continue;
+        }
         if (!IsLikelyClientEntity(entity)) {
             continue;
         }
@@ -1894,7 +4682,7 @@ void* ResolveEntityToPawn(void* entity) {
     }
 
     if (EntityIsPlayerController(entity)) {
-        return ResolveHandleToEntity(ControllerGetPawnHandle(entity));
+        return ResolveControllerPawnEntity(entity);
     }
 
     return nullptr;
@@ -1907,6 +4695,11 @@ struct TargetResolution {
 };
 
 TargetResolution ResolveFollowTarget() {
+    std::string schemaFailure;
+    if (!EnsureSchemaOffsetsResolved("ResolveFollowTarget", g_debugOptions.traceEnabled, schemaFailure)) {
+        return { nullptr, {}, schemaFailure };
+    }
+
     if (g_getSplitScreenPlayerCandidates.empty()) {
         return { nullptr, {}, Texts().reasonSplitScreenPlayerAccessUnavailable };
     }
@@ -1916,11 +4709,14 @@ TargetResolution ResolveFollowTarget() {
         return { nullptr, {}, Texts().reasonSplitScreenPlayerMissing };
     }
 
+    compat::ClientEntityKind splitScreenKind = compat::ClientEntityKind::Unknown;
     void* observerPawn = nullptr;
     if (EntityIsPlayerController(splitScreenEntity)) {
-        observerPawn = ResolveHandleToEntity(ControllerGetPawnHandle(splitScreenEntity));
+        splitScreenKind = compat::ClientEntityKind::PlayerController;
+        observerPawn = ResolveControllerPawnEntity(splitScreenEntity);
     }
     else if (EntityIsPlayerPawn(splitScreenEntity)) {
+        splitScreenKind = compat::ClientEntityKind::PlayerPawn;
         observerPawn = splitScreenEntity;
     }
     else {
@@ -1933,6 +4729,35 @@ TargetResolution ResolveFollowTarget() {
 
     const auto observerTarget = PawnGetObserverTarget(observerPawn);
     if (!observerTarget.IsValid()) {
+        const EntityHandle observerPawnHandle = EntityGetHandle(observerPawn);
+        int observerMode = -1;
+        const bool observerModeRead = TryPawnGetObserverMode(observerPawn, observerMode);
+        const bool useObserverPawn = compat::ShouldUseObserverPawnAsFollowTarget(
+            splitScreenKind,
+            observerTarget.IsValid(),
+            observerPawn != nullptr,
+            EntityIsPlayerPawn(observerPawn) && observerPawnHandle.IsValid()
+        );
+        if (g_debugOptions.traceEnabled) {
+            const unsigned long long resolveIndex = g_followResolutionTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+            if (resolveIndex <= 20u || 0u == (resolveIndex % 30u)) {
+                TracePrintf(
+                    "follow-resolve-chain idx=%llu split=%p splitKind=%s observerPawn=%p pawnHandle=%u observerModeRead=%d observerMode=%d observerTarget=%u fallbackPawn=%d",
+                    resolveIndex,
+                    splitScreenEntity,
+                    ClientEntityKindToTraceString(splitScreenKind),
+                    observerPawn,
+                    observerPawnHandle.raw,
+                    observerModeRead ? 1 : 0,
+                    observerMode,
+                    observerTarget.raw,
+                    useObserverPawn ? 1 : 0
+                );
+            }
+        }
+        if (useObserverPawn) {
+            return { observerPawn, observerPawnHandle, {} };
+        }
         return { nullptr, {}, Texts().reasonNoObserverTarget };
     }
 
@@ -1945,6 +4770,11 @@ TargetResolution ResolveFollowTarget() {
 }
 
 TargetResolution ResolveLockedTarget(EntityHandle handle) {
+    std::string schemaFailure;
+    if (!EnsureSchemaOffsetsResolved("ResolveLockedTarget", g_debugOptions.traceEnabled, schemaFailure)) {
+        return { nullptr, {}, schemaFailure };
+    }
+
     if (!handle.IsValid()) {
         return { nullptr, {}, Texts().reasonLockedTargetMissing };
     }
@@ -1958,6 +4788,11 @@ TargetResolution ResolveLockedTarget(EntityHandle handle) {
 }
 
 TargetResolution ResolveFollowSnapshotTarget(EntityHandle handle) {
+    std::string schemaFailure;
+    if (!EnsureSchemaOffsetsResolved("ResolveFollowSnapshotTarget", g_debugOptions.traceEnabled, schemaFailure)) {
+        return { nullptr, {}, schemaFailure };
+    }
+
     if (!handle.IsValid()) {
         return { nullptr, {}, Texts().reasonFollowTargetMissing };
     }
@@ -1982,14 +4817,24 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
     }
 
     std::uint8_t attachmentIndex{ 0xFFu };
-    g_lookupAttachment(entity, attachmentIndex, attachmentName);
+    if (!TryInvokeLookupAttachment(entity, g_lookupAttachment, attachmentIndex, attachmentName)) {
+        failure = FormatIncompatibleBuildReason("attachment lookup faulted");
+        TracePrintf("attachment-lookup-fault entity=%p name=%s", entity, attachmentName);
+        return false;
+    }
     if (attachmentIndex == 0xFFu) {
         failure = FormatText(Texts().reasonAttachmentMissingFormat, attachmentName);
         return false;
     }
 
     alignas(16) float data[8]{};
-    if (!g_getAttachment(entity, attachmentIndex, data)) {
+    bool gotAttachment = false;
+    if (!TryInvokeGetAttachment(entity, g_getAttachment, attachmentIndex, data, gotAttachment)) {
+        failure = FormatIncompatibleBuildReason("attachment transform faulted");
+        TracePrintf("attachment-transform-fault entity=%p name=%s index=%u", entity, attachmentName, static_cast<unsigned>(attachmentIndex));
+        return false;
+    }
+    if (!gotAttachment) {
         failure = FormatText(Texts().reasonAttachmentMissingFormat, attachmentName);
         return false;
     }
@@ -2000,7 +4845,7 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
     return true;
 }
 
-bool TryBuildHumanFrameBasis(void* targetPawn, HeldItemKind heldItemKind, WeaponFrameBasis& basis, std::string& failure) {
+bool TryBuildHumanFrameBasis(void* targetPawn, HeldItemKind heldItemKind, const Vec3* viewSetupEyeOrigin, WeaponFrameBasis& basis, std::string& failure) {
     Vec3 handOrigin{};
     if (!TryGetAttachmentOrigin(targetPawn, kAnchorAttachmentName, handOrigin, failure)) {
         failure = FormatText(Texts().reasonAttachmentMissingFormat, kAnchorAttachmentName);
@@ -2008,12 +4853,10 @@ bool TryBuildHumanFrameBasis(void* targetPawn, HeldItemKind heldItemKind, Weapon
     }
 
     float eyeOriginRaw[3]{};
-    EntityGetRenderEyeOrigin(targetPawn, eyeOriginRaw);
-    const Vec3 eyeOrigin{ eyeOriginRaw[0], eyeOriginRaw[1], eyeOriginRaw[2] };
-    if (!IsFiniteVec3(eyeOrigin)) {
-        failure = Texts().reasonInvalidEyeOrigin;
+    if (!TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, eyeOriginRaw, failure)) {
         return false;
     }
+    const Vec3 eyeOrigin{ eyeOriginRaw[0], eyeOriginRaw[1], eyeOriginRaw[2] };
 
     const Vec3 upperBodyTarget = Lerp(eyeOrigin, handOrigin, GetUpperBodyTargetBlendForHeldItem(heldItemKind));
     if (!IsFiniteVec3(upperBodyTarget)) {
@@ -2048,10 +4891,11 @@ bool TryBuildHumanFrameBasis(void* targetPawn, HeldItemKind heldItemKind, Weapon
     basis.heldItemKind = heldItemKind;
     basis.weaponHandle = {};
     basis.supportedWeaponId = SupportedWeaponId::None;
+    basis.syntheticFallbackHandAnchor = false;
     return true;
 }
 
-bool TryBuildGunFrameBasis(void* targetPawn, WeaponFrameBasis& basis, std::string& failure) {
+bool TryBuildGunFrameBasis(void* targetPawn, const Vec3* viewSetupEyeOrigin, WeaponFrameBasis& basis, std::string& failure) {
     const EntityHandle targetHandle = EntityGetHandle(targetPawn);
     const EntityHandle weaponHandle = PawnGetActiveWeaponHandle(targetPawn);
     if (!weaponHandle.IsValid()) {
@@ -2084,12 +4928,10 @@ bool TryBuildGunFrameBasis(void* targetPawn, WeaponFrameBasis& basis, std::strin
     }
 
     float eyeOriginRaw[3]{};
-    EntityGetRenderEyeOrigin(targetPawn, eyeOriginRaw);
-    const Vec3 eyeOrigin{ eyeOriginRaw[0], eyeOriginRaw[1], eyeOriginRaw[2] };
-    if (!IsFiniteVec3(eyeOrigin)) {
-        failure = Texts().reasonInvalidEyeOrigin;
+    if (!TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, eyeOriginRaw, failure)) {
         return false;
     }
+    const Vec3 eyeOrigin{ eyeOriginRaw[0], eyeOriginRaw[1], eyeOriginRaw[2] };
 
     const Vec3 handMidpoint = Lerp(leftHandOrigin, rightHandOrigin, 0.5f);
     const Vec3 upperBodyTarget = Lerp(eyeOrigin, handMidpoint, GetUpperBodyTargetBlendForHeldItem(HeldItemKind::Gun));
@@ -2143,18 +4985,165 @@ bool TryBuildGunFrameBasis(void* targetPawn, WeaponFrameBasis& basis, std::strin
     basis.heldItemKind = HeldItemKind::Gun;
     basis.weaponHandle = weaponHandle;
     basis.supportedWeaponId = TryGetSupportedWeaponId(weaponEntity);
+    basis.syntheticFallbackHandAnchor = false;
     StabilizeGunBasisRightAxis(targetHandle, basis);
     basis.anchorOrigin = StabilizeGunAnchorOrigin(targetHandle, weaponHandle, handMidpoint, basis, muzzleOrigin);
     return true;
 }
 
-bool TryBuildWeaponFrameBasis(void* targetPawn, WeaponFrameBasis& basis, std::string& failure) {
-    const HeldItemKind heldItemKind = GetHeldItemKindForPawn(targetPawn);
-    if (heldItemKind == HeldItemKind::Gun) {
-        return TryBuildGunFrameBasis(targetPawn, basis, failure);
+Vec3 AnglesToForward(const Vec3& angles) {
+    const float pitchRadians = angles.x * 3.14159265358979323846f / 180.0f;
+    const float yawRadians = angles.y * 3.14159265358979323846f / 180.0f;
+    const float cosPitch = std::cos(pitchRadians);
+    return Vec3{
+        cosPitch * std::cos(yawRadians),
+        cosPitch * std::sin(yawRadians),
+        -std::sin(pitchRadians)
+    };
+}
+
+bool TryBuildFallbackFrameBasis(void* targetPawn, HeldItemKind heldItemKind, const Vec3* viewSetupEyeOrigin, const Vec3* viewSetupEyeAngles, WeaponFrameBasis& basis, std::string& failure) {
+    float eyeOriginRaw[3]{};
+    if (!TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, eyeOriginRaw, failure)) {
+        return false;
     }
 
-    return TryBuildHumanFrameBasis(targetPawn, heldItemKind, basis, failure);
+    Vec3 eyeAngles{};
+    if (!TryGetPawnEyeAngles(targetPawn, eyeAngles, failure)) {
+        const std::string pawnAnglesFailure = failure;
+        const bool viewSetupAnglesAvailable = viewSetupEyeAngles != nullptr && IsFiniteVec3(*viewSetupEyeAngles);
+        if (!compat::ShouldUseViewSetupAnglesFallback(false, viewSetupAnglesAvailable)) {
+            return false;
+        }
+
+        eyeAngles = *viewSetupEyeAngles;
+        TracePrintf(
+            "eye-angles-viewsetup-fallback entity=%p pawnFailure=%s angles=(%.3f,%.3f,%.3f)",
+            targetPawn,
+            pawnAnglesFailure.c_str(),
+            eyeAngles.x,
+            eyeAngles.y,
+            eyeAngles.z
+        );
+        failure.clear();
+    }
+
+    Vec3 forward = AnglesToForward(eyeAngles);
+    if (!TryNormalize(forward)) {
+        failure = Texts().reasonCombatForwardAxisDegenerate;
+        return false;
+    }
+
+    Vec3 right = Cross(forward, kWorldUp);
+    if (!TryNormalize(right)) {
+        const float yawRadians = eyeAngles.y * 3.14159265358979323846f / 180.0f;
+        right = Vec3{ std::sin(yawRadians), -std::cos(yawRadians), 0.0f };
+        if (!TryNormalize(right)) {
+            failure = Texts().reasonCombatRightAxisDegenerate;
+            return false;
+        }
+    }
+
+    Vec3 up = Cross(right, forward);
+    if (!TryNormalize(up)) {
+        failure = Texts().reasonCombatUpAxisDegenerate;
+        return false;
+    }
+
+    const Vec3 eyeOrigin{ eyeOriginRaw[0], eyeOriginRaw[1], eyeOriginRaw[2] };
+    const bool useSyntheticHandAnchor = compat::ShouldUseSyntheticFallbackHandAnchor(
+        g_lookupAttachment != nullptr && g_getAttachment != nullptr,
+        heldItemKind != HeldItemKind::Unknown
+    );
+    if (useSyntheticHandAnchor) {
+        const Vec3 handAnchor = ComposeBasisPoint(
+            eyeOrigin,
+            right,
+            forward,
+            up,
+            kKnifeFallbackHandAnchorOffset.x,
+            kKnifeFallbackHandAnchorOffset.y,
+            kKnifeFallbackHandAnchorOffset.z
+        );
+        Vec3 syntheticRight = Subtract(handAnchor, eyeOrigin);
+        syntheticRight = ProjectOntoPlane(syntheticRight, kWorldUp);
+        if (!TryNormalize(syntheticRight)) {
+            failure = Texts().reasonCombatRightAxisDegenerate;
+            return false;
+        }
+
+        Vec3 syntheticForward = Cross(syntheticRight, kWorldUp);
+        if (!TryNormalize(syntheticForward)) {
+            failure = Texts().reasonCombatForwardAxisDegenerate;
+            return false;
+        }
+
+        Vec3 syntheticUp = Cross(syntheticForward, syntheticRight);
+        if (!TryNormalize(syntheticUp)) {
+            failure = Texts().reasonCombatUpAxisDegenerate;
+            return false;
+        }
+
+        basis.anchorOrigin = handAnchor;
+        basis.upperBodyTarget = Lerp(eyeOrigin, handAnchor, GetUpperBodyTargetBlendForHeldItem(heldItemKind));
+        basis.right = syntheticRight;
+        basis.forward = syntheticForward;
+        basis.up = syntheticUp;
+        basis.syntheticFallbackHandAnchor = true;
+        if (g_debugOptions.traceEnabled) {
+            const unsigned long long fallbackIndex = g_knifeFallbackAnchorTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+            if (fallbackIndex <= 20u || 0u == (fallbackIndex % 30u)) {
+                TracePrintf(
+                    "synthetic-fallback-anchor idx=%llu held=%d eye=(%.3f,%.3f,%.3f) anchor=(%.3f,%.3f,%.3f) right=(%.3f,%.3f,%.3f) forward=(%.3f,%.3f,%.3f)",
+                    fallbackIndex,
+                    static_cast<int>(heldItemKind),
+                    eyeOrigin.x,
+                    eyeOrigin.y,
+                    eyeOrigin.z,
+                    basis.anchorOrigin.x,
+                    basis.anchorOrigin.y,
+                    basis.anchorOrigin.z,
+                    basis.right.x,
+                    basis.right.y,
+                    basis.right.z,
+                    basis.forward.x,
+                    basis.forward.y,
+                    basis.forward.z
+                );
+            }
+        }
+    }
+    else {
+        basis.anchorOrigin = eyeOrigin;
+        basis.upperBodyTarget = Add(eyeOrigin, Scale(forward, 24.0f));
+        basis.right = right;
+        basis.forward = forward;
+        basis.up = up;
+        basis.syntheticFallbackHandAnchor = false;
+    }
+    basis.heldItemKind = heldItemKind;
+
+    const EntityHandle weaponHandle = PawnGetActiveWeaponHandle(targetPawn);
+    basis.weaponHandle = weaponHandle;
+    basis.supportedWeaponId = SupportedWeaponId::None;
+    if (heldItemKind == HeldItemKind::Gun && weaponHandle.IsValid()) {
+        basis.supportedWeaponId = TryGetSupportedWeaponId(ResolveHandleToEntity(weaponHandle));
+    }
+
+    return true;
+}
+
+bool TryBuildWeaponFrameBasis(void* targetPawn, const Vec3* viewSetupEyeOrigin, const Vec3* viewSetupEyeAngles, WeaponFrameBasis& basis, std::string& failure) {
+    const HeldItemKind heldItemKind = GetHeldItemKindForPawn(targetPawn);
+    if (g_lookupAttachment == nullptr || g_getAttachment == nullptr) {
+        return TryBuildFallbackFrameBasis(targetPawn, heldItemKind, viewSetupEyeOrigin, viewSetupEyeAngles, basis, failure);
+    }
+
+    if (heldItemKind == HeldItemKind::Gun) {
+        return TryBuildGunFrameBasis(targetPawn, viewSetupEyeOrigin, basis, failure);
+    }
+
+    return TryBuildHumanFrameBasis(targetPawn, heldItemKind, viewSetupEyeOrigin, basis, failure);
 }
 
 void VectorToAngles(const Vec3& direction, float& pitch, float& yaw) {
@@ -2168,9 +5157,18 @@ void OverrideScopedAwpFov(void* viewSetup, EntityHandle targetHandle, const Weap
         return;
     }
 
+    if (g_debugOptions.disableScopedFovOverride) {
+        return;
+    }
+
     auto* viewFov = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupFovOffset);
-    const float currentFov = *viewFov;
+    float currentFov = 0.0f;
+    if (!TryReadFloatPointer(viewFov, currentFov)) {
+        TracePrintf("fov-read-fault viewSetup=%p fovPtr=%p", viewSetup, viewFov);
+        return;
+    }
     if (!std::isfinite(currentFov) || currentFov <= 1.0f) {
+        TracePrintf("fov-read-invalid viewSetup=%p fovPtr=%p fov=%.3f", viewSetup, viewFov, currentFov);
         return;
     }
 
@@ -2265,22 +5263,69 @@ OverrideConfig GetOverrideConfig() {
     };
 }
 
+void __fastcall SelfieStickSetUpView(void* viewSetup);
+
+DWORD __fastcall RunSelfieStickSetUpViewGuarded(void* viewSetup) {
+    __try {
+        SelfieStickSetUpView(viewSetup);
+        return 0u;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+}
+
+void __fastcall SelfieStickSetUpViewBridge(void* viewSetup) {
+    const unsigned long long bridgeIndex = g_setupViewBridgeCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+    const bool traceBridge = g_debugOptions.traceEnabled && (bridgeIndex <= 20u || 0u == (bridgeIndex % 30u));
+    if (traceBridge) {
+        TracePrintf("bridge-enter idx=%llu viewSetup=%p", bridgeIndex, viewSetup);
+    }
+
+    const DWORD exceptionCode = RunSelfieStickSetUpViewGuarded(viewSetup);
+    if (exceptionCode != 0u) {
+        TracePrintf("bridge-exception idx=%llu code=0x%08lX viewSetup=%p", bridgeIndex, exceptionCode, viewSetup);
+        RestoreSuppressedRenderWithViewModels();
+        UpdateFailureReason(FormatIncompatibleBuildReason("SetUpView callback faulted"), true);
+        SetEnabled(false);
+    }
+}
+
 void __fastcall SelfieStickSetUpView(void* viewSetup) {
     if (viewSetup == nullptr) {
         return;
     }
 
     if (!g_setupViewCallbackObserved.exchange(true)) {
-        ConsolePrintf(Texts().logSetUpViewActive);
+        TracePrintf("callback-active viewSetup=%p", viewSetup);
     }
 
     const OverrideConfig config = GetOverrideConfig();
     if (!config.enabled) {
+        RestoreSuppressedRenderWithViewModels();
         return;
     }
 
+    const unsigned long long frameIndex = g_traceFrameCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+    const bool traceFrame = g_debugOptions.traceEnabled && (frameIndex <= 20u || 0u == (frameIndex % 30u));
+    if (traceFrame) {
+        TracePrintf(
+            "frame-enter idx=%llu viewSetup=%p mode=%s locked=%u follow=%u",
+            frameIndex,
+            viewSetup,
+            TargetModeToString(config.targetMode),
+            config.lockedHandle.raw,
+            config.followHandle.raw
+        );
+    }
+
     if (!g_enabledSetUpViewObserved.exchange(true)) {
-        ConsolePrintf(Texts().logEnabledCallbackEntered, TargetModeToString(config.targetMode), config.followHandle.raw, config.lockedHandle.raw);
+        TracePrintf(
+            "enabled-callback mode=%s follow=%u locked=%u",
+            TargetModeToString(config.targetMode),
+            config.followHandle.raw,
+            config.lockedHandle.raw
+        );
     }
 
     TargetResolution resolution{};
@@ -2288,27 +5333,90 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         resolution = ResolveLockedTarget(config.lockedHandle);
     }
     else {
-        resolution = ResolveFollowSnapshotTarget(config.followHandle);
+        resolution = ResolveFollowTarget();
+        SetCurrentFollowHandle(resolution.handle);
     }
 
     if (resolution.entity == nullptr) {
+        if (traceFrame) {
+            TracePrintf("frame-resolve-failed idx=%llu reason=%s", frameIndex, resolution.failure.c_str());
+        }
+        if (config.targetMode == TargetMode::Follow) {
+            SetCurrentFollowHandle(EntityHandle{});
+        }
+        RestoreSuppressedRenderWithViewModels();
         UpdateFailureReason(resolution.failure, false);
         return;
     }
 
+    if (traceFrame) {
+        TracePrintf("frame-resolved idx=%llu entity=%p handle=%u", frameIndex, resolution.entity, resolution.handle.raw);
+    }
+
+    Vec3 viewSetupEyeOrigin{};
+    const bool viewSetupEyeOriginAvailable = TryReadViewSetupOrigin(viewSetup, viewSetupEyeOrigin);
+    Vec3 viewSetupEyeAngles{};
+    const bool viewSetupEyeAnglesAvailable = TryReadViewSetupAngles(viewSetup, viewSetupEyeAngles);
+    if (traceFrame) {
+        TracePrintf(
+            "frame-viewsetup-pose idx=%llu originAvailable=%d anglesAvailable=%d origin=(%.3f,%.3f,%.3f) angles=(%.3f,%.3f,%.3f)",
+            frameIndex,
+            viewSetupEyeOriginAvailable ? 1 : 0,
+            viewSetupEyeAnglesAvailable ? 1 : 0,
+            viewSetupEyeOrigin.x,
+            viewSetupEyeOrigin.y,
+            viewSetupEyeOrigin.z,
+            viewSetupEyeAngles.x,
+            viewSetupEyeAngles.y,
+            viewSetupEyeAngles.z
+        );
+    }
+
     WeaponFrameBasis basis{};
     std::string failure;
-    if (!TryBuildWeaponFrameBasis(resolution.entity, basis, failure)) {
+    if (!TryBuildWeaponFrameBasis(
+            resolution.entity,
+            viewSetupEyeOriginAvailable ? &viewSetupEyeOrigin : nullptr,
+            viewSetupEyeAnglesAvailable ? &viewSetupEyeAngles : nullptr,
+            basis,
+            failure)) {
+        if (traceFrame) {
+            TracePrintf("frame-basis-failed idx=%llu reason=%s", frameIndex, failure.c_str());
+        }
+        RestoreSuppressedRenderWithViewModels();
         UpdateFailureReason(failure, false);
         return;
     }
 
-    const Vec3 baseOffset = GetBaseOffsetForHeldItem(basis.heldItemKind, config.lookMode);
+    if (traceFrame) {
+        TracePrintf(
+            "frame-basis-ok idx=%llu held=%d weapon=%u supported=%d synthetic=%d anchor=(%.3f,%.3f,%.3f)",
+            frameIndex,
+            static_cast<int>(basis.heldItemKind),
+            basis.weaponHandle.raw,
+            static_cast<int>(basis.supportedWeaponId),
+            basis.syntheticFallbackHandAnchor ? 1 : 0,
+            basis.anchorOrigin.x,
+            basis.anchorOrigin.y,
+            basis.anchorOrigin.z
+        );
+    }
+
+    const Vec3 baseOffset = GetBaseOffsetForBasis(basis, config.lookMode);
+
+    const compat::CameraOffset adjustedTrim = compat::ApplyLeftSelfieCameraOffsetAdjustment(
+        compat::CameraOffset{
+            GetCameraRightOffsetForBasis(basis, config.lookMode, baseOffset.x) + config.offset.x,
+            baseOffset.y + config.offset.y,
+            baseOffset.z + config.offset.z
+        },
+        config.lookMode == LookMode::SelfieLeft
+    );
 
     const Vec3 composedTrim{
-        GetCameraRightOffsetForBasis(basis, config.lookMode, baseOffset.x) + config.offset.x,
-        baseOffset.y + config.offset.y,
-        baseOffset.z + config.offset.z
+        adjustedTrim.right,
+        adjustedTrim.back,
+        adjustedTrim.up
     };
 
     const Vec3 cameraPosition = Add(
@@ -2328,6 +5436,7 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     }
 
     if (!TryNormalize(direction)) {
+        RestoreSuppressedRenderWithViewModels();
         UpdateFailureReason(Texts().reasonCameraDirectionDegenerate, true);
         return;
     }
@@ -2336,34 +5445,109 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     float yaw{};
     VectorToAngles(direction, pitch, yaw);
 
+    if (traceFrame) {
+        TracePrintf("frame-pre-fov idx=%llu pitch=%.3f yaw=%.3f", frameIndex, pitch, yaw);
+    }
     OverrideScopedAwpFov(viewSetup, resolution.handle, basis);
 
     auto* viewOrigin = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupOriginOffset);
     auto* viewAngles = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupAnglesOffset);
-    viewOrigin[0] = cameraPosition.x;
-    viewOrigin[1] = cameraPosition.y;
-    viewOrigin[2] = cameraPosition.z;
-    viewAngles[0] = pitch;
-    viewAngles[1] = yaw;
+    if (traceFrame) {
+        TracePrintf(
+            "frame-pre-write idx=%llu originPtr=%p anglesPtr=%p pos=(%.3f,%.3f,%.3f) ang=(%.3f,%.3f)",
+            frameIndex,
+            viewOrigin,
+            viewAngles,
+            cameraPosition.x,
+            cameraPosition.y,
+            cameraPosition.z,
+            pitch,
+            yaw
+        );
+    }
+    if (!TryWriteViewSetupPose(viewOrigin, viewAngles, cameraPosition, pitch, yaw)) {
+        const std::string reason = FormatIncompatibleBuildReason("view setup write faulted");
+        TracePrintf("frame-write-fault idx=%llu originPtr=%p anglesPtr=%p", frameIndex, viewOrigin, viewAngles);
+        RestoreSuppressedRenderWithViewModels();
+        UpdateFailureReason(reason, true);
+        SetEnabled(false);
+        return;
+    }
 
+    if (traceFrame) {
+        TracePrintf("frame-write-ok idx=%llu", frameIndex);
+    }
+
+    UpdateRenderWithViewModelsSuppression(basis, true, traceFrame, frameIndex);
     UpdateOverrideSuccess(resolution.handle);
 }
 
 bool HookSetUpView() {
-    const auto patchAddress = FindPattern(g_clientModule, kPatternSetupViewPatch);
-    if (patchAddress == 0) {
-        SetInitialized(false, Texts().reasonSetUpViewPatchSiteMissing);
+    g_runtimeCompatibility.setUpViewPatchReady = false;
+    TracePrintf(
+        "setupview-enter entity=%d split=%d schema=%d patch=%d",
+        g_runtimeCompatibility.entityAccessReady ? 1 : 0,
+        g_runtimeCompatibility.splitScreenAccessorReady ? 1 : 0,
+        g_runtimeCompatibility.schemaOffsetsReady ? 1 : 0,
+        g_runtimeCompatibility.setUpViewPatchReady ? 1 : 0
+    );
+    if (!compat::CanProbeSetUpViewHook(g_runtimeCompatibility)) {
+        TracePrintf(
+            "setupview-fail reason=precheck entity=%d split=%d",
+            g_runtimeCompatibility.entityAccessReady ? 1 : 0,
+            g_runtimeCompatibility.splitScreenAccessorReady ? 1 : 0
+        );
+        SetInitialized(false, FormatIncompatibleBuildReason("follow target entry points are not trusted"));
         return false;
     }
 
-    g_setupViewPatchAddress = reinterpret_cast<void*>(patchAddress);
-    std::memcpy(g_setupViewOriginalBytes.data(), g_setupViewPatchAddress, g_setupViewOriginalBytes.size());
+    const auto patchAddress = FindPattern(g_clientModule, kPatternSetupViewPatch);
+    if (patchAddress == 0) {
+        TracePrintf("setupview-fail reason=pattern-missing");
+        SetInitialized(false, Texts().reasonSetUpViewPatchSiteMissing);
+        return false;
+    }
+    TracePrintf("setupview-scan patch=%p", reinterpret_cast<void*>(patchAddress));
 
-    const auto helperStringAddress = patchAddress + 12 + *reinterpret_cast<std::int32_t*>(patchAddress + 8);
-    const auto helperCallTarget = patchAddress + 17 + *reinterpret_cast<std::int32_t*>(patchAddress + 13);
-    const auto returnAddress = patchAddress + g_setupViewOriginalBytes.size();
-    auto* detourStub = reinterpret_cast<std::uint8_t*>(VirtualAlloc(nullptr, 96, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    hook::SetUpViewPatchSite patchSite{};
+    std::string hookError;
+    if (!hook::DecodeSetUpViewPatchSite(reinterpret_cast<void*>(patchAddress), patchSite, &hookError)) {
+        TracePrintf("setupview-fail reason=decode error=%s", hookError.c_str());
+        SetInitialized(false, FormatIncompatibleBuildReason(hookError.c_str()));
+        return false;
+    }
+
+    g_setupViewPatchAddress = reinterpret_cast<void*>(patchSite.patchAddress);
+    g_setupViewOriginalBytes = patchSite.originalBytes;
+    if (!IsAddressReadableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.helperStringAddress))
+        || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.helperCallTarget))
+        || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.returnAddress))) {
+        TracePrintf(
+            "setupview-fail reason=site-changed helperString=%p helperCall=%p return=%p",
+            reinterpret_cast<void*>(patchSite.helperStringAddress),
+            reinterpret_cast<void*>(patchSite.helperCallTarget),
+            reinterpret_cast<void*>(patchSite.returnAddress)
+        );
+        SetInitialized(false, FormatIncompatibleBuildReason("SetUpView patch site changed"));
+        return false;
+    }
+
+    g_runtimeCompatibility.setUpViewPatchReady = true;
+    if (!compat::CanInstallSetUpViewHook(g_runtimeCompatibility)) {
+        TracePrintf(
+            "setupview-fail reason=compat-after-scan entity=%d split=%d patch=%d",
+            g_runtimeCompatibility.entityAccessReady ? 1 : 0,
+            g_runtimeCompatibility.splitScreenAccessorReady ? 1 : 0,
+            g_runtimeCompatibility.setUpViewPatchReady ? 1 : 0
+        );
+        SetInitialized(false, FormatIncompatibleBuildReason("SetUpView hook blocked by compatibility gate"));
+        return false;
+    }
+
+    auto* detourStub = reinterpret_cast<std::uint8_t*>(AllocateExecutableMemoryNearAddress(g_setupViewPatchAddress, 192));
     if (detourStub == nullptr) {
+        TracePrintf("setupview-fail reason=near-alloc patch=%p", g_setupViewPatchAddress);
+        g_runtimeCompatibility.setUpViewPatchReady = false;
         SetInitialized(false, Texts().reasonSetUpViewDetourAllocationFailed);
         return false;
     }
@@ -2371,150 +5555,54 @@ bool HookSetUpView() {
     g_setupViewDetourStub = detourStub;
 
     std::vector<std::uint8_t> stub;
-    stub.reserve(96);
-
-    auto appendByte = [&stub](std::uint8_t value) {
-        stub.push_back(value);
-    };
-
-    auto appendImmediate64 = [&stub](std::uintptr_t value) {
-        for (std::size_t index = 0; index < sizeof(value); ++index) {
-            stub.push_back(static_cast<std::uint8_t>((value >> (index * 8)) & 0xFFu));
-        }
-    };
-
-    appendByte(0xBA);
-    appendByte(0xFF);
-    appendByte(0xFF);
-    appendByte(0xFF);
-    appendByte(0xFF);
-
-    appendByte(0x48);
-    appendByte(0xB9);
-    appendImmediate64(helperStringAddress);
-
-    appendByte(0x48);
-    appendByte(0xB8);
-    appendImmediate64(helperCallTarget);
-    appendByte(0xFF);
-    appendByte(0xD0);
-
-    appendByte(0x48);
-    appendByte(0x83);
-    appendByte(0xEC);
-    appendByte(0x60);
-
-    appendByte(0x48);
-    appendByte(0x89);
-    appendByte(0x44);
-    appendByte(0x24);
-    appendByte(0x20);
-    appendByte(0x48);
-    appendByte(0x89);
-    appendByte(0x4C);
-    appendByte(0x24);
-    appendByte(0x28);
-    appendByte(0x48);
-    appendByte(0x89);
-    appendByte(0x54);
-    appendByte(0x24);
-    appendByte(0x30);
-    appendByte(0x4C);
-    appendByte(0x89);
-    appendByte(0x44);
-    appendByte(0x24);
-    appendByte(0x38);
-    appendByte(0x4C);
-    appendByte(0x89);
-    appendByte(0x4C);
-    appendByte(0x24);
-    appendByte(0x40);
-    appendByte(0x4C);
-    appendByte(0x89);
-    appendByte(0x54);
-    appendByte(0x24);
-    appendByte(0x48);
-    appendByte(0x4C);
-    appendByte(0x89);
-    appendByte(0x5C);
-    appendByte(0x24);
-    appendByte(0x50);
-
-    appendByte(0x48);
-    appendByte(0x8B);
-    appendByte(0xCE);
-    appendByte(0x48);
-    appendByte(0xB8);
-    appendImmediate64(reinterpret_cast<std::uintptr_t>(&SelfieStickSetUpView));
-    appendByte(0xFF);
-    appendByte(0xD0);
-
-    appendByte(0x4C);
-    appendByte(0x8B);
-    appendByte(0x5C);
-    appendByte(0x24);
-    appendByte(0x50);
-    appendByte(0x4C);
-    appendByte(0x8B);
-    appendByte(0x54);
-    appendByte(0x24);
-    appendByte(0x48);
-    appendByte(0x4C);
-    appendByte(0x8B);
-    appendByte(0x4C);
-    appendByte(0x24);
-    appendByte(0x40);
-    appendByte(0x4C);
-    appendByte(0x8B);
-    appendByte(0x44);
-    appendByte(0x24);
-    appendByte(0x38);
-    appendByte(0x48);
-    appendByte(0x8B);
-    appendByte(0x54);
-    appendByte(0x24);
-    appendByte(0x30);
-    appendByte(0x48);
-    appendByte(0x8B);
-    appendByte(0x4C);
-    appendByte(0x24);
-    appendByte(0x28);
-    appendByte(0x48);
-    appendByte(0x8B);
-    appendByte(0x44);
-    appendByte(0x24);
-    appendByte(0x20);
-
-    appendByte(0x48);
-    appendByte(0x83);
-    appendByte(0xC4);
-    appendByte(0x60);
-
-    appendByte(0x49);
-    appendByte(0xBB);
-    appendImmediate64(returnAddress);
-    appendByte(0x41);
-    appendByte(0xFF);
-    appendByte(0xE3);
+    if (!hook::BuildSetUpViewDetourStub(
+            reinterpret_cast<std::uintptr_t>(detourStub),
+            patchSite,
+            reinterpret_cast<std::uintptr_t>(&SelfieStickSetUpViewBridge),
+            stub,
+            &hookError)) {
+        TracePrintf("setupview-fail reason=build-detour error=%s", hookError.c_str());
+        VirtualFree(detourStub, 0, MEM_RELEASE);
+        g_setupViewDetourStub = nullptr;
+        g_runtimeCompatibility.setUpViewPatchReady = false;
+        SetInitialized(false, FormatIncompatibleBuildReason(hookError.c_str()));
+        return false;
+    }
 
     std::memcpy(detourStub, stub.data(), stub.size());
     FlushInstructionCache(GetCurrentProcess(), detourStub, stub.size());
 
-    std::array<std::uint8_t, 17> patch{
-        0x49, 0xBB,
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0x41, 0xFF, 0xE3,
-        0x90, 0x90, 0x90, 0x90
-    };
-    std::memcpy(patch.data() + 2, &g_setupViewDetourStub, sizeof(g_setupViewDetourStub));
-
-    if (!WriteProcessMemoryProtected(g_setupViewPatchAddress, patch.data(), patch.size())) {
+    std::array<std::uint8_t, hook::kSetUpViewPatchSize> patch{};
+    if (!hook::BuildSetUpViewEntryPatch(
+            patchSite.patchAddress,
+            reinterpret_cast<std::uintptr_t>(g_setupViewDetourStub),
+            patch,
+            &hookError)) {
+        TracePrintf("setupview-fail reason=build-entry error=%s", hookError.c_str());
         VirtualFree(detourStub, 0, MEM_RELEASE);
         g_setupViewDetourStub = nullptr;
+        g_runtimeCompatibility.setUpViewPatchReady = false;
+        SetInitialized(false, FormatIncompatibleBuildReason(hookError.c_str()));
+        return false;
+    }
+
+    if (!WriteProcessMemoryProtected(g_setupViewPatchAddress, patch.data(), patch.size())) {
+        TracePrintf("setupview-fail reason=patch-write gle=%lu", GetLastError());
+        VirtualFree(detourStub, 0, MEM_RELEASE);
+        g_setupViewDetourStub = nullptr;
+        g_runtimeCompatibility.setUpViewPatchReady = false;
         SetInitialized(false, Texts().reasonSetUpViewPatchFailed);
         return false;
     }
 
+    TracePrintf(
+        "setupview-ok patch=%p helperString=%p helperCall=%p return=%p stub=%p",
+        reinterpret_cast<void*>(patchSite.patchAddress),
+        reinterpret_cast<void*>(patchSite.helperStringAddress),
+        reinterpret_cast<void*>(patchSite.helperCallTarget),
+        reinterpret_cast<void*>(patchSite.returnAddress),
+        detourStub
+    );
     ConsolePrintf(Texts().logSetUpViewHookInstalled, static_cast<unsigned long long>(patchAddress - reinterpret_cast<std::uintptr_t>(g_clientModule)));
     return true;
 }
@@ -2592,6 +5680,66 @@ std::wstring GetSettingsFilePath() {
     return path;
 }
 
+std::wstring GetTraceFilePath() {
+    std::array<wchar_t, MAX_PATH> modulePath{};
+    const DWORD length = GetModuleFileNameW(g_module, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+    if (length == 0 || length >= modulePath.size()) {
+        return kTraceFileName;
+    }
+
+    std::wstring path(modulePath.data(), length);
+    const std::size_t lastSlash = path.find_last_of(L"\\/");
+    if (lastSlash == std::wstring::npos) {
+        return kTraceFileName;
+    }
+
+    path.resize(lastSlash + 1u);
+    path += kTraceFileName;
+    return path;
+}
+
+void TracePrintf(const char* format, ...) {
+    if (!g_debugOptions.traceEnabled) {
+        return;
+    }
+
+    char payload[2048]{};
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(payload, sizeof(payload), format, args);
+    va_end(args);
+
+    SYSTEMTIME systemTime{};
+    GetLocalTime(&systemTime);
+
+    char line[2304]{};
+    std::snprintf(
+        line,
+        sizeof(line),
+        "%04u-%02u-%02u %02u:%02u:%02u.%03u %s\r\n",
+        systemTime.wYear,
+        systemTime.wMonth,
+        systemTime.wDay,
+        systemTime.wHour,
+        systemTime.wMinute,
+        systemTime.wSecond,
+        systemTime.wMilliseconds,
+        payload
+    );
+
+    const std::wstring tracePath = GetTraceFilePath();
+    std::lock_guard lock(g_traceMutex);
+    HANDLE file = CreateFileW(tracePath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    DWORD written{};
+    WriteFile(file, line, static_cast<DWORD>(std::strlen(line)), &written, nullptr);
+    FlushFileBuffers(file);
+    CloseHandle(file);
+}
+
 void PersistOverlayHotkeyVirtualKey(int virtualKey) {
     wchar_t value[16]{};
     _itow_s(virtualKey, value, 10);
@@ -2619,6 +5767,32 @@ void LoadPersistedOverlayHotkeySetting() {
     std::lock_guard lock(g_stateMutex);
     g_state.overlayHotkeyVirtualKey = static_cast<int>(persistedVirtualKey);
     RefreshStatusTextLocked();
+}
+
+void LoadDebugOptions() {
+    const std::wstring settingsPath = GetSettingsFilePath();
+    g_debugOptions.traceEnabled = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyTraceEnabled, 1, settingsPath.c_str());
+    g_debugOptions.disableScopedFovOverride = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyDisableScopedFovOverride, 0, settingsPath.c_str());
+    g_debugOptions.disableGunStabilization = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyDisableGunStabilization, 0, settingsPath.c_str());
+}
+
+const char* InitStageToString(int stage) noexcept {
+    switch (stage) {
+    case 1:
+        return "overlay";
+    case 2:
+        return "interfaces";
+    case 3:
+        return "schema";
+    case 4:
+        return "entity";
+    case 5:
+        return "setupview-hook";
+    case 6:
+        return "ready";
+    default:
+        return "boot";
+    }
 }
 
 int GetConfiguredOverlayHotkeyVirtualKey() {
@@ -4276,41 +7450,80 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
-
-DWORD WINAPI InitializeSelfieStick(LPVOID) {
+DWORD InitializeSelfieStickImpl() {
     {
         std::lock_guard lock(g_stateMutex);
         RefreshStatusTextLocked();
     }
 
     LoadPersistedOverlayHotkeySetting();
+    LoadDebugOptions();
+    TracePrintf(
+        "init trace=%d disableScopedFov=%d disableGunStabilization=%d",
+        g_debugOptions.traceEnabled ? 1 : 0,
+        g_debugOptions.disableScopedFovOverride ? 1 : 0,
+        g_debugOptions.disableGunStabilization ? 1 : 0
+    );
+    TracePrintf("trace-version schema=%s build=%s", kSchemaProbeTraceVersion, kBuildTag);
 
+    g_initStage.store(1, std::memory_order_relaxed);
+    TracePrintf("init-stage stage=%d name=%s enter", 1, InitStageToString(1));
     const bool overlayUiStarted = StartOverlayUiThread();
+    TracePrintf("init-stage stage=%d name=%s result=%d", 1, InitStageToString(1), overlayUiStarted ? 1 : 0);
     if (!overlayUiStarted) {
         SetInitialized(false, Texts().reasonOverlayUiThreadCreationFailed);
         ConsolePrintf(Texts().logOverlayUiThreadCreationFailed);
     }
 
+    g_initStage.store(2, std::memory_order_relaxed);
+    TracePrintf("init-stage stage=%d name=%s enter", 2, InitStageToString(2));
     if (!LoadInterfaces()) {
+        TracePrintf("init-stage stage=%d name=%s failed reason=%s", 2, InitStageToString(2), SnapshotState().lastFailureReason.c_str());
         ConsolePrintf(Texts().logInterfaceInitializationFailed, SnapshotState().lastFailureReason.c_str());
         return 0;
     }
+    TracePrintf("init-stage stage=%d name=%s ok", 2, InitStageToString(2));
 
-    if (!ResolveSchemaOffsets()) {
-        ConsolePrintf(Texts().logSchemaInitializationFailed, SnapshotState().lastFailureReason.c_str());
-        return 0;
+    g_initStage.store(3, std::memory_order_relaxed);
+    g_schemaOffsetsResolved.store(false, std::memory_order_release);
+    g_runtimeCompatibility.schemaOffsetsReady = false;
+    g_typeScopeClassLookupVtableIndex = -1;
+    g_typeScopeClassLookupMode = TypeScopeClassLookupMode::Unknown;
+    g_findDeclaredClassByQualifiedName = nullptr;
+    g_schemaQualifiedClassLookupAddress = 0u;
+    {
+        std::lock_guard lock(g_schemaResolveMutex);
+        g_schemaResolveFailureReason.clear();
     }
+    g_lastSchemaResolveAttemptTickMs.store(0ull, std::memory_order_relaxed);
+    g_schemaResolveInProgress.store(false, std::memory_order_release);
+    const bool schemaResolveStarted = StartBackgroundSchemaResolve("InitializeSelfieStick", true);
+    TracePrintf(
+        "init-stage stage=%d name=%s deferred backgroundStarted=%d",
+        3,
+        InitStageToString(3),
+        schemaResolveStarted ? 1 : 0
+    );
 
+    g_initStage.store(4, std::memory_order_relaxed);
+    TracePrintf("init-stage stage=%d name=%s enter", 4, InitStageToString(4));
     if (!ResolveEntityAccess()) {
+        TracePrintf("init-stage stage=%d name=%s failed reason=%s", 4, InitStageToString(4), SnapshotState().lastFailureReason.c_str());
         ConsolePrintf(Texts().logEntityInitializationFailed, SnapshotState().lastFailureReason.c_str());
         return 0;
     }
+    TracePrintf("init-stage stage=%d name=%s ok", 4, InitStageToString(4));
 
+    WaitForStartupSchemaResolve("InitializeSelfieStick");
+
+    g_initStage.store(5, std::memory_order_relaxed);
+    TracePrintf("init-stage stage=%d name=%s enter", 5, InitStageToString(5));
     const bool setupViewHooked = HookSetUpView();
-    const bool frameStageHooked = HookFrameStageNotify();
+    constexpr bool frameStageHooked = false;
     SetHookFlags(setupViewHooked, frameStageHooked);
+    TracePrintf("init-stage stage=%d name=%s result=%d", 5, InitStageToString(5), setupViewHooked ? 1 : 0);
 
-    if (!setupViewHooked || !frameStageHooked) {
+    if (!setupViewHooked) {
         ConsolePrintf(Texts().logHookInstallationFailed, SnapshotState().lastFailureReason.c_str());
         return 0;
     }
@@ -4319,10 +7532,16 @@ DWORD WINAPI InitializeSelfieStick(LPVOID) {
         return 0;
     }
 
+    g_initStage.store(6, std::memory_order_relaxed);
+    TracePrintf("init-stage stage=%d name=%s ok", 6, InitStageToString(6));
     SetInitialized(true, "");
     ConsolePrintf(Texts().logBuild, kBuildTag);
     ConsolePrintf(Texts().logReady);
     return 0;
+}
+
+DWORD WINAPI InitializeSelfieStick(LPVOID) {
+    return InitializeSelfieStickImpl();
 }
 
 }

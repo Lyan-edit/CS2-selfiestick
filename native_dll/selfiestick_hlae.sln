@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "selfiestick_hlae", "selfiestick_hlae\selfiestick_hlae.vcxproj", "{CC9A723D-100E-4C49-B6EC-4C3B4690F9B2}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "selfiestick_hlae_validation", "selfiestick_hlae_validation\selfiestick_hlae_validation.vcxproj", "{44D7321E-E1B7-4E6A-95FA-B8F926C2686A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -14,6 +16,10 @@ Global
 		{CC9A723D-100E-4C49-B6EC-4C3B4690F9B2}.Debug|x64.Build.0 = Debug|x64
 		{CC9A723D-100E-4C49-B6EC-4C3B4690F9B2}.Release|x64.ActiveCfg = Release|x64
 		{CC9A723D-100E-4C49-B6EC-4C3B4690F9B2}.Release|x64.Build.0 = Release|x64
+		{44D7321E-E1B7-4E6A-95FA-B8F926C2686A}.Debug|x64.ActiveCfg = Debug|x64
+		{44D7321E-E1B7-4E6A-95FA-B8F926C2686A}.Debug|x64.Build.0 = Debug|x64
+		{44D7321E-E1B7-4E6A-95FA-B8F926C2686A}.Release|x64.ActiveCfg = Release|x64
+		{44D7321E-E1B7-4E6A-95FA-B8F926C2686A}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
