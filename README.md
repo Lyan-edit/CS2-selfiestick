@@ -5,7 +5,7 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.0`.
+Latest source/release package in this repository: `v0.3.1`.
 
 ## Supported Versions
 
@@ -104,7 +104,8 @@ Behavior:
 Prop controls:
 
 - `Prop X / Y / Z`: local prop camera offset.
-- `Pitch / Yaw / Roll`: local view angle trim.
+- `Pitch / Yaw / Roll`: local view angle trim, editable by numeric input or by the three angle sliders.
+- Angle sliders: medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders in the `-45` to `45` degree range for quick anti-clipping adjustments.
 - Recent Props: shows recent projectile candidates, validity, handle, age, and lock buttons.
 
 The prop camera uses a smoothed, predicted projectile anchor to reduce stepping and jitter across slow motion and normal demo speed.

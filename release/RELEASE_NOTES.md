@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.0 Release Notes
+# CS2 Selfiestick v0.3.1 Release Notes
 
 ## Supported Runtime
 
@@ -17,6 +17,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Fixed ImGui numeric editing for prop angle fields. Number input now accepts typed digits again.
+- Added medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders for prop camera angle trimming.
 - Added ImGui control panel.
 - Added bilingual English / Chinese DLL builds.
 - Added `Player Selfie` / `Prop Selfie` camera mode switch.
@@ -36,6 +38,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 新增内容：
 
+- 修复道具角度数字输入框无法输入数字、只能删除的问题。
+- 给道具相机 `俯仰 / 偏航 / 翻滚` 增加中等灵敏度滑轨。
 - 面板切换为 ImGui。
 - 保留英文 DLL，同时新增完整中文 DLL。
 - 新增 `人物自拍 / 道具自拍` 相机模式切换。

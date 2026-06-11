@@ -7848,6 +7848,9 @@ void RenderImGuiPlayerOffset(const RuntimeState& state) {
 }
 
 void RenderImGuiPropSelfie(const RuntimeState& state) {
+    constexpr float kPropRotationSliderMin = -45.0f;
+    constexpr float kPropRotationSliderMax = 45.0f;
+
     ImGui::Text(
         "%s: %s / %s",
         WideToUtf8(Texts().uiPropLabel).c_str(),
@@ -7864,6 +7867,35 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
     float propRotation[3]{ state.propRotation.x, state.propRotation.y, state.propRotation.z };
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::InputFloat3(WideToUtf8(Texts().uiPropRotationLabel).c_str(), propRotation, "%.3f")) {
+        SetPropRotation(Vec3{ propRotation[0], propRotation[1], propRotation[2] });
+    }
+
+    bool propRotationSliderChanged = false;
+    ImGui::SetNextItemWidth(-1.0f);
+    propRotationSliderChanged = ImGui::SliderFloat(
+        (WideToUtf8(Texts().uiPropPitchLabel) + "##PropPitchSlider").c_str(),
+        &propRotation[0],
+        kPropRotationSliderMin,
+        kPropRotationSliderMax,
+        "%.2f"
+    ) || propRotationSliderChanged;
+    ImGui::SetNextItemWidth(-1.0f);
+    propRotationSliderChanged = ImGui::SliderFloat(
+        (WideToUtf8(Texts().uiPropYawLabel) + "##PropYawSlider").c_str(),
+        &propRotation[1],
+        kPropRotationSliderMin,
+        kPropRotationSliderMax,
+        "%.2f"
+    ) || propRotationSliderChanged;
+    ImGui::SetNextItemWidth(-1.0f);
+    propRotationSliderChanged = ImGui::SliderFloat(
+        (WideToUtf8(Texts().uiPropRollLabel) + "##PropRollSlider").c_str(),
+        &propRotation[2],
+        kPropRotationSliderMin,
+        kPropRotationSliderMax,
+        "%.2f"
+    ) || propRotationSliderChanged;
+    if (propRotationSliderChanged) {
         SetPropRotation(Vec3{ propRotation[0], propRotation[1], propRotation[2] });
     }
 
@@ -9342,7 +9374,7 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
             continue;
         }
 
-        if (g_ui.overlayVisible && IsWindow(g_ui.overlayWindow) && IsDialogMessageW(g_ui.overlayWindow, &message)) {
+        if (!g_ui.imguiInitialized && g_ui.overlayVisible && IsWindow(g_ui.overlayWindow) && IsDialogMessageW(g_ui.overlayWindow, &message)) {
             continue;
         }
 

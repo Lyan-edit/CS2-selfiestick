@@ -84,7 +84,8 @@ Behavior:
 Prop controls:
 
 - `Prop X / Y / Z`: local prop camera offset
-- `Pitch / Yaw / Roll`: angle trim
+- `Pitch / Yaw / Roll`: angle trim, editable by numeric input or by sliders
+- `Pitch`, `Yaw`, `Roll` sliders: medium-sensitivity sliders from `-45` to `45` degrees for quick camera adjustment
 - `Recent Props`: candidate list with validity, handle, age, type, and lock state
 
 ## Failure States
