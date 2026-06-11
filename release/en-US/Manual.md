@@ -1,32 +1,28 @@
-# Selfiestick DLL Manual
+# CS2 Selfiestick Manual
 
-## 1. Package contents
+## Package Contents
 
-This English release folder contains only:
+This English release folder contains:
 
 - `Lyan's selfiestick.dll`
 - `Manual.md`
 - `selfiestick_bind.cfg`
 
-From this project side, **the only runtime file you actually need is `Lyan's selfiestick.dll`**.  
-`Manual.md` and `selfiestick_bind.cfg` are reference files only.
+Only the DLL is required at runtime. The manual and cfg are reference files.
 
-## 2. Required environment
+## Supported Versions
 
-You must already have:
+This package is marked for:
 
-- a working `HLAE`
-- a working `CS2`
+- HLAE: `2.190.2`
+- Counter-Strike 2: Steam app `730`, buildid `23669931`
 
-That means:
+Use it for HLAE demo/cinematic workflows only.
 
-- from this package, you only need `Lyan's selfiestick.dll`
-- from your own environment, you still need `HLAE + CS2`
+## Load The DLL
 
-## 3. Load the DLL
-
-1. Copy the `en-US` folder to any stable location.
-2. Start `HLAE`, then enter `CS2`.
+1. Copy the `en-US` folder to a stable location.
+2. Start HLAE `2.190.2`, launch CS2, and open a demo in spectator mode.
 3. Run this in the HLAE console:
 
 ```cfg
@@ -39,69 +35,66 @@ Example:
 mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 ```
 
-If loading succeeds, the console prints:
+If loading succeeds, the console prints a selfiestick ready message. Press `Ins` to open the ImGui panel.
 
-```text
-[selfiestick] ready - press Ins for panel, F8 toggle, F9 lock, F10 follow
-```
+## Hotkeys
 
-## 4. Runtime hotkeys
-
-- `Ins`: show / hide the control window by default
-- `F8`: enable / disable the selfiestick
+- `Ins`: show / hide the panel by default
+- `F8`: enable / disable Selfiestick
 - `F9`: lock the current spectator target
-- `F10`: return to follow mode
+- `F10`: return to Follow target mode
 
-Notes:
+The panel hotkey can be changed in the panel and is saved to `selfiestick.ini` next to the loaded DLL.
 
-- The control window is now a standalone movable, resizable window.
-- You can change the panel toggle key inside the window. The new key applies immediately and is saved for the next DLL load.
-- `F8 / F9 / F10` only work while the panel is hidden.
-- When the panel is visible, the panel captures input.
-- Gun-mounted views now damp muzzle shake while firing, so the selfie camera no longer jitters with each shot.
-- While following an `AWP`, scope zoom no longer changes the selfiestick camera position or FOV.
+## Player Selfie
 
-## 5. Panel controls
+Select `Player Selfie` in Camera Mode for the original player-mounted selfiestick.
 
-The panel keeps one compact page with:
+Controls:
 
-- enable / disable
-- `R / B / U` local trim
-- `SELFIE LEFT / SELFIE RIGHT / FORWARD`
-- panel hotkey remap button
-- `FOLLOW / LOCK CURRENT / CLEAR`
-- live runtime status
+- `Selfie Left`: selfie composition from the target's left side
+- `Selfie Right`: selfie composition from the target's right side
+- `Forward`: forward-facing camera mode
+- `Follow`: use the current spectator target
+- `Lock Current`: lock the current target agent
+- `Clear`: clear target lock
+- `R / B / U`: Right / Back / Up local camera trim
 
-Trim semantics:
+## Prop Selfie
 
-- `R` = Right
-- `B` = Back
-- `U` = Up
+Select `Prop Selfie` in Camera Mode to follow a projectile thrown by the current target agent.
 
-Direction semantics:
+Supported projectiles:
 
-- `SELFIE LEFT`: selfie-facing composition from the left side
-- `SELFIE RIGHT`: mirrored selfie-facing composition from the right side
-- `FORWARD`: current forward-facing mode
+- smoke
+- molotov / incendiary
+- HE grenade
+- flashbang
+- decoy
 
-## 6. Typical usage flow
+Behavior:
 
-1. Enter spectator view.
-2. Press the current panel key (`Ins` by default) to open the control window.
-3. Enable the selfiestick.
-4. Adjust `R / B / U` as needed.
-5. Switch between `SELFIE LEFT`, `SELFIE RIGHT`, and `FORWARD`.
-6. Use `FOLLOW / LOCK CURRENT / CLEAR` to manage the target.
+- The target agent is still controlled by `Follow` / `Lock Current`.
+- The prop scanner only accepts projectiles thrown or owned by the current target.
+- If there is exactly one valid flying projectile and no prop lock, it auto-locks.
+- If multiple valid projectiles exist, choose one manually from Recent Props with `LOCK`.
+- `CLEAR PROP` clears the current prop lock.
+- The camera tracks flying projectile entities only. When the projectile ends, override stops and the Runtime panel shows the reason.
 
-## 7. Failure states
+Prop controls:
 
-If the status area shows a failure reason, the DLL is reporting the exact blocking condition instead of hiding it behind fallback behavior.
+- `Prop X / Y / Z`: local prop camera offset
+- `Pitch / Yaw / Roll`: angle trim
+- `Recent Props`: candidate list with validity, handle, age, type, and lock state
 
-Common examples:
+## Failure States
 
-- `no observer target`
-- `attachment missing`
-- `target resolution failed`
-- `camera direction degenerate`
+Read the Runtime panel when the camera is blocked. Common examples:
 
-Read the `Reason` field in the panel for the exact runtime truth.
+- no observer target
+- target unresolved
+- prop not locked
+- prop ended
+- schema or SetUpView compatibility failure
+
+The DLL writes `selfiestick_trace.log` next to the loaded DLL. If you replace the DLL, fully restart HLAE and CS2 before testing again.

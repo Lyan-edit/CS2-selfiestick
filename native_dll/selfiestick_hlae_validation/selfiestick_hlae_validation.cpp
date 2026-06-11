@@ -35,8 +35,25 @@ int main() {
     using selfiestick::compat::ShouldUseViewSetupAnglesFallback;
     using selfiestick::compat::ShouldUseViewSetupEyeFallback;
     using selfiestick::compat::ShouldSuppressRenderWithViewModels;
+    using selfiestick::compat::ShouldEmitSampledTrace;
     using selfiestick::compat::ApplyLeftSelfieCameraOffsetAdjustment;
     using selfiestick::compat::CameraOffset;
+    using selfiestick::compat::CameraVector;
+    using selfiestick::compat::ClassifyPropProjectileClassName;
+    using selfiestick::compat::PropProjectileKind;
+    using selfiestick::compat::ShouldAcceptPropOwnerCandidate;
+    using selfiestick::compat::ShouldAutoLockSinglePropCandidate;
+    using selfiestick::compat::ShouldKeepManualPropLock;
+    using selfiestick::compat::TrySelectNearestPlausibleVector;
+    using selfiestick::compat::TrySelectTrustedProjectileSceneOrigin;
+    using selfiestick::compat::TrySelectDynamicProjectileOrigin;
+    using selfiestick::compat::TryBuildPropCenteredViewDirection;
+    using selfiestick::compat::TrySelectLockedProjectileOrigin;
+    using selfiestick::compat::TrySelectMovingProjectileOrigin;
+    using selfiestick::compat::MoveTowards;
+    using selfiestick::compat::ExtrapolateProjectileOrigin;
+    using selfiestick::compat::ApplyAngleTrim;
+    using selfiestick::compat::OffsetCameraVector;
     using selfiestick::schema::DetermineDeclaredClassScanLimit;
     using selfiestick::schema::DetermineExpectedProbeField;
     using selfiestick::schema::DetermineTypeScopeLookupProbeSlotLimit;
@@ -70,6 +87,256 @@ int main() {
 
     if (ClassifyEntityClassName("C_WeaponAWP") != ClientEntityKind::Unknown) {
         return ReportFailure("expected weapon class to classify as Unknown");
+    }
+
+    if (ClassifyPropProjectileClassName("C_SmokeGrenadeProjectile") != PropProjectileKind::Smoke) {
+        return ReportFailure("expected smoke projectile to classify as Smoke");
+    }
+
+    if (ClassifyPropProjectileClassName("C_MolotovProjectile") != PropProjectileKind::Fire) {
+        return ReportFailure("expected molotov projectile to classify as Fire");
+    }
+
+    if (ClassifyPropProjectileClassName("C_IncendiaryGrenadeProjectile") != PropProjectileKind::Fire) {
+        return ReportFailure("expected incendiary projectile to classify as Fire");
+    }
+
+    if (ClassifyPropProjectileClassName("C_HEGrenadeProjectile") != PropProjectileKind::Explosive) {
+        return ReportFailure("expected HE projectile to classify as Explosive");
+    }
+
+    if (ClassifyPropProjectileClassName("C_FlashbangProjectile") != PropProjectileKind::Flash) {
+        return ReportFailure("expected flashbang projectile to classify as Flash");
+    }
+
+    if (ClassifyPropProjectileClassName("C_DecoyProjectile") != PropProjectileKind::Decoy) {
+        return ReportFailure("expected decoy projectile to classify as Decoy");
+    }
+
+    if (ClassifyPropProjectileClassName("C_AK47") != PropProjectileKind::Unknown) {
+        return ReportFailure("expected weapon class to reject prop projectile classification");
+    }
+
+    if (!ShouldAcceptPropOwnerCandidate(100u, 200u, 100u)) {
+        return ReportFailure("prop owner matching should accept the target pawn handle");
+    }
+
+    if (!ShouldAcceptPropOwnerCandidate(100u, 200u, 200u)) {
+        return ReportFailure("prop owner matching should accept the target controller handle");
+    }
+
+    if (ShouldAcceptPropOwnerCandidate(100u, 200u, 300u)) {
+        return ReportFailure("prop owner matching should reject unrelated handles");
+    }
+
+    if (ShouldAcceptPropOwnerCandidate(100u, 200u, 0xFFFFFFFFu)) {
+        return ReportFailure("prop owner matching should reject invalid handles");
+    }
+
+    if (!ShouldKeepManualPropLock(true, true, 500u, 600u)) {
+        return ReportFailure("manual prop lock should keep the existing valid lock when a new candidate appears");
+    }
+
+    if (ShouldKeepManualPropLock(false, true, 500u, 600u)) {
+        return ReportFailure("manual prop lock should not keep an unlocked state");
+    }
+
+    if (ShouldKeepManualPropLock(true, false, 500u, 600u)) {
+        return ReportFailure("manual prop lock should clear when the locked prop is no longer valid");
+    }
+
+    if (!ShouldKeepManualPropLock(true, true, 500u, 500u)) {
+        return ReportFailure("manual prop lock should keep the same locked candidate");
+    }
+
+    if (!ShouldAutoLockSinglePropCandidate(false, 1u)) {
+        return ReportFailure("prop auto-lock should select the only valid candidate when no prop is locked");
+    }
+
+    if (ShouldAutoLockSinglePropCandidate(false, 0u)) {
+        return ReportFailure("prop auto-lock should not select when no valid candidates exist");
+    }
+
+    if (ShouldAutoLockSinglePropCandidate(false, 2u)) {
+        return ReportFailure("prop auto-lock should not select when multiple valid candidates exist");
+    }
+
+    if (ShouldAutoLockSinglePropCandidate(true, 1u)) {
+        return ReportFailure("prop auto-lock should not replace an existing prop lock");
+    }
+
+    const selfiestick::compat::CameraVector originCandidates[] = {
+        { 9999.0f, 9999.0f, 9999.0f },
+        { 30.0f, 0.0f, 0.0f },
+        { 10.0f, 0.0f, 0.0f }
+    };
+    selfiestick::compat::CameraVector selectedOrigin{};
+    if (!TrySelectNearestPlausibleVector(originCandidates, 3u, { 0.0f, 0.0f, 0.0f }, 128.0f, selectedOrigin)) {
+        return ReportFailure("projectile origin fallback should select a plausible nearby vector");
+    }
+    if (selectedOrigin.x != 10.0f || selectedOrigin.y != 0.0f || selectedOrigin.z != 0.0f) {
+        return ReportFailure("projectile origin fallback should select the nearest plausible vector");
+    }
+
+    const selfiestick::compat::CameraVector invalidOriginCandidates[] = {
+        { 9999.0f, 9999.0f, 9999.0f },
+        { NAN, 0.0f, 0.0f }
+    };
+    if (TrySelectNearestPlausibleVector(invalidOriginCandidates, 2u, { 0.0f, 0.0f, 0.0f }, 128.0f, selectedOrigin)) {
+        return ReportFailure("projectile origin fallback should reject non-finite or distant vectors");
+    }
+
+    const OffsetCameraVector sceneNodeOriginCandidates[] = {
+        { 0x30, { 149.248f, 0.0f, 1.0f } },
+        { 0x88, { 151.0f, -1960.0f, 56.0f } },
+        { 0xD0, { 152.0f, -1961.0f, 57.0f } }
+    };
+    OffsetCameraVector selectedSceneNodeOrigin{};
+    if (!TrySelectTrustedProjectileSceneOrigin(sceneNodeOriginCandidates, 3u, { 151.965f, -1962.597f, 56.0f }, 4096.0f, selectedSceneNodeOrigin)) {
+        return ReportFailure("projectile scene origin should select a trusted scene-node offset");
+    }
+    if (selectedSceneNodeOrigin.offset != 0xD0) {
+        return ReportFailure("projectile scene origin should prefer trusted abs-origin offset over nearer local-looking values");
+    }
+
+    const OffsetCameraVector invalidSceneNodeOriginCandidates[] = {
+        { 0x30, { 149.248f, 0.0f, 1.0f } },
+        { 0xD0, { NAN, 0.0f, 0.0f } }
+    };
+    if (TrySelectTrustedProjectileSceneOrigin(invalidSceneNodeOriginCandidates, 2u, { 151.965f, -1962.597f, 56.0f }, 4096.0f, selectedSceneNodeOrigin)) {
+        return ReportFailure("projectile scene origin should reject untrusted local-origin-only values");
+    }
+
+    const OffsetCameraVector zeroSceneNodeOriginCandidates[] = {
+        { 0xD0, { 0.0f, -0.0f, -0.0f } },
+        { 0x88, { 151.0f, -1960.0f, 56.0f } }
+    };
+    if (!TrySelectTrustedProjectileSceneOrigin(zeroSceneNodeOriginCandidates, 2u, { 151.965f, -1962.597f, 56.0f }, 4096.0f, selectedSceneNodeOrigin)) {
+        return ReportFailure("projectile scene origin should continue past a trusted-but-zero candidate");
+    }
+    if (selectedSceneNodeOrigin.offset != 0x88) {
+        return ReportFailure("projectile scene origin should reject a static map-origin value when the target is elsewhere");
+    }
+
+    const OffsetCameraVector onlyZeroSceneNodeOriginCandidates[] = {
+        { 0xD0, { 0.0f, 0.0f, 0.0f } }
+    };
+    if (TrySelectTrustedProjectileSceneOrigin(onlyZeroSceneNodeOriginCandidates, 1u, { 151.965f, -1962.597f, 56.0f }, 4096.0f, selectedSceneNodeOrigin)) {
+        return ReportFailure("projectile scene origin should not accept a static map-origin value as live projectile origin");
+    }
+
+    const OffsetCameraVector dynamicOriginCandidates[] = {
+        { 0x40, { 12.420f, -111.355f, 0.0f } },
+        { 0x88, { 0.0f, 0.0f, -1752469063335936.0f } },
+        { 0x180, { -884.0f, -2334.0f, -105.0f } },
+        { 0x220, { -2000.0f, -4000.0f, -500.0f } }
+    };
+    OffsetCameraVector selectedDynamicOrigin{};
+    if (!TrySelectDynamicProjectileOrigin(dynamicOriginCandidates, 4u, { -887.0f, -2336.0f, -105.0f }, 1536.0f, selectedDynamicOrigin)) {
+        return ReportFailure("dynamic projectile origin scan should select a plausible entity-space world vector");
+    }
+    if (selectedDynamicOrigin.offset != 0x180) {
+        return ReportFailure("dynamic projectile origin scan should prefer the nearest plausible world vector");
+    }
+
+    const OffsetCameraVector invalidDynamicOriginCandidates[] = {
+        { 0x40, { 12.420f, -111.355f, 0.0f } },
+        { 0x80, { 0.0f, 0.0f, 0.0f } },
+        { 0x88, { 0.0f, 0.0f, -1752469063335936.0f } }
+    };
+    if (TrySelectDynamicProjectileOrigin(invalidDynamicOriginCandidates, 3u, { -887.0f, -2336.0f, -105.0f }, 1536.0f, selectedDynamicOrigin)) {
+        return ReportFailure("dynamic projectile origin scan should reject angle, zero, and non-world candidates");
+    }
+
+    const OffsetCameraVector movingOriginCandidates[] = {
+        { 0x11A0, { -882.869f, -2332.305f, -98.567f } },
+        { 0x1200, { -840.0f, -2318.0f, -105.0f } }
+    };
+    const OffsetCameraVector previousMovingOriginCandidates[] = {
+        { 0x11A0, { -882.869f, -2332.305f, -98.567f } },
+        { 0x1200, { -870.0f, -2330.0f, -102.0f } }
+    };
+    if (!TrySelectMovingProjectileOrigin(
+            movingOriginCandidates,
+            2u,
+            previousMovingOriginCandidates,
+            2u,
+            { -835.0f, -2316.0f, -108.0f },
+            1536.0f,
+            0.5f,
+            512.0f,
+            selectedDynamicOrigin)) {
+        return ReportFailure("moving projectile origin scan should select a moving world vector");
+    }
+    if (selectedDynamicOrigin.offset != 0x1200) {
+        return ReportFailure("moving projectile origin scan should prefer moving current-position fields over static initial-position fields");
+    }
+
+    const OffsetCameraVector lockedOriginCandidates[] = {
+        { 0x11A0, { -884.0f, -2334.0f, -105.0f } },
+        { 0x11DC, { -840.0f, -2318.0f, -101.0f } }
+    };
+    if (!TrySelectLockedProjectileOrigin(
+            lockedOriginCandidates,
+            2u,
+            0x11DC,
+            { -835.0f, -2316.0f, -108.0f },
+            1536.0f,
+            selectedDynamicOrigin)) {
+        return ReportFailure("locked projectile origin scan should keep using the locked live offset");
+    }
+    if (selectedDynamicOrigin.offset != 0x11DC) {
+        return ReportFailure("locked projectile origin scan should not switch to another plausible offset");
+    }
+
+    const auto moved = MoveTowards({ 0.0f, 0.0f, 0.0f }, { 10.0f, 0.0f, 0.0f }, 3.0f);
+    if (moved.x != 3.0f || moved.y != 0.0f || moved.z != 0.0f) {
+        return ReportFailure("MoveTowards should advance by the capped distance");
+    }
+
+    const auto snappedMove = MoveTowards({ 0.0f, 0.0f, 0.0f }, { 2.0f, 0.0f, 0.0f }, 3.0f);
+    if (snappedMove.x != 2.0f || snappedMove.y != 0.0f || snappedMove.z != 0.0f) {
+        return ReportFailure("MoveTowards should snap when the target is within the cap");
+    }
+
+    const auto extrapolatedOrigin = ExtrapolateProjectileOrigin({ 10.0f, 0.0f, 0.0f }, { 100.0f, 0.0f, -20.0f }, 0.05f, 0.10f);
+    if (extrapolatedOrigin.x != 15.0f || extrapolatedOrigin.y != 0.0f || extrapolatedOrigin.z != -1.0f) {
+        return ReportFailure("projectile origin extrapolation should advance by velocity over elapsed time");
+    }
+
+    const auto clampedExtrapolatedOrigin = ExtrapolateProjectileOrigin({ 10.0f, 0.0f, 0.0f }, { 100.0f, 0.0f, 0.0f }, 0.25f, 0.10f);
+    if (clampedExtrapolatedOrigin.x != 20.0f || clampedExtrapolatedOrigin.y != 0.0f || clampedExtrapolatedOrigin.z != 0.0f) {
+        return ReportFailure("projectile origin extrapolation should clamp excessive elapsed time");
+    }
+
+    if (!ShouldEmitSampledTrace(1u, 3u, 10u) || !ShouldEmitSampledTrace(3u, 3u, 10u)) {
+        return ReportFailure("sampled trace should emit initial frames");
+    }
+    if (ShouldEmitSampledTrace(4u, 3u, 10u)) {
+        return ReportFailure("sampled trace should suppress ordinary frames after the initial window");
+    }
+    if (!ShouldEmitSampledTrace(10u, 3u, 10u) || ShouldEmitSampledTrace(11u, 3u, 10u)) {
+        return ReportFailure("sampled trace should emit only interval frames after the initial window");
+    }
+
+    const auto angleTrim = ApplyAngleTrim({ 10.0f, 20.0f, 30.0f }, { 1.0f, -2.0f, 3.0f });
+    if (angleTrim.x != 11.0f || angleTrim.y != 18.0f || angleTrim.z != 33.0f) {
+        return ReportFailure("ApplyAngleTrim should add local pitch/yaw/roll trim");
+    }
+
+    CameraVector propCenteredDirection{};
+    if (!TryBuildPropCenteredViewDirection({ 0.0f, -18.0f, 6.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, propCenteredDirection)) {
+        return ReportFailure("prop centered camera direction should point from camera to projectile center");
+    }
+    if (propCenteredDirection.y <= 0.9f || propCenteredDirection.z >= -0.2f) {
+        return ReportFailure("prop centered camera direction should look at the projectile instead of straight back to the thrower");
+    }
+
+    if (!TryBuildPropCenteredViewDirection({ 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, propCenteredDirection)) {
+        return ReportFailure("prop centered camera direction should use fallback when camera sits on projectile center");
+    }
+    if (propCenteredDirection.x != 0.0f || propCenteredDirection.y != 1.0f || propCenteredDirection.z != 0.0f) {
+        return ReportFailure("prop centered camera direction should normalize the fallback direction");
     }
 
     if (!ShouldUseObserverPawnAsFollowTarget(ClientEntityKind::PlayerPawn, false, true, true)) {

@@ -1,104 +1,141 @@
 # CS2 Selfiestick
 
-CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It adds a small in-game control panel and camera override for cinematic demo work, including left/right selfie views, forward view, target locking, and local camera trim.
+CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides an ImGui control panel and two camera modes for cinematic demo work:
 
-Latest release: [v0.2.0](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.2.0)
+- Player Selfie: the original player-mounted selfiestick.
+- Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-## What It Does
+Latest source/release package in this repository: `v0.3.0`.
 
-- Works as an HLAE-loaded DLL inside CS2.
-- Provides a movable control panel, opened with `Ins` by default.
-- Supports `Selfie Left`, `Selfie Right`, and `Forward` view modes.
-- Supports `Follow`, `Lock Current`, and `Clear` target control.
-- Provides local camera trim through `R / B / U`.
-- Keeps a debug trace in `selfiestick_trace.log` next to the loaded DLL.
-- Includes English and Chinese DLL builds.
-- Current build trace marker: `schema-probe-v20-left-selfie-offset-tune`.
+## Supported Versions
+
+This build is marked for:
+
+- HLAE: `2.190.2`
+- Counter-Strike 2: Steam app `730`, buildid `23669931`
+- CS2 app manifest timestamp used locally: `2026-06-11 08:24:56 +08:00`
+
+CS2 and HLAE update often. If Valve or HLAE changes schema, entity layout, or `SetUpView`, load may fail by design and the panel will show a reason instead of silently using an unsafe fallback.
 
 ## Download
 
-Download the latest DLLs from GitHub Releases:
-
-- English: `Lyan-selfiestick-en-US.dll`
-- Chinese: `Lyan-CS2-selfiestick-zh-CN.dll`
-
-Release page:
-
-```text
-https://github.com/Lyan-edit/CS2-selfiestick/releases/latest
-```
-
-The repository also tracks the current release DLLs here:
+The repository tracks current release DLLs here:
 
 ```text
 release/en-US/Lyan's selfiestick.dll
 release/zh-CN/Lyan_CS2自拍杆.dll
 ```
 
+The same current DLLs are also built in:
+
+```text
+bin/selfiestick_hlae_en-US.dll
+bin/selfiestick_hlae_zh-CN.dll
+```
+
 ## Quick Start
 
-1. Start HLAE and launch CS2.
-2. Open or play a demo in a spectator context.
+1. Start HLAE `2.190.2` and launch CS2.
+2. Open or play a demo in spectator mode.
 3. Load one DLL from the HLAE console.
+4. Press `Ins` to open the panel.
+5. Press `F8` or click the panel button to enable the camera.
 
-English DLL example:
-
-```cfg
-mirv_loadlibrary "D:\tools\selfiestick\Lyan-selfiestick-en-US.dll"
-```
-
-Chinese DLL example:
+English DLL:
 
 ```cfg
-mirv_loadlibrary "D:\tools\selfiestick\Lyan-CS2-selfiestick-zh-CN.dll"
+mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 ```
 
-After loading, open the panel with `Ins`, then enable Selfiestick from the panel or with `F8`.
+Chinese DLL:
+
+```cfg
+mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
+```
 
 ## Hotkeys
 
 | Key | Action |
 | --- | --- |
-| `Ins` | Show or hide the control panel |
+| `Ins` | Show or hide the ImGui panel |
 | `F8` | Enable or disable Selfiestick |
 | `F9` | Lock the current spectator target |
-| `F10` | Return to follow mode |
+| `F10` | Return target mode to Follow |
 
-`Ins` can be changed in the panel. The setting is saved to `selfiestick.ini` next to the loaded DLL.
+The panel hotkey can be changed inside the panel. The setting is saved to `selfiestick.ini` next to the loaded DLL.
 
-## Camera Controls
+## Player Selfie Mode
 
-The panel exposes three local trim values:
+Use `Camera Mode -> Player Selfie` for the original selfiestick behavior.
 
-- `R`: right offset in the camera basis
-- `B`: backward offset in the camera basis
-- `U`: upward offset in the camera basis
+Controls:
 
-The default built-in framing is applied first; panel values are trim values on top of that framing.
+- `Selfie Left`: selfie-facing composition from the target's left side.
+- `Selfie Right`: selfie-facing composition from the target's right side.
+- `Forward`: forward-facing camera mode.
+- `Follow`: use the current spectator target each frame.
+- `Lock Current`: lock the current target agent.
+- `Clear`: clear the locked target.
+- `R / B / U`: local trim for Right / Back / Up.
 
-The v0.2.0 build includes the latest left-side selfie tuning:
+The built-in player framing is applied first. `R / B / U` are extra local trim values on top of that framing.
 
-- left selfie `R`: original value + 15
-- left selfie `B`: original value + 10
-- left selfie `U`: unchanged
+## Prop Selfie Mode
 
-## Current Compatibility
+Use `Camera Mode -> Prop Selfie` to follow projectiles thrown by the current target agent.
 
-This project is maintained against the current CS2/HLAE demo workflow. Recent CS2 updates changed schema and view setup behavior, so the DLL now includes compatibility probing and fallback logic for:
+Supported projectile types:
 
-- schema field discovery
-- SetUpView hook discovery
-- spectator follow target resolution
-- attachment-unavailable fallback basis
-- viewmodel suppression during active camera override
+- smoke
+- molotov / incendiary
+- HE grenade
+- flashbang
+- decoy
 
-If the UI is red or the camera does not override, check `selfiestick_trace.log`. The first lines should include:
+Behavior:
+
+- The target agent still comes from the same `Follow` / `Lock Current` logic as Player Selfie.
+- The DLL scans only projectiles owned/thrown by that target pawn or controller.
+- If exactly one valid flying projectile exists and no prop is locked, the DLL auto-locks it.
+- If multiple valid projectiles exist, it does not auto-switch. Use `LOCK` on the desired candidate.
+- `CLEAR PROP` clears the current prop lock. If exactly one valid prop still exists on the next frame, it can auto-lock again.
+- Tracking is only for flying projectile entities. When the projectile ends or disappears, the prop camera stops overriding and reports the reason.
+
+Prop controls:
+
+- `Prop X / Y / Z`: local prop camera offset.
+- `Pitch / Yaw / Roll`: local view angle trim.
+- Recent Props: shows recent projectile candidates, validity, handle, age, and lock buttons.
+
+The prop camera uses a smoothed, predicted projectile anchor to reduce stepping and jitter across slow motion and normal demo speed.
+
+## Status And Debugging
+
+The Runtime panel shows:
+
+- enabled state
+- camera mode
+- look mode
+- panel hotkey
+- target mode
+- locked/current target handles
+- prop lock and candidate list
+- last override result
+- failure reason
+
+Debug trace is written next to the loaded DLL:
+
+```text
+selfiestick_trace.log
+```
+
+The current trace marker is:
 
 ```text
 schema-probe-v20-left-selfie-offset-tune
 ```
 
-If the trace marker is older, HLAE/CS2 is still loading an old DLL.
+If the marker is older, HLAE/CS2 is loading an old DLL. Fully restart HLAE and CS2 after replacing DLLs because Windows keeps loaded DLLs inside the process.
 
 ## Build From Source
 
@@ -108,42 +145,39 @@ Requirements:
 - MSVC C++ toolchain
 - Windows SDK
 
-Main solution:
+Native solution:
 
 ```text
 native_dll/selfiestick_hlae.sln
 ```
 
-Build script:
-
-```bat
-build_dll.bat
-```
-
-The validation project is included in the solution:
+Validation executable:
 
 ```text
 native_dll/selfiestick_hlae_validation/
 ```
 
-It checks the compatibility gate, schema probing helpers, SetUpView patch helpers, viewmodel suppression conditions, and the current left selfie offset rule.
+The validation project checks compatibility gates, schema helpers, SetUpView patch helpers, prop projectile classification, owner matching, auto-lock policy, prop camera math, and camera smoothing helpers.
+
+Do not run `npm run build` during agent sessions for this repository. The native DLL flow is independent of the Next.js app guidance.
 
 ## Repository Layout
 
 ```text
 native_dll/selfiestick_hlae/             Main DLL source and Visual Studio project
-native_dll/selfiestick_hlae_validation/  Lightweight validation executable
+native_dll/selfiestick_hlae_validation/  Lightweight native validation executable
+native_dll/third_party/imgui/            Vendored Dear ImGui sources used by the DLL panel
 release/en-US/                           English release DLL and manual
 release/zh-CN/                           Chinese release DLL and manual
-使用说明.md                              Chinese development and usage notes
+bin/                                     Local build outputs
 selfiestick_bind.cfg                     Hotkey reference
 ```
 
-## Notes
+## Safety Notes
 
-- This DLL is intended for HLAE/demo/cinematic workflows.
-- It is not a gameplay cheat and is not intended for matchmaking or anti-cheat protected live play.
-- Fully restart HLAE/CS2 after replacing the DLL; Windows will otherwise keep the old DLL loaded in the process.
+- This DLL is intended for HLAE demo and cinematic workflows.
+- It is not intended for matchmaking, live play, or anti-cheat protected servers.
+- Joining VAC-protected servers with HLAE or injected tools can be unsafe.
 
 ## License
 
