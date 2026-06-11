@@ -37,6 +37,12 @@ mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 
 If loading succeeds, the console prints a selfiestick ready message. Press `Ins` to open the ImGui panel.
 
+Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
+
+```cfg
+demo_timescale 0.1
+```
+
 ## Hotkeys
 
 - `Ins`: show / hide the panel by default
@@ -58,11 +64,16 @@ Controls:
 - `Follow`: use the current spectator target
 - `Lock Current`: lock the current target agent
 - `Clear`: clear target lock
-- `R / B / U`: Right / Back / Up local camera trim
+- `Player R / B / U`: Right / Back / Up local camera trim, editable by numeric input or by the labeled `RIGHT`, `BACK`, and `UP` sliders
+- `Player Pitch / Yaw / Roll`: local angle trim, editable by numeric input or by the labeled `PITCH`, `YAW`, and `ROLL` sliders
+
+Player angle trim is applied after the normal Selfie Left, Selfie Right, or Forward view is calculated.
 
 ## Prop Selfie
 
 Select `Prop Selfie` in Camera Mode to follow a projectile thrown by the current target agent.
+
+Recommended workflow: set demo playback to `0.1x`, lock or follow the target agent, wait for the projectile candidate to appear, use auto-lock for a single projectile or `LOCK` for one candidate, then tune `X / Y / Z` and `Pitch / Yaw / Roll`. After framing is stable, raise demo speed as needed.
 
 Supported projectiles:
 
@@ -84,7 +95,8 @@ Behavior:
 Prop controls:
 
 - `Prop X / Y / Z`: local prop camera offset
-- `Pitch / Yaw / Roll`: angle trim, editable by numeric input or by sliders
+- `X`, `Y`, `Z` sliders: medium-sensitivity position sliders from `-64` to `64`
+- `Pitch / Yaw / Roll`: angle trim, editable by numeric input or by labeled sliders
 - `Pitch`, `Yaw`, `Roll` sliders: medium-sensitivity sliders from `-45` to `45` degrees for quick camera adjustment
 - `Recent Props`: candidate list with validity, handle, age, type, and lock state
 

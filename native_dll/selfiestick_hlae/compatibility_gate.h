@@ -104,6 +104,7 @@ CameraVector ExtrapolateProjectileOrigin(
     float maxElapsedSeconds
 ) noexcept;
 CameraVector ApplyAngleTrim(CameraVector baseAngles, CameraVector trim) noexcept;
+CameraVector ApplyPlayerSelfieAngleTrim(CameraVector baseAngles, CameraVector playerRotation) noexcept;
 bool TryBuildPropCenteredViewDirection(
     CameraVector cameraPosition,
     CameraVector propOrigin,

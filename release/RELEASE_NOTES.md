@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.1 Release Notes
+# CS2 Selfiestick v0.3.2 Release Notes
 
 ## Supported Runtime
 
@@ -17,6 +17,11 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Documented the recommended Prop Selfie workflow: tune projectile camera shots at `0.1x` demo playback speed for the smoothest setup and centering.
+- Added full six-parameter ImGui controls for Player Selfie: `R / B / U` position trim plus `Pitch / Yaw / Roll` angle trim.
+- Added labeled Player Selfie sliders for `RIGHT`, `BACK`, `UP`, `PITCH`, `YAW`, and `ROLL`.
+- Added labeled Prop Selfie position sliders for `X`, `Y`, and `Z`; prop angle sliders remain available for `Pitch`, `Yaw`, and `Roll`.
+- Added persistent `PlayerPitch`, `PlayerYaw`, and `PlayerRoll` settings in `selfiestick.ini`.
 - Fixed ImGui numeric editing for prop angle fields. Number input now accepts typed digits again.
 - Added medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders for prop camera angle trimming.
 - Added ImGui control panel.
@@ -38,6 +43,11 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 新增内容：
 
+- 文档新增推荐使用方法：道具自拍建议先把 demo 调到 `0.1x` 倍速，再锁定道具并调节构图，最适合保持快速道具居中。
+- 人物自拍新增完整六参数 ImGui 控制：`右 / 后 / 上` 位置微调，加 `俯仰 / 偏航 / 翻滚` 角度微调。
+- 人物自拍新增标注清楚的 `右`、`后`、`上`、`俯仰`、`偏航`、`翻滚` 六条滑轨。
+- 道具自拍补齐 `X`、`Y`、`Z` 位置滑轨，道具角度 `俯仰 / 偏航 / 翻滚` 滑轨继续保留。
+- `selfiestick.ini` 新增 `PlayerPitch`、`PlayerYaw`、`PlayerRoll` 持久化键。
 - 修复道具角度数字输入框无法输入数字、只能删除的问题。
 - 给道具相机 `俯仰 / 偏航 / 翻滚` 增加中等灵敏度滑轨。
 - 面板切换为 ImGui。

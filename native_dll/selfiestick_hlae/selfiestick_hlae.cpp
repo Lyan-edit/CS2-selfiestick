@@ -82,6 +82,9 @@ constexpr wchar_t kSettingsKeyPropPitch[] = L"PropPitch";
 constexpr wchar_t kSettingsKeyPropYaw[] = L"PropYaw";
 constexpr wchar_t kSettingsKeyPropRoll[] = L"PropRoll";
 constexpr wchar_t kSettingsKeyPropFollowSpeed[] = L"PropFollowSpeed";
+constexpr wchar_t kSettingsKeyPlayerPitch[] = L"PlayerPitch";
+constexpr wchar_t kSettingsKeyPlayerYaw[] = L"PlayerYaw";
+constexpr wchar_t kSettingsKeyPlayerRoll[] = L"PlayerRoll";
 constexpr wchar_t kSettingsSectionDebug[] = L"Debug";
 constexpr wchar_t kSettingsKeyTraceEnabled[] = L"TraceEnabled";
 constexpr wchar_t kSettingsKeyDisableScopedFovOverride[] = L"DisableScopedFovOverride";
@@ -383,6 +386,14 @@ struct LocalizedText {
     const wchar_t* uiCameraPlayer;
     const wchar_t* uiCameraProp;
     const wchar_t* uiPlayerOffsetSection;
+    const wchar_t* uiPlayerOffsetLabel;
+    const wchar_t* uiPlayerRotationLabel;
+    const wchar_t* uiPlayerRightLabel;
+    const wchar_t* uiPlayerBackLabel;
+    const wchar_t* uiPlayerUpLabel;
+    const wchar_t* uiPlayerPitchLabel;
+    const wchar_t* uiPlayerYawLabel;
+    const wchar_t* uiPlayerRollLabel;
     const wchar_t* uiPropLabel;
     const wchar_t* uiPropOffsetLabel;
     const wchar_t* uiPropRotationLabel;
@@ -398,6 +409,9 @@ struct LocalizedText {
     const wchar_t* uiPropCandidatesLabel;
     const wchar_t* uiPropHandleLabel;
     const wchar_t* uiPropAgeLabel;
+    const wchar_t* uiPropXLabel;
+    const wchar_t* uiPropYLabel;
+    const wchar_t* uiPropZLabel;
     const wchar_t* uiPropPitchLabel;
     const wchar_t* uiPropYawLabel;
     const wchar_t* uiPropRollLabel;
@@ -536,6 +550,14 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiCameraPlayer = L"PLAYER",
     .uiCameraProp = L"PROP",
     .uiPlayerOffsetSection = L"Player Selfie Offset",
+    .uiPlayerOffsetLabel = L"Player R / B / U",
+    .uiPlayerRotationLabel = L"Player Pitch / Yaw / Roll",
+    .uiPlayerRightLabel = L"RIGHT",
+    .uiPlayerBackLabel = L"BACK",
+    .uiPlayerUpLabel = L"UP",
+    .uiPlayerPitchLabel = L"PITCH",
+    .uiPlayerYawLabel = L"YAW",
+    .uiPlayerRollLabel = L"ROLL",
     .uiPropLabel = L"Prop",
     .uiPropOffsetLabel = L"Prop X / Y / Z",
     .uiPropRotationLabel = L"Pitch / Yaw / Roll",
@@ -551,6 +573,9 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiPropCandidatesLabel = L"Prop candidates: ",
     .uiPropHandleLabel = L"handle",
     .uiPropAgeLabel = L"age",
+    .uiPropXLabel = L"X",
+    .uiPropYLabel = L"Y",
+    .uiPropZLabel = L"Z",
     .uiPropPitchLabel = L"PITCH",
     .uiPropYawLabel = L"YAW",
     .uiPropRollLabel = L"ROLL",
@@ -689,6 +714,14 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiCameraPlayer = L"人物自拍",
     .uiCameraProp = L"道具自拍",
     .uiPlayerOffsetSection = L"人物自拍偏移",
+    .uiPlayerOffsetLabel = L"人物 右 / 后 / 上",
+    .uiPlayerRotationLabel = L"人物 俯仰 / 偏航 / 翻滚",
+    .uiPlayerRightLabel = L"右",
+    .uiPlayerBackLabel = L"后",
+    .uiPlayerUpLabel = L"上",
+    .uiPlayerPitchLabel = L"俯仰",
+    .uiPlayerYawLabel = L"偏航",
+    .uiPlayerRollLabel = L"翻滚",
     .uiPropLabel = L"道具",
     .uiPropOffsetLabel = L"道具 X / Y / Z",
     .uiPropRotationLabel = L"俯仰 / 偏航 / 翻滚",
@@ -704,6 +737,9 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiPropCandidatesLabel = L"道具候选: ",
     .uiPropHandleLabel = L"句柄",
     .uiPropAgeLabel = L"帧龄",
+    .uiPropXLabel = L"X",
+    .uiPropYLabel = L"Y",
+    .uiPropZLabel = L"Z",
     .uiPropPitchLabel = L"俯仰",
     .uiPropYawLabel = L"偏航",
     .uiPropRollLabel = L"翻滚",
@@ -783,6 +819,7 @@ struct RuntimeState {
     TargetMode targetMode{TargetMode::Follow};
     int overlayHotkeyVirtualKey{kOverlayHotkeyVirtualKey};
     Vec3 offset{0.0f, 0.0f, 0.0f};
+    Vec3 playerRotation{0.0f, 0.0f, 0.0f};
     Vec3 propOffset{kDefaultPropOffsetX, kDefaultPropOffsetY, kDefaultPropOffsetZ};
     Vec3 propRotation{0.0f, 0.0f, 0.0f};
     float propFollowSpeed{kDefaultPropFollowSpeed};
@@ -808,6 +845,7 @@ struct OverrideConfig {
     LookMode lookMode{LookMode::SelfieRight};
     TargetMode targetMode{TargetMode::Follow};
     Vec3 offset{};
+    Vec3 playerRotation{};
     Vec3 propOffset{};
     Vec3 propRotation{};
     float propFollowSpeed{kDefaultPropFollowSpeed};
@@ -1615,6 +1653,7 @@ void RefreshStatusTextLocked() {
         << " look=" << LookModeToString(g_state.lookMode)
         << " targetMode=" << TargetModeToString(g_state.targetMode)
         << " trimRBU=(" << FormatFloat(g_state.offset.x) << "," << FormatFloat(g_state.offset.y) << "," << FormatFloat(g_state.offset.z) << ")"
+        << " playerPYR=(" << FormatFloat(g_state.playerRotation.x) << "," << FormatFloat(g_state.playerRotation.y) << "," << FormatFloat(g_state.playerRotation.z) << ")"
         << " propXYZ=(" << FormatFloat(g_state.propOffset.x) << "," << FormatFloat(g_state.propOffset.y) << "," << FormatFloat(g_state.propOffset.z) << ")"
         << " propPYR=(" << FormatFloat(g_state.propRotation.x) << "," << FormatFloat(g_state.propRotation.y) << "," << FormatFloat(g_state.propRotation.z) << ")"
         << " lockedHandle=";
@@ -1750,6 +1789,18 @@ void SetOffset(const Vec3& offset) {
     std::lock_guard lock(g_stateMutex);
     g_state.offset = offset;
     RefreshStatusTextLocked();
+    MarkOverlayDirty();
+}
+
+void SetPlayerRotation(const Vec3& rotation) {
+    RuntimeState snapshot{};
+    {
+        std::lock_guard lock(g_stateMutex);
+        g_state.playerRotation = rotation;
+        RefreshStatusTextLocked();
+        snapshot = g_state;
+    }
+    PersistCameraSettingsSnapshot(snapshot);
     MarkOverlayDirty();
 }
 
@@ -6439,6 +6490,7 @@ OverrideConfig GetOverrideConfig() {
         g_state.lookMode,
         g_state.targetMode,
         g_state.offset,
+        g_state.playerRotation,
         g_state.propOffset,
         g_state.propRotation,
         g_state.propFollowSpeed,
@@ -6684,9 +6736,21 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     float pitch{};
     float yaw{};
     VectorToAngles(direction, pitch, yaw);
+    const auto playerAngles = compat::ApplyPlayerSelfieAngleTrim(
+        compat::CameraVector{ pitch, yaw, 0.0f },
+        compat::CameraVector{ config.playerRotation.x, config.playerRotation.y, config.playerRotation.z }
+    );
 
     if (traceFrame) {
-        TracePrintf("frame-pre-fov idx=%llu pitch=%.3f yaw=%.3f", frameIndex, pitch, yaw);
+        TracePrintf(
+            "frame-pre-fov idx=%llu pitch=%.3f yaw=%.3f playerTrim=(%.3f,%.3f,%.3f)",
+            frameIndex,
+            playerAngles.x,
+            playerAngles.y,
+            config.playerRotation.x,
+            config.playerRotation.y,
+            config.playerRotation.z
+        );
     }
     OverrideScopedAwpFov(viewSetup, resolution.handle, basis);
 
@@ -6694,18 +6758,19 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     auto* viewAngles = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupAnglesOffset);
     if (traceFrame) {
         TracePrintf(
-            "frame-pre-write idx=%llu originPtr=%p anglesPtr=%p pos=(%.3f,%.3f,%.3f) ang=(%.3f,%.3f)",
+            "frame-pre-write idx=%llu originPtr=%p anglesPtr=%p pos=(%.3f,%.3f,%.3f) ang=(%.3f,%.3f,%.3f)",
             frameIndex,
             viewOrigin,
             viewAngles,
             cameraPosition.x,
             cameraPosition.y,
             cameraPosition.z,
-            pitch,
-            yaw
+            playerAngles.x,
+            playerAngles.y,
+            playerAngles.z
         );
     }
-    if (!TryWriteViewSetupPose(viewOrigin, viewAngles, cameraPosition, pitch, yaw)) {
+    if (!TryWriteViewSetupPose(viewOrigin, viewAngles, cameraPosition, playerAngles.x, playerAngles.y, playerAngles.z)) {
         const std::string reason = FormatIncompatibleBuildReason("view setup write faulted");
         TracePrintf("frame-write-fault idx=%llu originPtr=%p anglesPtr=%p", frameIndex, viewOrigin, viewAngles);
         RestoreSuppressedRenderWithViewModels();
@@ -6974,6 +7039,9 @@ void PersistCameraSettingsSnapshot(const RuntimeState& state) {
     WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPropYaw, state.propRotation.y);
     WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPropRoll, state.propRotation.z);
     WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPropFollowSpeed, state.propFollowSpeed);
+    WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerPitch, state.playerRotation.x);
+    WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerYaw, state.playerRotation.y);
+    WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerRoll, state.playerRotation.z);
 }
 
 void TracePrintf(const char* format, ...) {
@@ -7077,6 +7145,11 @@ void LoadPersistedCameraSettings() {
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropPitch, 0.0f),
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropYaw, 0.0f),
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropRoll, 0.0f)
+        };
+        g_state.playerRotation = Vec3{
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerPitch, 0.0f),
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerYaw, 0.0f),
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerRoll, 0.0f)
         };
         g_state.propFollowSpeed = ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropFollowSpeed, kDefaultPropFollowSpeed);
         if (g_state.propFollowSpeed <= 0.0f || !std::isfinite(g_state.propFollowSpeed)) {
@@ -7409,6 +7482,15 @@ std::wstring BuildOverlayStatusText(const RuntimeState& state) {
     AppendFormattedFloatToWide(result, state.offset.z);
     AppendWideToWide(result, L"\r\n");
 
+    AppendWideToWide(result, Texts().uiPlayerRotationLabel);
+    AppendWideToWide(result, L": ");
+    AppendFormattedFloatToWide(result, state.playerRotation.x);
+    AppendWideToWide(result, L" / ");
+    AppendFormattedFloatToWide(result, state.playerRotation.y);
+    AppendWideToWide(result, L" / ");
+    AppendFormattedFloatToWide(result, state.playerRotation.z);
+    AppendWideToWide(result, L"\r\n");
+
     AppendWideToWide(result, Texts().uiPropLockLabel);
     AppendWideToWide(result, HandleToWide(state.lockedPropHandle));
     AppendWideToWide(result, L" / ");
@@ -7504,6 +7586,9 @@ bool OverlayStateAffectsView(const RuntimeState& left, const RuntimeState& right
         && left.offset.x == right.offset.x
         && left.offset.y == right.offset.y
         && left.offset.z == right.offset.z
+        && left.playerRotation.x == right.playerRotation.x
+        && left.playerRotation.y == right.playerRotation.y
+        && left.playerRotation.z == right.playerRotation.z
         && left.propOffset.x == right.propOffset.x
         && left.propOffset.y == right.propOffset.y
         && left.propOffset.z == right.propOffset.z
@@ -7538,7 +7623,10 @@ void SyncOverlayFromState(bool force = false) {
     const bool offsetChanged = force || !hasLastRenderedState
         || g_ui.lastRenderedState.offset.x != state.offset.x
         || g_ui.lastRenderedState.offset.y != state.offset.y
-        || g_ui.lastRenderedState.offset.z != state.offset.z;
+        || g_ui.lastRenderedState.offset.z != state.offset.z
+        || g_ui.lastRenderedState.playerRotation.x != state.playerRotation.x
+        || g_ui.lastRenderedState.playerRotation.y != state.playerRotation.y
+        || g_ui.lastRenderedState.playerRotation.z != state.playerRotation.z;
     const bool propEditsChanged = force || !hasLastRenderedState
         || g_ui.lastRenderedState.propOffset.x != state.propOffset.x
         || g_ui.lastRenderedState.propOffset.y != state.propOffset.y
@@ -7808,6 +7896,18 @@ bool ImGuiModeButton(const char* label, bool active, const ImVec2& size = ImVec2
     return clicked;
 }
 
+bool ImGuiFullWidthSliderFloat(const wchar_t* label, const char* id, float* value, float minValue, float maxValue) {
+    constexpr float kSliderLabelWidth = 74.0f;
+    const std::string labelUtf8 = WideToUtf8(label);
+    const float rowStartX = ImGui::GetCursorPosX();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(labelUtf8.c_str());
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(rowStartX + kSliderLabelWidth);
+    ImGui::SetNextItemWidth(-1.0f);
+    return ImGui::SliderFloat(id, value, minValue, maxValue, "%.2f");
+}
+
 void RenderImGuiHeader(const RuntimeState& state) {
     ImGui::TextUnformatted(WideToUtf8(Texts().uiTitle).c_str());
     ImGui::SameLine();
@@ -7838,16 +7938,38 @@ void RenderImGuiCameraMode(const RuntimeState& state) {
 }
 
 void RenderImGuiPlayerOffset(const RuntimeState& state) {
+    constexpr float kPlayerOffsetSliderMin = -80.0f;
+    constexpr float kPlayerOffsetSliderMax = 80.0f;
+    constexpr float kPlayerRotationSliderMin = -45.0f;
+    constexpr float kPlayerRotationSliderMax = 45.0f;
+
     float offset[3]{ state.offset.x, state.offset.y, state.offset.z };
     ImGui::TextUnformatted(WideToUtf8(Texts().uiPlayerOffsetSection).c_str());
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::InputFloat3("R / B / U", offset, "%.3f")) {
+    bool playerOffsetChanged = ImGui::InputFloat3(WideToUtf8(Texts().uiPlayerOffsetLabel).c_str(), offset, "%.3f");
+    playerOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerRightLabel, "##PlayerRightSlider", &offset[0], kPlayerOffsetSliderMin, kPlayerOffsetSliderMax) || playerOffsetChanged;
+    playerOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerBackLabel, "##PlayerBackSlider", &offset[1], kPlayerOffsetSliderMin, kPlayerOffsetSliderMax) || playerOffsetChanged;
+    playerOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerUpLabel, "##PlayerUpSlider", &offset[2], kPlayerOffsetSliderMin, kPlayerOffsetSliderMax) || playerOffsetChanged;
+    if (playerOffsetChanged) {
         SetOffset(Vec3{ offset[0], offset[1], offset[2] });
     }
+
+    float playerRotation[3]{ state.playerRotation.x, state.playerRotation.y, state.playerRotation.z };
+    ImGui::SetNextItemWidth(-1.0f);
+    bool playerRotationChanged = ImGui::InputFloat3(WideToUtf8(Texts().uiPlayerRotationLabel).c_str(), playerRotation, "%.3f");
+    playerRotationChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerPitchLabel, "##PlayerPitchSlider", &playerRotation[0], kPlayerRotationSliderMin, kPlayerRotationSliderMax) || playerRotationChanged;
+    playerRotationChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerYawLabel, "##PlayerYawSlider", &playerRotation[1], kPlayerRotationSliderMin, kPlayerRotationSliderMax) || playerRotationChanged;
+    playerRotationChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerRollLabel, "##PlayerRollSlider", &playerRotation[2], kPlayerRotationSliderMin, kPlayerRotationSliderMax) || playerRotationChanged;
+    if (playerRotationChanged) {
+        SetPlayerRotation(Vec3{ playerRotation[0], playerRotation[1], playerRotation[2] });
+    }
+
     ImGui::TextDisabled("%s", WideToUtf8(Texts().uiOffsetHint).c_str());
 }
 
 void RenderImGuiPropSelfie(const RuntimeState& state) {
+    constexpr float kPropOffsetSliderMin = -64.0f;
+    constexpr float kPropOffsetSliderMax = 64.0f;
     constexpr float kPropRotationSliderMin = -45.0f;
     constexpr float kPropRotationSliderMax = 45.0f;
 
@@ -7860,7 +7982,11 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
 
     float propOffset[3]{ state.propOffset.x, state.propOffset.y, state.propOffset.z };
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::InputFloat3(WideToUtf8(Texts().uiPropOffsetLabel).c_str(), propOffset, "%.3f")) {
+    bool propOffsetChanged = ImGui::InputFloat3(WideToUtf8(Texts().uiPropOffsetLabel).c_str(), propOffset, "%.3f");
+    propOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPropXLabel, "##PropXSlider", &propOffset[0], kPropOffsetSliderMin, kPropOffsetSliderMax) || propOffsetChanged;
+    propOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPropYLabel, "##PropYSlider", &propOffset[1], kPropOffsetSliderMin, kPropOffsetSliderMax) || propOffsetChanged;
+    propOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPropZLabel, "##PropZSlider", &propOffset[2], kPropOffsetSliderMin, kPropOffsetSliderMax) || propOffsetChanged;
+    if (propOffsetChanged) {
         SetPropOffset(Vec3{ propOffset[0], propOffset[1], propOffset[2] });
     }
 
@@ -7871,30 +7997,9 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
     }
 
     bool propRotationSliderChanged = false;
-    ImGui::SetNextItemWidth(-1.0f);
-    propRotationSliderChanged = ImGui::SliderFloat(
-        (WideToUtf8(Texts().uiPropPitchLabel) + "##PropPitchSlider").c_str(),
-        &propRotation[0],
-        kPropRotationSliderMin,
-        kPropRotationSliderMax,
-        "%.2f"
-    ) || propRotationSliderChanged;
-    ImGui::SetNextItemWidth(-1.0f);
-    propRotationSliderChanged = ImGui::SliderFloat(
-        (WideToUtf8(Texts().uiPropYawLabel) + "##PropYawSlider").c_str(),
-        &propRotation[1],
-        kPropRotationSliderMin,
-        kPropRotationSliderMax,
-        "%.2f"
-    ) || propRotationSliderChanged;
-    ImGui::SetNextItemWidth(-1.0f);
-    propRotationSliderChanged = ImGui::SliderFloat(
-        (WideToUtf8(Texts().uiPropRollLabel) + "##PropRollSlider").c_str(),
-        &propRotation[2],
-        kPropRotationSliderMin,
-        kPropRotationSliderMax,
-        "%.2f"
-    ) || propRotationSliderChanged;
+    propRotationSliderChanged = ImGuiFullWidthSliderFloat(Texts().uiPropPitchLabel, "##PropPitchSlider", &propRotation[0], kPropRotationSliderMin, kPropRotationSliderMax) || propRotationSliderChanged;
+    propRotationSliderChanged = ImGuiFullWidthSliderFloat(Texts().uiPropYawLabel, "##PropYawSlider", &propRotation[1], kPropRotationSliderMin, kPropRotationSliderMax) || propRotationSliderChanged;
+    propRotationSliderChanged = ImGuiFullWidthSliderFloat(Texts().uiPropRollLabel, "##PropRollSlider", &propRotation[2], kPropRotationSliderMin, kPropRotationSliderMax) || propRotationSliderChanged;
     if (propRotationSliderChanged) {
         SetPropRotation(Vec3{ propRotation[0], propRotation[1], propRotation[2] });
     }
@@ -8004,8 +8109,12 @@ void RenderImGuiOverlayFrame() {
         ToggleEnabled();
     }
     RenderImGuiCameraMode(state);
-    RenderImGuiPlayerOffset(state);
-    RenderImGuiPropSelfie(state);
+    if (state.cameraMode == CameraMode::PlayerSelfie) {
+        RenderImGuiPlayerOffset(state);
+    }
+    else {
+        RenderImGuiPropSelfie(state);
+    }
     RenderImGuiLookAndTarget(state);
     RenderImGuiStatus(state);
 

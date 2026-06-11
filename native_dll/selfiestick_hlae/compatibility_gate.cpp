@@ -309,6 +309,10 @@ CameraVector ApplyAngleTrim(CameraVector baseAngles, CameraVector trim) noexcept
     };
 }
 
+CameraVector ApplyPlayerSelfieAngleTrim(CameraVector baseAngles, CameraVector playerRotation) noexcept {
+    return ApplyAngleTrim(baseAngles, playerRotation);
+}
+
 bool TryBuildPropCenteredViewDirection(
     CameraVector cameraPosition,
     CameraVector propOrigin,

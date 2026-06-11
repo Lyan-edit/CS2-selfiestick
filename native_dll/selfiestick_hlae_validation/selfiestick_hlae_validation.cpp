@@ -53,6 +53,7 @@ int main() {
     using selfiestick::compat::MoveTowards;
     using selfiestick::compat::ExtrapolateProjectileOrigin;
     using selfiestick::compat::ApplyAngleTrim;
+    using selfiestick::compat::ApplyPlayerSelfieAngleTrim;
     using selfiestick::compat::OffsetCameraVector;
     using selfiestick::schema::DetermineDeclaredClassScanLimit;
     using selfiestick::schema::DetermineExpectedProbeField;
@@ -322,6 +323,11 @@ int main() {
     const auto angleTrim = ApplyAngleTrim({ 10.0f, 20.0f, 30.0f }, { 1.0f, -2.0f, 3.0f });
     if (angleTrim.x != 11.0f || angleTrim.y != 18.0f || angleTrim.z != 33.0f) {
         return ReportFailure("ApplyAngleTrim should add local pitch/yaw/roll trim");
+    }
+
+    const auto playerAngleTrim = ApplyPlayerSelfieAngleTrim({ -5.0f, 135.0f, 0.0f }, { 2.5f, -10.0f, 1.5f });
+    if (playerAngleTrim.x != -2.5f || playerAngleTrim.y != 125.0f || playerAngleTrim.z != 1.5f) {
+        return ReportFailure("player selfie angle trim should add independent local pitch/yaw/roll trim");
     }
 
     CameraVector propCenteredDirection{};

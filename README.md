@@ -5,7 +5,7 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.1`.
+Latest source/release package in this repository: `v0.3.2`.
 
 ## Supported Versions
 
@@ -40,6 +40,7 @@ bin/selfiestick_hlae_zh-CN.dll
 3. Load one DLL from the HLAE console.
 4. Press `Ins` to open the panel.
 5. Press `F8` or click the panel button to enable the camera.
+6. Recommended for Prop Selfie tuning: set demo playback to `0.1x` first, then raise speed after the camera framing is stable.
 
 English DLL:
 
@@ -51,6 +52,12 @@ Chinese DLL:
 
 ```cfg
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
+```
+
+For slow-motion setup, use the CS2 demo UI / HLAE playback controls, or run this in the game console when available:
+
+```cfg
+demo_timescale 0.1
 ```
 
 ## Hotkeys
@@ -76,13 +83,16 @@ Controls:
 - `Follow`: use the current spectator target each frame.
 - `Lock Current`: lock the current target agent.
 - `Clear`: clear the locked target.
-- `R / B / U`: local trim for Right / Back / Up.
+- `Player R / B / U`: local position trim for Right / Back / Up, editable by numeric input or by the labeled `RIGHT`, `BACK`, and `UP` sliders.
+- `Player Pitch / Yaw / Roll`: local angle trim on top of the existing player selfie view, editable by numeric input or by the labeled `PITCH`, `YAW`, and `ROLL` sliders.
 
-The built-in player framing is applied first. `R / B / U` are extra local trim values on top of that framing.
+The built-in player framing is applied first. `R / B / U` and `Pitch / Yaw / Roll` are extra local trim values on top of that framing, so Selfie Left, Selfie Right, Forward, Follow, and Lock Current keep their existing behavior.
 
 ## Prop Selfie Mode
 
 Use `Camera Mode -> Prop Selfie` to follow projectiles thrown by the current target agent.
+
+Recommended workflow: play the demo at `0.1x`, lock the target agent, throw or scrub to the projectile moment, let the unique projectile auto-lock or choose one from Recent Props, then tune `X / Y / Z` and `Pitch / Yaw / Roll`. `0.1x` gives the smoothest setup window and makes it easier to keep fast projectiles centered.
 
 Supported projectile types:
 
@@ -104,8 +114,9 @@ Behavior:
 Prop controls:
 
 - `Prop X / Y / Z`: local prop camera offset.
-- `Pitch / Yaw / Roll`: local view angle trim, editable by numeric input or by the three angle sliders.
-- Angle sliders: medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders in the `-45` to `45` degree range for quick anti-clipping adjustments.
+- `X`, `Y`, `Z` sliders: medium-sensitivity prop position sliders in the `-64` to `64` range for quick anti-clipping adjustments.
+- `Pitch / Yaw / Roll`: local view angle trim, editable by numeric input or by the labeled angle sliders.
+- Angle sliders: medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders in the `-45` to `45` degree range.
 - Recent Props: shows recent projectile candidates, validity, handle, age, and lock buttons.
 
 The prop camera uses a smoothed, predicted projectile anchor to reduce stepping and jitter across slow motion and normal demo speed.
@@ -158,7 +169,7 @@ Validation executable:
 native_dll/selfiestick_hlae_validation/
 ```
 
-The validation project checks compatibility gates, schema helpers, SetUpView patch helpers, prop projectile classification, owner matching, auto-lock policy, prop camera math, and camera smoothing helpers.
+The validation project checks compatibility gates, schema helpers, SetUpView patch helpers, prop projectile classification, owner matching, auto-lock policy, prop camera math, player angle trim, and camera smoothing helpers.
 
 Do not run `npm run build` during agent sessions for this repository. The native DLL flow is independent of the Next.js app guidance.
 
