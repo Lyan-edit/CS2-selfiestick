@@ -23,5 +23,8 @@ bin_temp/
 *.VC.db
 *.VC.opendb
 
+.worktrees/
+worktrees/
+
 native_dll/**/intermediate/
 release/**/selfiestick.ini
