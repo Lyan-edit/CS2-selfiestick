@@ -7064,9 +7064,10 @@ bool HookSetUpView() {
     g_runtimeCompatibility.setUpViewPatchReady = true;
     if (!compat::CanInstallSetUpViewHook(g_runtimeCompatibility)) {
         TracePrintf(
-            "setupview-fail reason=compat-after-scan entity=%d split=%d patch=%d",
+            "setupview-fail reason=compat-after-scan entity=%d split=%d schema=%d patch=%d",
             g_runtimeCompatibility.entityAccessReady ? 1 : 0,
             g_runtimeCompatibility.splitScreenAccessorReady ? 1 : 0,
+            g_runtimeCompatibility.schemaOffsetsReady ? 1 : 0,
             g_runtimeCompatibility.setUpViewPatchReady ? 1 : 0
         );
         SetInitialized(false, FormatIncompatibleBuildReason("SetUpView hook blocked by compatibility gate"));

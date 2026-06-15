@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.3 Release Notes
+# CS2 Selfiestick v0.3.4 Release Notes
 
 ## Supported Runtime
 
@@ -19,6 +19,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Fixed external-user startup where HLAE printed `LoadLibraryA Ok.` but the DLL then stopped with `SetUpView hook blocked by compatibility gate` when schema offsets were not ready yet.
+- SetUpView hook installation now requires only the trusted entity access, split-screen accessor, and patch site; schema offsets remain guarded lazily by the camera/target code that actually reads schema fields.
 - Rebuilt English and Chinese release DLLs with the MSVC runtime statically linked, so users do not need the Visual C++ Redistributable to load the DLL.
 - Removed load-time dependency on `D3DCOMPILER_47.dll`; the ImGui DX11 backend now loads D3DCompiler dynamically only when shader compilation is needed.
 - Added release dependency checks for VC++ runtime DLLs and `D3DCOMPILER_47.dll`.
@@ -53,6 +55,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 新增内容：
 
+- 修复别人电脑上出现 `LoadLibraryA Ok.` 但随后提示 `SetUpView hook blocked by compatibility gate` 的问题。原因是 schema offsets 还没准备好时，旧版本把 SetUpView hook 安装也一起阻塞了。
+- SetUpView hook 现在只要求实体入口、分屏入口和 patch site 可信；真正读取 schema 字段的人物/道具逻辑仍然会延迟检查 schema offsets，不会盲目读字段。
 - 中英文 release DLL 改为静态链接 MSVC 运行库，用户不需要安装 Visual C++ Redistributable 也能加载 DLL。
 - 移除对 `D3DCOMPILER_47.dll` 的加载时依赖；ImGui DX11 后端只在需要编译 shader 时动态加载 D3DCompiler。
 - 新增 release 依赖检查脚本，用来防止 VC++ 运行库和 `D3DCOMPILER_47.dll` 重新进入 DLL 导入表。

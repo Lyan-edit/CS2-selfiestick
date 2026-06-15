@@ -140,7 +140,6 @@ bool CanProbeSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept {
 bool CanInstallSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept {
     return compatibility.setUpViewPatchReady
         && compatibility.entityAccessReady
-        && compatibility.schemaOffsetsReady
         && compatibility.splitScreenAccessorReady;
 }
 

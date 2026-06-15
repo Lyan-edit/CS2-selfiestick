@@ -507,8 +507,12 @@ int main() {
         return ReportFailure("follow target resolution must be blocked when schema offsets are unresolved");
     }
 
-    if (CanInstallSetUpViewHook(ready)) {
-        return ReportFailure("SetUpView hook must not install while schema offsets are unresolved");
+    if (!CanProbeSetUpViewHook(ready)) {
+        return ReportFailure("SetUpView hook probing should not require schema offsets");
+    }
+
+    if (!CanInstallSetUpViewHook(ready)) {
+        return ReportFailure("SetUpView hook should install while schema offsets are still resolving");
     }
 
     ready.schemaOffsetsReady = true;
