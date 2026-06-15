@@ -26,6 +26,13 @@ release/en-US/Lyan's selfiestick.dll
 release/zh-CN/Lyan_CS2自拍杆.dll
 ```
 
+The GitHub Release page also provides ASCII-named copies for easier downloading on every browser:
+
+```text
+Lyan_selfiestick_en-US.dll
+Lyan_CS2_selfiestick_zh-CN.dll
+```
+
 These DLLs are built with the MSVC runtime statically linked. Users do not need to install the Visual C++ Redistributable just to load the DLL with HLAE.
 
 Local native builds write the latest intermediate DLL to `bin/selfiestick_hlae.dll`; the packaged bilingual DLLs are copied into `release/en-US` and `release/zh-CN` by `build_dll.bat`.

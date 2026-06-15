@@ -12,6 +12,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 - English DLL: `release/en-US/Lyan's selfiestick.dll`
 - Chinese DLL: `release/zh-CN/Lyan_CS2自拍杆.dll`
+- GitHub Release English download: `Lyan_selfiestick_en-US.dll`
+- GitHub Release Chinese download: `Lyan_CS2_selfiestick_zh-CN.dll`
 - English manual: `release/en-US/Manual.md`
 - Chinese manual: `release/zh-CN/操作手册.md`
 
