@@ -5,7 +5,7 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.2`.
+Latest source/release package in this repository: `v0.3.3`.
 
 ## Supported Versions
 
@@ -26,12 +26,9 @@ release/en-US/Lyan's selfiestick.dll
 release/zh-CN/Lyan_CS2自拍杆.dll
 ```
 
-The same current DLLs are also built in:
+These DLLs are built with the MSVC runtime statically linked. Users do not need to install the Visual C++ Redistributable just to load the DLL with HLAE.
 
-```text
-bin/selfiestick_hlae_en-US.dll
-bin/selfiestick_hlae_zh-CN.dll
-```
+Local native builds write the latest intermediate DLL to `bin/selfiestick_hlae.dll`; the packaged bilingual DLLs are copied into `release/en-US` and `release/zh-CN` by `build_dll.bat`.
 
 ## Quick Start
 
@@ -53,6 +50,8 @@ Chinese DLL:
 ```cfg
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
+
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.3` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, the UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`, so a missing VC++ runtime should not block loading.
 
 For slow-motion setup, use the CS2 demo UI / HLAE playback controls, or run this in the game console when available:
 
@@ -170,6 +169,15 @@ native_dll/selfiestick_hlae_validation/
 ```
 
 The validation project checks compatibility gates, schema helpers, SetUpView patch helpers, prop projectile classification, owner matching, auto-lock policy, prop camera math, player angle trim, and camera smoothing helpers.
+
+Release dependency check:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check_dll_dependencies.ps1 -DllPath "release\en-US\Lyan's selfiestick.dll"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check_dll_dependencies.ps1 -DllPath "release\zh-CN\Lyan_CS2自拍杆.dll"
+```
+
+The check fails if a release DLL has load-time dependencies on VC++ runtime DLLs or `D3DCOMPILER_47.dll`.
 
 Do not run `npm run build` during agent sessions for this repository. The native DLL flow is independent of the Next.js app guidance.
 

@@ -136,10 +136,14 @@ constexpr float kGunAnchorStabilizationFactor = 0.18f;
 constexpr float kScopedFovThreshold = 60.0f;
 constexpr float kFallbackUnscopedFov = 90.0f;
 constexpr std::size_t kMaxPropCandidates = 5u;
-constexpr float kDefaultPropOffsetX = 0.0f;
-constexpr float kDefaultPropOffsetY = -18.0f;
-constexpr float kDefaultPropOffsetZ = 6.0f;
+constexpr float kDefaultPropOffsetX = -8.0f;
+constexpr float kDefaultPropOffsetY = -22.0f;
+constexpr float kDefaultPropOffsetZ = 4.0f;
+constexpr float kDefaultPropPitch = 1.0f;
+constexpr float kDefaultPropYaw = 0.0f;
+constexpr float kDefaultPropRoll = 0.0f;
 constexpr float kDefaultPropFollowSpeed = 640.0f;
+constexpr double kSmokePostFlightHoldSeconds = 1.2;
 constexpr float kOverlayTickSeconds = static_cast<float>(kOverlayTimerIntervalMs) / 1000.0f;
 
 struct Vec3 {
@@ -246,6 +250,7 @@ using PropProjectileKind = compat::PropProjectileKind;
 
 struct PropCandidate {
     EntityHandle handle{};
+    EntityHandle throwerHandle{};
     PropProjectileKind kind{PropProjectileKind::Unknown};
     bool valid{false};
     unsigned int ageFrames{};
@@ -403,11 +408,13 @@ struct LocalizedText {
     const wchar_t* uiButtonPropLock;
     const wchar_t* uiButtonPropLocked;
     const wchar_t* uiButtonPropClear;
+    const wchar_t* uiButtonPropImageStyle;
     const wchar_t* uiPropLockLabel;
     const wchar_t* uiPropXyzLabel;
     const wchar_t* uiPropPyrLabel;
     const wchar_t* uiPropCandidatesLabel;
     const wchar_t* uiPropHandleLabel;
+    const wchar_t* uiPropThrowerLabel;
     const wchar_t* uiPropAgeLabel;
     const wchar_t* uiPropXLabel;
     const wchar_t* uiPropYLabel;
@@ -567,11 +574,13 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiButtonPropLock = L"LOCK",
     .uiButtonPropLocked = L"LOCKED",
     .uiButtonPropClear = L"CLEAR PROP",
+    .uiButtonPropImageStyle = L"IMAGE STYLE",
     .uiPropLockLabel = L"Prop lock: ",
     .uiPropXyzLabel = L"Prop XYZ: ",
     .uiPropPyrLabel = L"Prop P/Y/R: ",
     .uiPropCandidatesLabel = L"Prop candidates: ",
     .uiPropHandleLabel = L"handle",
+    .uiPropThrowerLabel = L"thrower",
     .uiPropAgeLabel = L"age",
     .uiPropXLabel = L"X",
     .uiPropYLabel = L"Y",
@@ -731,11 +740,13 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiButtonPropLock = L"锁定",
     .uiButtonPropLocked = L"已锁定",
     .uiButtonPropClear = L"清除道具",
+    .uiButtonPropImageStyle = L"截图风格",
     .uiPropLockLabel = L"道具锁定: ",
     .uiPropXyzLabel = L"道具 XYZ: ",
     .uiPropPyrLabel = L"道具 P/Y/R: ",
     .uiPropCandidatesLabel = L"道具候选: ",
     .uiPropHandleLabel = L"句柄",
+    .uiPropThrowerLabel = L"投掷者",
     .uiPropAgeLabel = L"帧龄",
     .uiPropXLabel = L"X",
     .uiPropYLabel = L"Y",
@@ -821,12 +832,13 @@ struct RuntimeState {
     Vec3 offset{0.0f, 0.0f, 0.0f};
     Vec3 playerRotation{0.0f, 0.0f, 0.0f};
     Vec3 propOffset{kDefaultPropOffsetX, kDefaultPropOffsetY, kDefaultPropOffsetZ};
-    Vec3 propRotation{0.0f, 0.0f, 0.0f};
+    Vec3 propRotation{kDefaultPropPitch, kDefaultPropYaw, kDefaultPropRoll};
     float propFollowSpeed{kDefaultPropFollowSpeed};
     EntityHandle lockedHandle{};
     EntityHandle currentFollowHandle{};
     EntityHandle currentTargetHandle{};
     EntityHandle lockedPropHandle{};
+    EntityHandle lockedPropThrowerHandle{};
     PropProjectileKind lockedPropKind{PropProjectileKind::Unknown};
     std::array<PropCandidate, kMaxPropCandidates> propCandidates{};
     bool attachmentAvailable{false};
@@ -852,6 +864,8 @@ struct OverrideConfig {
     EntityHandle lockedHandle{};
     EntityHandle followHandle{};
     EntityHandle lockedPropHandle{};
+    EntityHandle lockedPropThrowerHandle{};
+    PropProjectileKind lockedPropKind{PropProjectileKind::Unknown};
 };
 
 struct GunBasisContinuityState {
@@ -916,6 +930,16 @@ struct PropCameraReferenceState {
 struct PropLookTargetState {
     EntityHandle propHandle{};
     Vec3 target{};
+    bool valid{false};
+};
+
+struct PropPostFlightHoldState {
+    EntityHandle propHandle{};
+    EntityHandle throwerHandle{};
+    PropProjectileKind kind{PropProjectileKind::Unknown};
+    Vec3 anchor{};
+    Vec3 forward{};
+    double lastLiveTimeSeconds{};
     bool valid{false};
 };
 
@@ -1054,6 +1078,7 @@ std::mutex g_propSmoothingMutex;
 std::mutex g_propOriginHistoryMutex;
 std::mutex g_propCameraReferenceMutex;
 std::mutex g_propLookTargetMutex;
+std::mutex g_propPostFlightHoldMutex;
 std::mutex g_solidBrushCacheMutex;
 RuntimeState g_state;
 OverlayUiState g_ui;
@@ -1065,6 +1090,7 @@ PropSmoothingState g_propSmoothing;
 PropOriginHistoryState g_propOriginHistory;
 PropCameraReferenceState g_propCameraReference;
 PropLookTargetState g_propLookTarget;
+PropPostFlightHoldState g_propPostFlightHold;
 DebugOptions g_debugOptions;
 std::atomic<bool> g_uiThreadStarted{false};
 std::atomic<bool> g_setupViewCallbackObserved{false};
@@ -1676,7 +1702,11 @@ void RefreshStatusTextLocked() {
     stream
         << " lockedProp=";
     if (g_state.lockedPropHandle.IsValid()) {
-        stream << g_state.lockedPropHandle.raw << "(" << PropProjectileKindToString(g_state.lockedPropKind) << ")";
+        stream
+            << g_state.lockedPropHandle.raw
+            << "(" << PropProjectileKindToString(g_state.lockedPropKind)
+            << ",thrower=" << g_state.lockedPropThrowerHandle.raw
+            << ")";
     }
     else {
         stream << Texts().valueNone;
@@ -1804,6 +1834,29 @@ void SetPlayerRotation(const Vec3& rotation) {
     MarkOverlayDirty();
 }
 
+void ResetPropTrackingState() {
+    {
+        std::lock_guard lock(g_propSmoothingMutex);
+        g_propSmoothing = {};
+    }
+    {
+        std::lock_guard lock(g_propOriginHistoryMutex);
+        g_propOriginHistory = {};
+    }
+    {
+        std::lock_guard lock(g_propCameraReferenceMutex);
+        g_propCameraReference = {};
+    }
+    {
+        std::lock_guard lock(g_propLookTargetMutex);
+        g_propLookTarget = {};
+    }
+    {
+        std::lock_guard lock(g_propPostFlightHoldMutex);
+        g_propPostFlightHold = {};
+    }
+}
+
 void SetPropOffset(const Vec3& offset) {
     RuntimeState snapshot{};
     {
@@ -1828,6 +1881,29 @@ void SetPropRotation(const Vec3& rotation) {
     MarkOverlayDirty();
 }
 
+void ApplyPropImageStylePreset() {
+    const compat::PropCameraPreset preset = compat::GetImageStylePropCameraPreset();
+    RuntimeState snapshot{};
+    {
+        std::lock_guard lock(g_stateMutex);
+        g_state.propOffset = Vec3{ preset.offset.x, preset.offset.y, preset.offset.z };
+        g_state.propRotation = Vec3{ preset.rotation.x, preset.rotation.y, preset.rotation.z };
+        RefreshStatusTextLocked();
+        snapshot = g_state;
+    }
+    PersistCameraSettingsSnapshot(snapshot);
+    MarkOverlayDirty();
+    TracePrintf(
+        "prop-image-style offset=(%.3f,%.3f,%.3f) rotation=(%.3f,%.3f,%.3f)",
+        snapshot.propOffset.x,
+        snapshot.propOffset.y,
+        snapshot.propOffset.z,
+        snapshot.propRotation.x,
+        snapshot.propRotation.y,
+        snapshot.propRotation.z
+    );
+}
+
 void SetTargetMode(TargetMode targetMode) {
     bool changed = false;
     std::lock_guard lock(g_stateMutex);
@@ -1844,25 +1920,11 @@ void ClearLockedProp() {
     {
         std::lock_guard lock(g_stateMutex);
         g_state.lockedPropHandle = {};
+        g_state.lockedPropThrowerHandle = {};
         g_state.lockedPropKind = PropProjectileKind::Unknown;
         RefreshStatusTextLocked();
     }
-    {
-        std::lock_guard lock(g_propSmoothingMutex);
-        g_propSmoothing = {};
-    }
-    {
-        std::lock_guard lock(g_propOriginHistoryMutex);
-        g_propOriginHistory = {};
-    }
-    {
-        std::lock_guard lock(g_propCameraReferenceMutex);
-        g_propCameraReference = {};
-    }
-    {
-        std::lock_guard lock(g_propLookTargetMutex);
-        g_propLookTarget = {};
-    }
+    ResetPropTrackingState();
     MarkOverlayDirty();
     TracePrintf("prop-lock cleared");
 }
@@ -1874,27 +1936,18 @@ void SetLockedProp(const PropCandidate& candidate) {
     {
         std::lock_guard lock(g_stateMutex);
         g_state.lockedPropHandle = candidate.handle;
+        g_state.lockedPropThrowerHandle = candidate.throwerHandle;
         g_state.lockedPropKind = candidate.kind;
         RefreshStatusTextLocked();
     }
-    {
-        std::lock_guard lock(g_propSmoothingMutex);
-        g_propSmoothing = {};
-    }
-    {
-        std::lock_guard lock(g_propOriginHistoryMutex);
-        g_propOriginHistory = {};
-    }
-    {
-        std::lock_guard lock(g_propCameraReferenceMutex);
-        g_propCameraReference = {};
-    }
-    {
-        std::lock_guard lock(g_propLookTargetMutex);
-        g_propLookTarget = {};
-    }
+    ResetPropTrackingState();
     MarkOverlayDirty();
-    TracePrintf("prop-lock handle=%u kind=%s", candidate.handle.raw, PropProjectileKindToString(candidate.kind));
+    TracePrintf(
+        "prop-lock handle=%u kind=%s thrower=%u",
+        candidate.handle.raw,
+        PropProjectileKindToString(candidate.kind),
+        candidate.throwerHandle.raw
+    );
 }
 
 void ClearLockedTarget() {
@@ -5043,6 +5096,19 @@ void* ResolveControllerPawnEntity(void* controller) {
     return nullptr;
 }
 
+void* ResolvePropThrowerPawnEntity(EntityHandle throwerHandle) {
+    void* throwerEntity = ResolveHandleToEntity(throwerHandle);
+    if (EntityIsPlayerPawn(throwerEntity)) {
+        return throwerEntity;
+    }
+
+    if (EntityIsPlayerController(throwerEntity)) {
+        return ResolveControllerPawnEntity(throwerEntity);
+    }
+
+    return nullptr;
+}
+
 HeldItemKind GetHeldItemKindForPawn(void* pawn) {
     const EntityHandle weaponHandle = PawnGetActiveWeaponHandle(pawn);
     if (!weaponHandle.IsValid()) {
@@ -5705,6 +5771,41 @@ bool IsPropProjectileForTarget(void* entity, EntityHandle targetHandle, EntityHa
     }
 
     candidate.handle = handle;
+    candidate.throwerHandle = ownerHandle;
+    candidate.kind = kind;
+    candidate.valid = true;
+    candidate.ageFrames = 0u;
+    return true;
+}
+
+bool IsLockedPropProjectileStillOwnedByThrower(
+    void* entity,
+    EntityHandle lockedThrowerHandle,
+    PropCandidate& candidate
+) {
+    candidate = {};
+    if (entity == nullptr || !lockedThrowerHandle.IsValid()) {
+        return false;
+    }
+
+    const std::string className = TryGetEntityRttiClassName(entity);
+    const PropProjectileKind kind = compat::ClassifyPropProjectileClassName(className);
+    if (kind == PropProjectileKind::Unknown) {
+        return false;
+    }
+
+    EntityHandle ownerHandle{};
+    if (!TryReadProjectileOwnerHandle(entity, ownerHandle) || ownerHandle.raw != lockedThrowerHandle.raw) {
+        return false;
+    }
+
+    const EntityHandle handle = EntityGetHandle(entity);
+    if (!handle.IsValid()) {
+        return false;
+    }
+
+    candidate.handle = handle;
+    candidate.throwerHandle = ownerHandle;
     candidate.kind = kind;
     candidate.valid = true;
     candidate.ageFrames = 0u;
@@ -5766,6 +5867,7 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
         });
         if (existingIt != g_state.propCandidates.end()) {
             existingIt->kind = candidate.kind;
+            existingIt->throwerHandle = candidate.throwerHandle;
             existingIt->valid = true;
             existingIt->ageFrames = 0u;
             continue;
@@ -5780,27 +5882,40 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
     if (g_state.lockedPropHandle.IsValid()) {
         bool lockedStillValid = false;
         PropProjectileKind lockedKind = g_state.lockedPropKind;
+        EntityHandle lockedThrowerHandle = g_state.lockedPropThrowerHandle;
         for (const auto& candidate : g_state.propCandidates) {
             if (candidate.valid && candidate.handle.raw == g_state.lockedPropHandle.raw) {
                 lockedStillValid = true;
                 lockedKind = candidate.kind;
+                lockedThrowerHandle = candidate.throwerHandle;
                 break;
+            }
+        }
+        if (!lockedStillValid && lockedKind == PropProjectileKind::Smoke) {
+            PropPostFlightHoldState hold{};
+            {
+                std::lock_guard holdLock(g_propPostFlightHoldMutex);
+                hold = g_propPostFlightHold;
+            }
+            const double secondsSinceLastLive = hold.valid && hold.propHandle.raw == g_state.lockedPropHandle.raw
+                ? HighResolutionSeconds() - hold.lastLiveTimeSeconds
+                : std::numeric_limits<double>::infinity();
+            if (hold.valid
+                && hold.propHandle.raw == g_state.lockedPropHandle.raw
+                && compat::ShouldUseSmokePostFlightHold(hold.kind, false, secondsSinceLastLive, kSmokePostFlightHoldSeconds)) {
+                lockedStillValid = true;
+                lockedThrowerHandle = hold.throwerHandle;
             }
         }
         if (!compat::ShouldKeepManualPropLock(true, lockedStillValid, g_state.lockedPropHandle.raw, g_state.propCandidates[0].handle.raw)) {
             g_state.lockedPropHandle = {};
+            g_state.lockedPropThrowerHandle = {};
             g_state.lockedPropKind = PropProjectileKind::Unknown;
-            std::lock_guard smoothingLock(g_propSmoothingMutex);
-            g_propSmoothing = {};
-            std::lock_guard historyLock(g_propOriginHistoryMutex);
-            g_propOriginHistory = {};
-            std::lock_guard referenceLock(g_propCameraReferenceMutex);
-            g_propCameraReference = {};
-            std::lock_guard lookTargetLock(g_propLookTargetMutex);
-            g_propLookTarget = {};
+            ResetPropTrackingState();
         }
         else {
             g_state.lockedPropKind = lockedKind;
+            g_state.lockedPropThrowerHandle = lockedThrowerHandle;
         }
     }
 
@@ -5817,18 +5932,15 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
 
     if (compat::ShouldAutoLockSinglePropCandidate(g_state.lockedPropHandle.IsValid(), validCandidateCount)) {
         g_state.lockedPropHandle = onlyValidCandidate.handle;
+        g_state.lockedPropThrowerHandle = onlyValidCandidate.throwerHandle;
         g_state.lockedPropKind = onlyValidCandidate.kind;
-        {
-            std::lock_guard smoothingLock(g_propSmoothingMutex);
-            g_propSmoothing = {};
-            std::lock_guard historyLock(g_propOriginHistoryMutex);
-            g_propOriginHistory = {};
-            std::lock_guard referenceLock(g_propCameraReferenceMutex);
-            g_propCameraReference = {};
-            std::lock_guard lookTargetLock(g_propLookTargetMutex);
-            g_propLookTarget = {};
-        }
-        TracePrintf("prop-auto-lock handle=%u kind=%s", onlyValidCandidate.handle.raw, PropProjectileKindToString(onlyValidCandidate.kind));
+        ResetPropTrackingState();
+        TracePrintf(
+            "prop-auto-lock handle=%u kind=%s thrower=%u",
+            onlyValidCandidate.handle.raw,
+            PropProjectileKindToString(onlyValidCandidate.kind),
+            onlyValidCandidate.throwerHandle.raw
+        );
     }
 
     RefreshStatusTextLocked();
@@ -6243,6 +6355,8 @@ bool TryBuildPropCameraPose(
     void* targetPawn,
     EntityHandle targetHandle,
     EntityHandle propHandle,
+    EntityHandle lockedThrowerHandle,
+    PropProjectileKind lockedPropKind,
     const Vec3* viewSetupEyeOrigin,
     const Vec3& propOffset,
     const Vec3& propRotation,
@@ -6267,6 +6381,68 @@ bool TryBuildPropCameraPose(
 
     void* propEntity = ResolveHandleToEntity(propHandle);
     if (propEntity == nullptr) {
+        PropPostFlightHoldState hold{};
+        {
+            std::lock_guard lock(g_propPostFlightHoldMutex);
+            hold = g_propPostFlightHold;
+        }
+        const double nowSeconds = HighResolutionSeconds();
+        const double secondsSinceLastLive = hold.valid && hold.propHandle.raw == propHandle.raw
+            ? nowSeconds - hold.lastLiveTimeSeconds
+            : std::numeric_limits<double>::infinity();
+        if (hold.valid
+            && hold.propHandle.raw == propHandle.raw
+            && compat::ShouldUseSmokePostFlightHold(hold.kind, false, secondsSinceLastLive, kSmokePostFlightHoldSeconds)) {
+            Vec3 basisForward = hold.forward;
+            basisForward.z = 0.0f;
+            if (!TryNormalize(basisForward)) {
+                basisForward = hold.forward;
+                if (!TryNormalize(basisForward)) {
+                    failure = Texts().reasonCombatForwardAxisDegenerate;
+                    return false;
+                }
+            }
+
+            Vec3 right = Cross(basisForward, kWorldUp);
+            if (!TryNormalize(right)) {
+                right = Vec3{ 1.0f, 0.0f, 0.0f };
+            }
+
+            const Vec3 up = kWorldUp;
+            cameraPosition = Add(
+                Add(
+                    Add(hold.anchor, Scale(right, propOffset.x)),
+                    Scale(basisForward, propOffset.y)
+                ),
+                Scale(up, propOffset.z)
+            );
+
+            compat::CameraVector centeredDirection{};
+            if (!compat::TryBuildPropCenteredViewDirection(
+                    compat::CameraVector{ cameraPosition.x, cameraPosition.y, cameraPosition.z },
+                    compat::CameraVector{ hold.anchor.x, hold.anchor.y, hold.anchor.z },
+                    compat::CameraVector{ basisForward.x, basisForward.y, basisForward.z },
+                    centeredDirection)) {
+                failure = Texts().reasonCameraDirectionDegenerate;
+                return false;
+            }
+
+            float pitch{};
+            float yaw{};
+            VectorToAngles(Vec3{ centeredDirection.x, centeredDirection.y, centeredDirection.z }, pitch, yaw);
+            const auto trimmedAngles = compat::ApplyAngleTrim(
+                compat::CameraVector{ pitch, yaw, 0.0f },
+                compat::CameraVector{ propRotation.x, propRotation.y, propRotation.z }
+            );
+            cameraAngles = Vec3{ trimmedAngles.x, trimmedAngles.y, trimmedAngles.z };
+#if defined(SELFIESTICK_LANG_ZH_CN)
+            failure = "烟雾弹飞行结束，短暂保留镜头";
+#else
+            failure = "smoke post-flight hold";
+#endif
+            return IsFiniteVec3(cameraPosition) && IsFiniteVec3(cameraAngles);
+        }
+
 #if defined(SELFIESTICK_LANG_ZH_CN)
         failure = "道具已结束";
 #else
@@ -6276,7 +6452,14 @@ bool TryBuildPropCameraPose(
     }
 
     PropCandidate candidate{};
-    if (!IsPropProjectileForTarget(propEntity, targetHandle, PawnGetControllerHandle(targetPawn), candidate)) {
+    bool candidateMatches = false;
+    if (lockedThrowerHandle.IsValid()) {
+        candidateMatches = IsLockedPropProjectileStillOwnedByThrower(propEntity, lockedThrowerHandle, candidate);
+    }
+    if (!candidateMatches) {
+        candidateMatches = IsPropProjectileForTarget(propEntity, targetHandle, PawnGetControllerHandle(targetPawn), candidate);
+    }
+    if (!candidateMatches) {
 #if defined(SELFIESTICK_LANG_ZH_CN)
         failure = "道具 owner 不匹配或已结束";
 #else
@@ -6284,11 +6467,19 @@ bool TryBuildPropCameraPose(
 #endif
         return false;
     }
+    if (lockedThrowerHandle.IsValid()) {
+        candidate.throwerHandle = lockedThrowerHandle;
+    }
+    if (lockedPropKind != PropProjectileKind::Unknown) {
+        candidate.kind = lockedPropKind;
+    }
 
     Vec3 referenceOrigin{};
     Vec3 targetEye{};
+    Vec3 throwerEye{};
     bool referenceAvailable = false;
     bool targetEyeAvailable = false;
+    bool throwerEyeAvailable = false;
     float targetEyeRaw[3]{};
     std::string targetEyeFailure;
     if (TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, false, targetEyeRaw, targetEyeFailure)) {
@@ -6307,6 +6498,16 @@ bool TryBuildPropCameraPose(
         return false;
     }
 
+    void* throwerPawn = ResolvePropThrowerPawnEntity(candidate.throwerHandle);
+    if (throwerPawn != nullptr) {
+        float throwerEyeRaw[3]{};
+        std::string throwerEyeFailure;
+        if (TryGetEntityEyeOrigin(throwerPawn, viewSetupEyeOrigin, false, throwerEyeRaw, throwerEyeFailure)) {
+            throwerEye = Vec3{ throwerEyeRaw[0], throwerEyeRaw[1], throwerEyeRaw[2] };
+            throwerEyeAvailable = true;
+        }
+    }
+
     Vec3 propOrigin{};
     if (!TryGetProjectileOriginWithFallback(propHandle, propEntity, referenceOrigin, propOrigin, failure)) {
         return false;
@@ -6315,7 +6516,15 @@ bool TryBuildPropCameraPose(
 
     Vec3 forward{};
     bool forwardAvailable = false;
-    if (targetEyeAvailable) {
+    if (compat::ShouldUseActualThrowerDirection(throwerEyeAvailable, targetEyeAvailable)) {
+        forward = Subtract(throwerEye, anchor);
+        forwardAvailable = TryNormalize(forward);
+        if (forwardAvailable) {
+            UpdateCachedPropForward(propHandle, forward);
+        }
+    }
+
+    if (!forwardAvailable && targetEyeAvailable) {
         forward = Subtract(targetEye, anchor);
         forwardAvailable = TryNormalize(forward);
         if (forwardAvailable) {
@@ -6338,6 +6547,17 @@ bool TryBuildPropCameraPose(
     if (!forwardAvailable) {
         failure = Texts().reasonCombatForwardAxisDegenerate;
         return false;
+    }
+
+    {
+        std::lock_guard lock(g_propPostFlightHoldMutex);
+        g_propPostFlightHold.propHandle = propHandle;
+        g_propPostFlightHold.throwerHandle = candidate.throwerHandle;
+        g_propPostFlightHold.kind = candidate.kind;
+        g_propPostFlightHold.anchor = anchor;
+        g_propPostFlightHold.forward = forward;
+        g_propPostFlightHold.lastLiveTimeSeconds = HighResolutionSeconds();
+        g_propPostFlightHold.valid = true;
     }
 
     Vec3 basisForward = forward;
@@ -6496,7 +6716,9 @@ OverrideConfig GetOverrideConfig() {
         g_state.propFollowSpeed,
         g_state.lockedHandle,
         g_state.currentFollowHandle,
-        g_state.lockedPropHandle
+        g_state.lockedPropHandle,
+        g_state.lockedPropThrowerHandle,
+        g_state.lockedPropKind
     };
 }
 
@@ -6636,6 +6858,8 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
                 resolution.entity,
                 resolution.handle,
                 lockedPropHandle,
+                config.lockedPropThrowerHandle,
+                config.lockedPropKind,
                 viewSetupEyeOriginAvailable ? &viewSetupEyeOrigin : nullptr,
                 config.propOffset,
                 config.propRotation,
@@ -7142,9 +7366,9 @@ void LoadPersistedCameraSettings() {
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropOffsetZ, kDefaultPropOffsetZ)
         };
         g_state.propRotation = Vec3{
-            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropPitch, 0.0f),
-            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropYaw, 0.0f),
-            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropRoll, 0.0f)
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropPitch, kDefaultPropPitch),
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropYaw, kDefaultPropYaw),
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropRoll, kDefaultPropRoll)
         };
         g_state.playerRotation = Vec3{
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerPitch, 0.0f),
@@ -7495,6 +7719,10 @@ std::wstring BuildOverlayStatusText(const RuntimeState& state) {
     AppendWideToWide(result, HandleToWide(state.lockedPropHandle));
     AppendWideToWide(result, L" / ");
     AppendWideToWide(result, PropProjectileKindToWide(state.lockedPropKind));
+    AppendWideToWide(result, L" / ");
+    AppendWideToWide(result, Texts().uiPropThrowerLabel);
+    AppendWideToWide(result, L"=");
+    AppendWideToWide(result, HandleToWide(state.lockedPropThrowerHandle));
     AppendWideToWide(result, L"\r\n");
 
     AppendWideToWide(result, Texts().uiPropXyzLabel);
@@ -7525,6 +7753,10 @@ std::wstring BuildOverlayStatusText(const RuntimeState& state) {
             AppendWideToWide(result, HandleToWide(candidate.handle));
             AppendWideToWide(result, L"/");
             AppendWideToWide(result, PropProjectileKindToWide(candidate.kind));
+            AppendWideToWide(result, L"/");
+            AppendWideToWide(result, Texts().uiPropThrowerLabel);
+            AppendWideToWide(result, L"=");
+            AppendWideToWide(result, HandleToWide(candidate.throwerHandle));
             AppendWideToWide(result, L"/");
             AppendWideToWide(result, candidate.valid ? Texts().uiPropLive : Texts().uiPropEnded);
         }
@@ -7567,6 +7799,7 @@ bool OverlayPropEditHasFocus() {
 bool PropCandidatesEqual(const std::array<PropCandidate, kMaxPropCandidates>& left, const std::array<PropCandidate, kMaxPropCandidates>& right) {
     for (std::size_t index = 0u; index < left.size(); ++index) {
         if (left[index].handle.raw != right[index].handle.raw
+            || left[index].throwerHandle.raw != right[index].throwerHandle.raw
             || left[index].kind != right[index].kind
             || left[index].valid != right[index].valid
             || left[index].ageFrames != right[index].ageFrames) {
@@ -7597,6 +7830,7 @@ bool OverlayStateAffectsView(const RuntimeState& left, const RuntimeState& right
         && left.propRotation.z == right.propRotation.z
         && left.lockedHandle.raw == right.lockedHandle.raw
         && left.lockedPropHandle.raw == right.lockedPropHandle.raw
+        && left.lockedPropThrowerHandle.raw == right.lockedPropThrowerHandle.raw
         && left.lockedPropKind == right.lockedPropKind
         && left.currentTargetHandle.raw == right.currentTargetHandle.raw
         && left.attachmentAvailable == right.attachmentAvailable
@@ -8004,6 +8238,10 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
         SetPropRotation(Vec3{ propRotation[0], propRotation[1], propRotation[2] });
     }
 
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPropImageStyle).c_str(), false, ImVec2(-1.0f, 0.0f))) {
+        ApplyPropImageStylePreset();
+    }
+
     ImGui::SeparatorText(WideToUtf8(Texts().uiPropRecentSection).c_str());
     for (std::size_t index = 0u; index < state.propCandidates.size(); ++index) {
         const PropCandidate& candidate = state.propCandidates[index];
@@ -8011,11 +8249,13 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
         const bool active = state.lockedPropHandle.IsValid() && candidate.handle.raw == state.lockedPropHandle.raw;
         const std::string kind = WideToUtf8(PropProjectileKindToWide(candidate.kind));
         ImGui::Text(
-            "%u: %s  %s=%u  %s=%u",
+            "%u: %s  %s=%u  %s=%u  %s=%u",
             static_cast<unsigned int>(index + 1u),
             WideToUtf8(candidate.valid ? Texts().uiPropLive : Texts().uiPropEnded).c_str(),
             WideToUtf8(Texts().uiPropHandleLabel).c_str(),
             candidate.handle.raw,
+            WideToUtf8(Texts().uiPropThrowerLabel).c_str(),
+            candidate.throwerHandle.raw,
             WideToUtf8(Texts().uiPropAgeLabel).c_str(),
             candidate.ageFrames
         );

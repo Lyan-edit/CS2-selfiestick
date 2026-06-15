@@ -30,6 +30,11 @@ struct CameraVector {
     float z{};
 };
 
+struct PropCameraPreset {
+    CameraVector offset{};
+    CameraVector rotation{};
+};
+
 struct OffsetCameraVector {
     std::ptrdiff_t offset{};
     CameraVector value{};
@@ -64,6 +69,17 @@ bool ShouldAutoLockSinglePropCandidate(
     bool hasLockedProp,
     unsigned int validCandidateCount
 ) noexcept;
+bool ShouldUseSmokePostFlightHold(
+    PropProjectileKind kind,
+    bool projectileEntityStillValid,
+    double secondsSinceLastLive,
+    double holdSeconds
+) noexcept;
+bool ShouldUseActualThrowerDirection(
+    bool actualThrowerResolved,
+    bool currentTargetResolved
+) noexcept;
+PropCameraPreset GetImageStylePropCameraPreset() noexcept;
 bool ShouldUseObserverPawnAsFollowTarget(
     ClientEntityKind splitScreenEntityKind,
     bool observerTargetValid,

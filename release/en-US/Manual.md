@@ -10,6 +10,8 @@ This English release folder contains:
 
 Only the DLL is required at runtime. The manual and cfg are reference files.
 
+The DLL is built with the MSVC runtime statically linked. You do not need to install the Visual C++ Redistributable just to load it with HLAE.
+
 ## Supported Versions
 
 This package is marked for:
@@ -36,6 +38,8 @@ mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 ```
 
 If loading succeeds, the console prints a selfiestick ready message. Press `Ins` to open the ImGui panel.
+
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
@@ -90,7 +94,8 @@ Behavior:
 - If there is exactly one valid flying projectile and no prop lock, it auto-locks.
 - If multiple valid projectiles exist, choose one manually from Recent Props with `LOCK`.
 - `CLEAR PROP` clears the current prop lock.
-- The camera tracks flying projectile entities only. When the projectile ends, override stops and the Runtime panel shows the reason.
+- The camera direction prefers the actual projectile thrower, so look-back direction stays correct even if the spectator target changes.
+- Smoke projectile shots keep a short post-flight hold after the flying smoke entity disappears. Other projectile types end normally when the flying entity ends.
 
 Prop controls:
 
@@ -98,7 +103,8 @@ Prop controls:
 - `X`, `Y`, `Z` sliders: medium-sensitivity position sliders from `-64` to `64`
 - `Pitch / Yaw / Roll`: angle trim, editable by numeric input or by labeled sliders
 - `Pitch`, `Yaw`, `Roll` sliders: medium-sensitivity sliders from `-45` to `45` degrees for quick camera adjustment
-- `Recent Props`: candidate list with validity, handle, age, type, and lock state
+- `IMAGE STYLE`: writes the shared screenshot-style prop preset: `X=-8`, `Y=-22`, `Z=4`, `Pitch=1`, `Yaw=0`, `Roll=0`
+- `Recent Props`: candidate list with validity, handle, thrower handle, age, type, and lock state
 
 ## Failure States
 

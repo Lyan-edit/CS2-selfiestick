@@ -178,6 +178,38 @@ bool ShouldAutoLockSinglePropCandidate(
     return !hasLockedProp && validCandidateCount == 1u;
 }
 
+bool ShouldUseSmokePostFlightHold(
+    PropProjectileKind kind,
+    bool projectileEntityStillValid,
+    double secondsSinceLastLive,
+    double holdSeconds
+) noexcept {
+    if (kind != PropProjectileKind::Smoke || projectileEntityStillValid) {
+        return false;
+    }
+
+    return std::isfinite(secondsSinceLastLive)
+        && std::isfinite(holdSeconds)
+        && secondsSinceLastLive >= 0.0
+        && holdSeconds > 0.0
+        && secondsSinceLastLive <= holdSeconds;
+}
+
+bool ShouldUseActualThrowerDirection(
+    bool actualThrowerResolved,
+    bool currentTargetResolved
+) noexcept {
+    (void)currentTargetResolved;
+    return actualThrowerResolved;
+}
+
+PropCameraPreset GetImageStylePropCameraPreset() noexcept {
+    return PropCameraPreset{
+        CameraVector{ -8.0f, -22.0f, 4.0f },
+        CameraVector{ 1.0f, 0.0f, 0.0f }
+    };
+}
+
 bool ShouldUseObserverPawnAsFollowTarget(
     ClientEntityKind splitScreenEntityKind,
     bool observerTargetValid,

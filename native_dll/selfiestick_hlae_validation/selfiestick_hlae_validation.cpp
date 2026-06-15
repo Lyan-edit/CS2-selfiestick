@@ -44,6 +44,8 @@ int main() {
     using selfiestick::compat::ShouldAcceptPropOwnerCandidate;
     using selfiestick::compat::ShouldAutoLockSinglePropCandidate;
     using selfiestick::compat::ShouldKeepManualPropLock;
+    using selfiestick::compat::ShouldUseActualThrowerDirection;
+    using selfiestick::compat::ShouldUseSmokePostFlightHold;
     using selfiestick::compat::TrySelectNearestPlausibleVector;
     using selfiestick::compat::TrySelectTrustedProjectileSceneOrigin;
     using selfiestick::compat::TrySelectDynamicProjectileOrigin;
@@ -54,6 +56,7 @@ int main() {
     using selfiestick::compat::ExtrapolateProjectileOrigin;
     using selfiestick::compat::ApplyAngleTrim;
     using selfiestick::compat::ApplyPlayerSelfieAngleTrim;
+    using selfiestick::compat::GetImageStylePropCameraPreset;
     using selfiestick::compat::OffsetCameraVector;
     using selfiestick::schema::DetermineDeclaredClassScanLimit;
     using selfiestick::schema::DetermineExpectedProbeField;
@@ -164,6 +167,44 @@ int main() {
 
     if (ShouldAutoLockSinglePropCandidate(true, 1u)) {
         return ReportFailure("prop auto-lock should not replace an existing prop lock");
+    }
+
+    if (!ShouldUseActualThrowerDirection(true, true)) {
+        return ReportFailure("prop camera should prefer the actual projectile thrower over the current target");
+    }
+
+    if (!ShouldUseActualThrowerDirection(true, false)) {
+        return ReportFailure("prop camera should use the actual projectile thrower even when the current target is unavailable");
+    }
+
+    if (ShouldUseActualThrowerDirection(false, true)) {
+        return ReportFailure("prop camera should fall back to the current target only when actual thrower cannot resolve");
+    }
+
+    if (!ShouldUseSmokePostFlightHold(PropProjectileKind::Smoke, false, 0.6, 1.2)) {
+        return ReportFailure("smoke projectile should keep a short post-flight camera hold after the entity ends");
+    }
+
+    if (ShouldUseSmokePostFlightHold(PropProjectileKind::Smoke, false, 1.3, 1.2)) {
+        return ReportFailure("smoke post-flight camera hold should expire after the configured duration");
+    }
+
+    if (ShouldUseSmokePostFlightHold(PropProjectileKind::Fire, false, 0.6, 1.2)) {
+        return ReportFailure("non-smoke projectiles should not use the long smoke post-flight hold");
+    }
+
+    if (ShouldUseSmokePostFlightHold(PropProjectileKind::Smoke, true, 0.0, 1.2)) {
+        return ReportFailure("live smoke projectiles should not be treated as post-flight hold frames");
+    }
+
+    const auto propImageStylePreset = GetImageStylePropCameraPreset();
+    if (propImageStylePreset.offset.x != -8.0f
+        || propImageStylePreset.offset.y != -22.0f
+        || propImageStylePreset.offset.z != 4.0f
+        || propImageStylePreset.rotation.x != 1.0f
+        || propImageStylePreset.rotation.y != 0.0f
+        || propImageStylePreset.rotation.z != 0.0f) {
+        return ReportFailure("image-style prop camera preset should match the shared screenshot framing values");
     }
 
     const selfiestick::compat::CameraVector originCandidates[] = {

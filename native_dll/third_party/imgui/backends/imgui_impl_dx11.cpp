@@ -48,11 +48,9 @@
 
 // DirectX
 #include <stdio.h>
+#include <windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
-#ifdef _MSC_VER
-#pragma comment(lib, "d3dcompiler") // Automatically link with d3dcompiler.lib as we are using D3DCompile() below.
-#endif
 
 // Clang/GCC warnings with -Weverything
 #if defined(__clang__)
@@ -93,6 +91,54 @@ struct VERTEX_CONSTANT_BUFFER_DX11
 {
     float   mvp[4][4];
 };
+
+typedef HRESULT (WINAPI *ImGui_ImplDX11_D3DCompileFn)(
+    LPCVOID pSrcData,
+    SIZE_T SrcDataSize,
+    LPCSTR pSourceName,
+    const D3D_SHADER_MACRO* pDefines,
+    ID3DInclude* pInclude,
+    LPCSTR pEntrypoint,
+    LPCSTR pTarget,
+    UINT Flags1,
+    UINT Flags2,
+    ID3DBlob** ppCode,
+    ID3DBlob** ppErrorMsgs
+);
+
+static ImGui_ImplDX11_D3DCompileFn ImGui_ImplDX11_GetD3DCompile()
+{
+    static bool attempted = false;
+    static HMODULE d3dcompiler_module = nullptr;
+    static ImGui_ImplDX11_D3DCompileFn d3d_compile = nullptr;
+
+    if (!attempted)
+    {
+        attempted = true;
+        const wchar_t* candidates[] =
+        {
+            L"d3dcompiler_47.dll",
+            L"d3dcompiler_46.dll",
+            L"d3dcompiler_43.dll"
+        };
+
+        for (const wchar_t* candidate : candidates)
+        {
+            d3dcompiler_module = LoadLibraryW(candidate);
+            if (d3dcompiler_module == nullptr)
+                continue;
+
+            d3d_compile = (ImGui_ImplDX11_D3DCompileFn)GetProcAddress(d3dcompiler_module, "D3DCompile");
+            if (d3d_compile != nullptr)
+                break;
+
+            FreeLibrary(d3dcompiler_module);
+            d3dcompiler_module = nullptr;
+        }
+    }
+
+    return d3d_compile;
+}
 
 // Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui contexts
 // It is STRONGLY preferred that you use docking branch with multi-viewports (== single Dear ImGui context + multiple windows) instead of multiple Dear ImGui contexts.
@@ -436,6 +482,10 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
 
     // Create the vertex shader
     {
+        ImGui_ImplDX11_D3DCompileFn d3d_compile = ImGui_ImplDX11_GetD3DCompile();
+        if (d3d_compile == nullptr)
+            return false;
+
         static const char* vertexShader =
             "cbuffer vertexBuffer : register(b0) \
             {\
@@ -465,7 +515,7 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
             }";
 
         ID3DBlob* vertexShaderBlob;
-        if (FAILED(D3DCompile(vertexShader, strlen(vertexShader), nullptr, nullptr, nullptr, "main", "vs_4_0", 0, 0, &vertexShaderBlob, nullptr)))
+        if (FAILED(d3d_compile(vertexShader, strlen(vertexShader), nullptr, nullptr, nullptr, "main", "vs_4_0", 0, 0, &vertexShaderBlob, nullptr)))
             return false; // NB: Pass ID3DBlob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
         if (bd->pd3dDevice->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), nullptr, &bd->pVertexShader) != S_OK)
         {
@@ -501,6 +551,10 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
 
     // Create the pixel shader
     {
+        ImGui_ImplDX11_D3DCompileFn d3d_compile = ImGui_ImplDX11_GetD3DCompile();
+        if (d3d_compile == nullptr)
+            return false;
+
         static const char* pixelShader =
             "struct PS_INPUT\
             {\
@@ -518,7 +572,7 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
             }";
 
         ID3DBlob* pixelShaderBlob;
-        if (FAILED(D3DCompile(pixelShader, strlen(pixelShader), nullptr, nullptr, nullptr, "main", "ps_4_0", 0, 0, &pixelShaderBlob, nullptr)))
+        if (FAILED(d3d_compile(pixelShader, strlen(pixelShader), nullptr, nullptr, nullptr, "main", "ps_4_0", 0, 0, &pixelShaderBlob, nullptr)))
             return false; // NB: Pass ID3DBlob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
         if (bd->pd3dDevice->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(), nullptr, &bd->pPixelShader) != S_OK)
         {
