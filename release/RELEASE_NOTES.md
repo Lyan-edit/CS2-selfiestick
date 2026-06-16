@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.5 Release Notes
+# CS2 Selfiestick v0.3.6 Release Notes
 
 ## Supported Runtime
 

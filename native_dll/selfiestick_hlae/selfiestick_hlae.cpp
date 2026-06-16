@@ -10100,7 +10100,7 @@ DWORD InitializeSelfieStickImpl() {
     }
     TracePrintf("init-stage stage=%d name=%s ok", 4, InitStageToString(4));
 
-    if (schema::ShouldWaitForStartupSchemaResolve(compat::CanInstallSetUpViewHook(g_runtimeCompatibility))) {
+    if (schema::ShouldWaitForStartupSchemaResolve(compat::CanProbeSetUpViewHook(g_runtimeCompatibility))) {
         WaitForStartupSchemaResolve("InitializeSelfieStick");
     }
     else {
