@@ -30,6 +30,7 @@ int main() {
     using selfiestick::compat::ClientEntityKind;
     using selfiestick::compat::IsInstructionPointerInsidePatchRange;
     using selfiestick::compat::RuntimeCompatibility;
+    using selfiestick::compat::ShouldRetryHotPatchForActiveInstructionPointer;
     using selfiestick::compat::ShouldUseObserverPawnAsFollowTarget;
     using selfiestick::compat::ShouldUseSceneOriginEyeFallback;
     using selfiestick::compat::ShouldUseSyntheticFallbackHandAnchor;
@@ -542,6 +543,14 @@ int main() {
 
     if (IsInstructionPointerInsidePatchRange(0x1000u, 0u, 17u)) {
         return ReportFailure("live patch safety should reject a null patch address");
+    }
+
+    if (!ShouldRetryHotPatchForActiveInstructionPointer(0x1004u, 0x1000u, 17u)) {
+        return ReportFailure("hotpatch should retry while a suspended thread is inside the patch range");
+    }
+
+    if (ShouldRetryHotPatchForActiveInstructionPointer(0x1011u, 0x1000u, 17u)) {
+        return ReportFailure("hotpatch should not retry when a suspended thread is at the exclusive patch end");
     }
 
     if (DetermineDeclaredClassScanLimit(0u) != 32768u) {

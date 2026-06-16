@@ -2044,20 +2044,30 @@ bool WriteProcessMemoryProtected(void* address, const void* bytes, std::size_t s
 struct SuspendedThread {
     HANDLE handle{};
     DWORD threadId{};
+    bool suspended{};
 };
 
-void ResumeSuspendedThreads(std::vector<SuspendedThread>& threads) {
-    for (auto it = threads.rbegin(); it != threads.rend(); ++it) {
-        if (it->handle != nullptr) {
-            ResumeThread(it->handle);
-            CloseHandle(it->handle);
+void ClosePatchThreadHandles(std::vector<SuspendedThread>& threads) {
+    for (SuspendedThread& thread : threads) {
+        if (thread.handle != nullptr) {
+            CloseHandle(thread.handle);
+            thread.handle = nullptr;
         }
     }
     threads.clear();
 }
 
-bool SuspendOtherProcessThreads(std::vector<SuspendedThread>& suspendedThreads) {
-    suspendedThreads.clear();
+void ResumeSuspendedThreads(std::vector<SuspendedThread>& threads) {
+    for (auto it = threads.rbegin(); it != threads.rend(); ++it) {
+        if (it->handle != nullptr && it->suspended) {
+            ResumeThread(it->handle);
+            it->suspended = false;
+        }
+    }
+}
+
+bool CollectOtherProcessThreads(std::vector<SuspendedThread>& threads) {
+    threads.clear();
     const DWORD currentProcessId = GetCurrentProcessId();
     const DWORD currentThreadId = GetCurrentThreadId();
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -2072,7 +2082,6 @@ bool SuspendOtherProcessThreads(std::vector<SuspendedThread>& suspendedThreads) 
         return false;
     }
 
-    bool ok = true;
     do {
         if (entry.th32OwnerProcessID != currentProcessId || entry.th32ThreadID == currentThreadId) {
             continue;
@@ -2083,20 +2092,29 @@ bool SuspendOtherProcessThreads(std::vector<SuspendedThread>& suspendedThreads) 
             continue;
         }
 
-        if (SuspendThread(thread) == static_cast<DWORD>(-1)) {
-            CloseHandle(thread);
-            ok = false;
-            break;
-        }
-
-        suspendedThreads.push_back(SuspendedThread{ thread, entry.th32ThreadID });
+        threads.push_back(SuspendedThread{ thread, entry.th32ThreadID, false });
     } while (Thread32Next(snapshot, &entry));
 
     CloseHandle(snapshot);
-    if (!ok) {
-        ResumeSuspendedThreads(suspendedThreads);
+    return true;
+}
+
+bool SuspendCollectedThreads(std::vector<SuspendedThread>& threads, std::size_t& suspendedCount) {
+    suspendedCount = 0u;
+    for (SuspendedThread& thread : threads) {
+        if (thread.handle == nullptr) {
+            continue;
+        }
+
+        if (SuspendThread(thread.handle) == static_cast<DWORD>(-1)) {
+            ResumeSuspendedThreads(threads);
+            return false;
+        }
+
+        thread.suspended = true;
+        ++suspendedCount;
     }
-    return ok;
+    return true;
 }
 
 bool AnySuspendedThreadInsidePatchRange(
@@ -2121,7 +2139,7 @@ bool AnySuspendedThreadInsidePatchRange(
 #else
         const std::uintptr_t rip = static_cast<std::uintptr_t>(context.Eip);
 #endif
-        if (compat::IsInstructionPointerInsidePatchRange(rip, patchAddress, patchSize)) {
+        if (compat::ShouldRetryHotPatchForActiveInstructionPointer(rip, patchAddress, patchSize)) {
             threadId = thread.threadId;
             instructionPointer = rip;
             return true;
@@ -2141,15 +2159,24 @@ bool WriteHotCodePatchSafely(void* address, const void* bytes, std::size_t size)
     const std::uintptr_t patchAddress = reinterpret_cast<std::uintptr_t>(address);
     for (unsigned int attempt = 1u; attempt <= kMaxPatchAttempts; ++attempt) {
         std::vector<SuspendedThread> suspendedThreads;
-        if (!SuspendOtherProcessThreads(suspendedThreads)) {
-            TracePrintf("hotpatch-fail reason=suspend attempt=%u gle=%lu", attempt, GetLastError());
+        if (!CollectOtherProcessThreads(suspendedThreads)) {
+            TracePrintf("hotpatch-fail reason=collect-threads attempt=%u gle=%lu", attempt, GetLastError());
             return false;
+        }
+
+        std::size_t suspendedCount = 0u;
+        if (!SuspendCollectedThreads(suspendedThreads, suspendedCount)) {
+            ClosePatchThreadHandles(suspendedThreads);
+            TracePrintf("hotpatch-retry reason=suspend-failed attempt=%u gle=%lu", attempt, GetLastError());
+            Sleep(kPatchRetrySleepMs);
+            continue;
         }
 
         DWORD activeThreadId = 0;
         std::uintptr_t activeRip = 0u;
         if (AnySuspendedThreadInsidePatchRange(suspendedThreads, patchAddress, size, activeThreadId, activeRip)) {
             ResumeSuspendedThreads(suspendedThreads);
+            ClosePatchThreadHandles(suspendedThreads);
             TracePrintf(
                 "hotpatch-retry reason=thread-in-range attempt=%u thread=%lu rip=%p patch=%p size=%llu",
                 attempt,
@@ -2164,6 +2191,7 @@ bool WriteHotCodePatchSafely(void* address, const void* bytes, std::size_t size)
 
         const bool written = WriteProcessMemoryProtected(address, bytes, size);
         ResumeSuspendedThreads(suspendedThreads);
+        ClosePatchThreadHandles(suspendedThreads);
         return written;
     }
 

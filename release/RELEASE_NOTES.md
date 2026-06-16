@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.6 Release Notes
+# CS2 Selfiestick v0.3.7 Release Notes
 
 ## Supported Runtime
 
@@ -19,6 +19,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Fixed a demo-process freeze seen on some external PCs by removing heap allocation from the thread-suspended hotpatch window.
+- Hotpatch installation now opens and stores thread handles before suspension, then only checks thread RIP, writes the SetUpView patch, and resumes threads inside the short suspended window.
 - Fixed demo-time DLL loading hang by skipping the startup schema wait when SetUpView hook installation no longer depends on schema readiness.
 - Added safer hotpatch installation that avoids writing the SetUpView patch while another thread is executing inside the patch range.
 - Fixed external-user startup where HLAE printed `LoadLibraryA Ok.` but the DLL then stopped with `SetUpView hook blocked by compatibility gate` when schema offsets were not ready yet.
@@ -57,6 +59,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 新增内容：
 
+- 修复部分别人电脑上“大厅能加载 DLL，但进入 demo 后游戏进程无响应”的问题：热补丁安装时不再在暂停其它线程的窗口内分配堆内存，降低死锁风险。
+- 热补丁安装现在先打开并保存线程句柄，再进入极短暂停窗口；暂停窗口内只检查线程 RIP、写入 SetUpView 补丁并立刻恢复线程。
 - 修复 demo 中加载 DLL 时的卡死：当 SetUpView hook 已不再依赖 schema 时，启动阶段不再等待 schema 解析。
 - 新增更安全的热补丁安装流程：如果有线程正在补丁区内执行，先让线程退出该范围再写入 SetUpView 跳转。
 - 修复别人电脑上出现 `LoadLibraryA Ok.` 但随后提示 `SetUpView hook blocked by compatibility gate` 的问题。原因是 schema offsets 还没准备好时，旧版本把 SetUpView hook 安装也一起阻塞了。

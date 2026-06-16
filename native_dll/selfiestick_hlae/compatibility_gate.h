@@ -60,6 +60,11 @@ bool IsInstructionPointerInsidePatchRange(
     std::uintptr_t patchAddress,
     std::size_t patchSize
 ) noexcept;
+bool ShouldRetryHotPatchForActiveInstructionPointer(
+    std::uintptr_t instructionPointer,
+    std::uintptr_t patchAddress,
+    std::size_t patchSize
+) noexcept;
 bool ShouldAcceptPropOwnerCandidate(
     unsigned int targetPawnHandle,
     unsigned int targetControllerHandle,
