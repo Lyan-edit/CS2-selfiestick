@@ -38,6 +38,7 @@ bool ShouldStartBackgroundSchemaResolve(
     unsigned long long retryIntervalMs
 ) noexcept;
 bool ShouldWaitForStartupSchemaResolve(bool setupViewHookCanInstallWithoutSchema) noexcept;
+bool ShouldStartSchemaResolveAtStartup(bool setupViewHookCanInstallWithoutSchema) noexcept;
 bool ShouldUseSchemaInterfaceFallback(bool rawScopeFound, bool rawPayloadsCollected, bool rawOffsetsComplete) noexcept;
 bool BuildQualifiedClassName(const char* moduleName, const char* className, std::string& qualifiedName);
 std::size_t BuildSchemaClassLookupCandidates(

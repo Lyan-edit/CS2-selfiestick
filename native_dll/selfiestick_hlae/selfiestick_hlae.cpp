@@ -1029,7 +1029,7 @@ struct OverlayUiState {
 };
 
 struct DebugOptions {
-    bool traceEnabled{true};
+    bool traceEnabled{false};
     bool disableScopedFovOverride{false};
     bool disableGunStabilization{false};
 };
@@ -7548,7 +7548,7 @@ void LoadPersistedCameraSettings() {
 
 void LoadDebugOptions() {
     const std::wstring settingsPath = GetSettingsFilePath();
-    g_debugOptions.traceEnabled = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyTraceEnabled, 1, settingsPath.c_str());
+    g_debugOptions.traceEnabled = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyTraceEnabled, 0, settingsPath.c_str());
     g_debugOptions.disableScopedFovOverride = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyDisableScopedFovOverride, 0, settingsPath.c_str());
     g_debugOptions.disableGunStabilization = 0 != GetPrivateProfileIntW(kSettingsSectionDebug, kSettingsKeyDisableGunStabilization, 0, settingsPath.c_str());
 }
@@ -10111,13 +10111,7 @@ DWORD InitializeSelfieStickImpl() {
     }
     g_lastSchemaResolveAttemptTickMs.store(0ull, std::memory_order_relaxed);
     g_schemaResolveInProgress.store(false, std::memory_order_release);
-    const bool schemaResolveStarted = StartBackgroundSchemaResolve("InitializeSelfieStick", true);
-    TracePrintf(
-        "init-stage stage=%d name=%s deferred backgroundStarted=%d",
-        3,
-        InitStageToString(3),
-        schemaResolveStarted ? 1 : 0
-    );
+    TracePrintf("init-stage stage=%d name=%s deferred backgroundStarted=0 reason=pending-hook-capability", 3, InitStageToString(3));
 
     g_initStage.store(4, std::memory_order_relaxed);
     TracePrintf("init-stage stage=%d name=%s enter", 4, InitStageToString(4));
@@ -10127,6 +10121,18 @@ DWORD InitializeSelfieStickImpl() {
         return 0;
     }
     TracePrintf("init-stage stage=%d name=%s ok", 4, InitStageToString(4));
+
+    bool schemaResolveStarted = false;
+    if (schema::ShouldStartSchemaResolveAtStartup(compat::CanProbeSetUpViewHook(g_runtimeCompatibility))) {
+        schemaResolveStarted = StartBackgroundSchemaResolve("InitializeSelfieStick", true);
+        TracePrintf(
+            "schema-async caller=InitializeSelfieStick startup-policy=started result=%d",
+            schemaResolveStarted ? 1 : 0
+        );
+    }
+    else {
+        TracePrintf("schema-async caller=InitializeSelfieStick startup-policy=lazy reason=hook-does-not-need-schema");
+    }
 
     if (schema::ShouldWaitForStartupSchemaResolve(compat::CanProbeSetUpViewHook(g_runtimeCompatibility))) {
         WaitForStartupSchemaResolve("InitializeSelfieStick");

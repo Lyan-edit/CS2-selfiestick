@@ -65,6 +65,7 @@ int main() {
     using selfiestick::schema::DetermineTypeScopeLookupProbeSlotLimit;
     using selfiestick::schema::IsUniqueRawSchemaCandidateCount;
     using selfiestick::schema::ShouldStartBackgroundSchemaResolve;
+    using selfiestick::schema::ShouldStartSchemaResolveAtStartup;
     using selfiestick::schema::ShouldWaitForStartupSchemaResolve;
     using selfiestick::schema::ShouldUseSchemaInterfaceFallback;
     using selfiestick::schema::BuildQualifiedClassName;
@@ -696,6 +697,14 @@ int main() {
 
     if (!ShouldWaitForStartupSchemaResolve(false)) {
         return ReportFailure("startup should wait for schema only when hook installation still requires schema");
+    }
+
+    if (ShouldStartSchemaResolveAtStartup(true)) {
+        return ReportFailure("startup should not launch heavy schema resolve when SetUpView hook can install without schema");
+    }
+
+    if (!ShouldStartSchemaResolveAtStartup(false)) {
+        return ReportFailure("startup should launch schema resolve when hook installation still requires schema");
     }
 
     if (ShouldUseSchemaInterfaceFallback(true, true, false)) {

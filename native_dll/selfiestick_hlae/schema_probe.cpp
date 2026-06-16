@@ -103,6 +103,10 @@ bool ShouldWaitForStartupSchemaResolve(bool setupViewHookCanInstallWithoutSchema
     return !setupViewHookCanInstallWithoutSchema;
 }
 
+bool ShouldStartSchemaResolveAtStartup(bool setupViewHookCanInstallWithoutSchema) noexcept {
+    return !setupViewHookCanInstallWithoutSchema;
+}
+
 bool ShouldUseSchemaInterfaceFallback(bool rawScopeFound, bool rawPayloadsCollected, bool rawOffsetsComplete) noexcept {
     if (rawOffsetsComplete) {
         return false;

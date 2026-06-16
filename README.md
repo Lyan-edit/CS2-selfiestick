@@ -5,7 +5,7 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.7`.
+Latest source/release package in this repository: `v0.3.8`.
 
 ## Supported Versions
 
@@ -58,11 +58,13 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.7` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, the UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`, so a missing VC++ runtime should not block loading.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.8` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, the UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`, so a missing VC++ runtime should not block loading.
 
-If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.7` or newer.
+If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.8` or newer.
 
-If the DLL is loaded while a demo is already playing, `v0.3.7` no longer waits for schema resolution before installing the camera hook. It also avoids doing heap allocations while other game threads are suspended during hotpatch installation, which fixes a demo-process freeze seen on some external PCs.
+If the DLL is loaded while a demo is already playing, `v0.3.8` no longer waits for schema resolution before installing the camera hook and no longer starts heavy schema resolution at startup when the hook can install without schema offsets. Trace logging is also off by default in code and in the packaged `selfiestick.ini`, so ordinary PCs do not spend the first demo frames doing high-volume schema diagnostics and file writes. This targets the external-PC symptom where the lobby could load the DLL but the game became unresponsive after entering a demo.
+
+If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
 For slow-motion setup, use the CS2 demo UI / HLAE playback controls, or run this in the game console when available:
 
@@ -145,7 +147,14 @@ The Runtime panel shows:
 - last override result
 - failure reason
 
-Debug trace is written next to the loaded DLL:
+Debug trace is off by default. To collect diagnostics, set this in `selfiestick.ini` next to the loaded DLL, then fully restart HLAE/CS2:
+
+```ini
+[Debug]
+TraceEnabled=1
+```
+
+When enabled, debug trace is written next to the loaded DLL:
 
 ```text
 selfiestick_trace.log

@@ -41,6 +41,10 @@ If loading succeeds, the console prints a selfiestick ready message. Press `Ins`
 
 If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`.
 
+Current release DLLs also avoid heavy startup schema resolving when the camera hook can be installed without schema offsets. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
+
+If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
+
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
 ```cfg
@@ -116,4 +120,6 @@ Read the Runtime panel when the camera is blocked. Common examples:
 - prop ended
 - schema or SetUpView compatibility failure
 
-The DLL writes `selfiestick_trace.log` next to the loaded DLL. If you replace the DLL, fully restart HLAE and CS2 before testing again.
+Trace logging is off by default. To collect diagnostics, set `[Debug] TraceEnabled=1` in `selfiestick.ini` next to the DLL and fully restart HLAE/CS2. The DLL then writes `selfiestick_trace.log` next to the loaded DLL.
+
+If you replace the DLL, fully restart HLAE and CS2 before testing again.

@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.7 Release Notes
+# CS2 Selfiestick v0.3.8 Release Notes
 
 ## Supported Runtime
 
@@ -19,6 +19,11 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Fixed another external-PC demo-load no-response path found from a shared `selfiestick_trace.log`: the DLL was loaded successfully and `bridge-enter` was running, but startup schema diagnostics kept doing heavy schema probing and logging during early demo frames.
+- Startup schema resolution is now lazy when the SetUpView hook can install without schema offsets. Schema offsets are resolved only when player/prop camera code actually needs them.
+- Debug trace is now off by default both in code and in the packaged `selfiestick.ini`. Users can still enable `[Debug] TraceEnabled=1` when collecting diagnostics.
+- Existing old `selfiestick.ini` files can still override the new default. Delete the old ini or set `[Debug] TraceEnabled=0` before testing this release on another PC.
+- Removed an old packaged `selfiestick_trace.log` from the Chinese release folder so users do not copy stale debug output with the DLL.
 - Fixed a demo-process freeze seen on some external PCs by removing heap allocation from the thread-suspended hotpatch window.
 - Hotpatch installation now opens and stores thread handles before suspension, then only checks thread RIP, writes the SetUpView patch, and resumes threads inside the short suspended window.
 - Fixed demo-time DLL loading hang by skipping the startup schema wait when SetUpView hook installation no longer depends on schema readiness.
@@ -60,6 +65,11 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 新增内容：
 
 - 修复部分别人电脑上“大厅能加载 DLL，但进入 demo 后游戏进程无响应”的问题：热补丁安装时不再在暂停其它线程的窗口内分配堆内存，降低死锁风险。
+- 根据别人电脑提供的 `selfiestick_trace.log` 继续修复一条进入 demo 后无响应路径：日志显示 DLL 已加载并进入 `bridge-enter`，但启动阶段仍在高频执行 schema 诊断和写日志。
+- 当 SetUpView hook 已经不需要 schema offsets 就能安装时，启动阶段不再主动启动重 schema 解析；真正的人物 / 道具相机代码需要读取字段时再延迟解析。
+- 代码默认值和 release 自带 `selfiestick.ini` 都已把 `TraceEnabled` 改为 `0`。只有排查问题时才建议手动打开 `[Debug] TraceEnabled=1`。
+- 如果用户机器上已经有旧版生成的 `selfiestick.ini`，旧配置仍会覆盖新默认值；测试新版前请删除旧 ini，或确认 `[Debug] TraceEnabled=0`。
+- 中文 release 目录中清理了旧的 `selfiestick_trace.log`，避免用户复制整包时把旧调试日志一起带走。
 - 热补丁安装现在先打开并保存线程句柄，再进入极短暂停窗口；暂停窗口内只检查线程 RIP、写入 SetUpView 补丁并立刻恢复线程。
 - 修复 demo 中加载 DLL 时的卡死：当 SetUpView hook 已不再依赖 schema 时，启动阶段不再等待 schema 解析。
 - 新增更安全的热补丁安装流程：如果有线程正在补丁区内执行，先让线程退出该范围再写入 SetUpView 跳转。
