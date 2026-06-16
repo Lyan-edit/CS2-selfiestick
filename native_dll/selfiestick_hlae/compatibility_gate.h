@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 namespace selfiestick::compat {
@@ -54,6 +55,11 @@ PropProjectileKind ClassifyPropProjectileClassName(std::string_view className);
 bool CanResolveFollowTarget(const RuntimeCompatibility& compatibility) noexcept;
 bool CanProbeSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept;
 bool CanInstallSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept;
+bool IsInstructionPointerInsidePatchRange(
+    std::uintptr_t instructionPointer,
+    std::uintptr_t patchAddress,
+    std::size_t patchSize
+) noexcept;
 bool ShouldAcceptPropOwnerCandidate(
     unsigned int targetPawnHandle,
     unsigned int targetControllerHandle,

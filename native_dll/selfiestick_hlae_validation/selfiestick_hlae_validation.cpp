@@ -28,6 +28,7 @@ int main() {
     using selfiestick::compat::CanResolveFollowTarget;
     using selfiestick::compat::ClassifyEntityClassName;
     using selfiestick::compat::ClientEntityKind;
+    using selfiestick::compat::IsInstructionPointerInsidePatchRange;
     using selfiestick::compat::RuntimeCompatibility;
     using selfiestick::compat::ShouldUseObserverPawnAsFollowTarget;
     using selfiestick::compat::ShouldUseSceneOriginEyeFallback;
@@ -63,6 +64,7 @@ int main() {
     using selfiestick::schema::DetermineTypeScopeLookupProbeSlotLimit;
     using selfiestick::schema::IsUniqueRawSchemaCandidateCount;
     using selfiestick::schema::ShouldStartBackgroundSchemaResolve;
+    using selfiestick::schema::ShouldWaitForStartupSchemaResolve;
     using selfiestick::schema::ShouldUseSchemaInterfaceFallback;
     using selfiestick::schema::BuildQualifiedClassName;
     using selfiestick::schema::BuildSchemaClassLookupCandidates;
@@ -530,6 +532,18 @@ int main() {
         return ReportFailure("SetUpView hook should install when all compatibility gates are satisfied");
     }
 
+    if (!IsInstructionPointerInsidePatchRange(0x1004u, 0x1000u, 17u)) {
+        return ReportFailure("live patch safety should detect instruction pointers inside the patch range");
+    }
+
+    if (IsInstructionPointerInsidePatchRange(0x1011u, 0x1000u, 17u)) {
+        return ReportFailure("live patch safety should treat the patch range end as exclusive");
+    }
+
+    if (IsInstructionPointerInsidePatchRange(0x1000u, 0u, 17u)) {
+        return ReportFailure("live patch safety should reject a null patch address");
+    }
+
     if (DetermineDeclaredClassScanLimit(0u) != 32768u) {
         return ReportFailure("zero declared class count should use the fallback scan limit");
     }
@@ -665,6 +679,14 @@ int main() {
 
     if (!ShouldStartBackgroundSchemaResolve(false, false, true, 500ull, 500ull)) {
         return ReportFailure("background schema resolve should retry once the backoff interval expires");
+    }
+
+    if (ShouldWaitForStartupSchemaResolve(true)) {
+        return ReportFailure("startup should not wait for schema when SetUpView hook can install without schema");
+    }
+
+    if (!ShouldWaitForStartupSchemaResolve(false)) {
+        return ReportFailure("startup should wait for schema only when hook installation still requires schema");
     }
 
     if (ShouldUseSchemaInterfaceFallback(true, true, false)) {

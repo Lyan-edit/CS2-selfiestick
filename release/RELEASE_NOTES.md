@@ -1,4 +1,4 @@
-# CS2 Selfiestick v0.3.4 Release Notes
+# CS2 Selfiestick v0.3.5 Release Notes
 
 ## Supported Runtime
 
@@ -19,6 +19,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Fixed demo-time DLL loading hang by skipping the startup schema wait when SetUpView hook installation no longer depends on schema readiness.
+- Added safer hotpatch installation that avoids writing the SetUpView patch while another thread is executing inside the patch range.
 - Fixed external-user startup where HLAE printed `LoadLibraryA Ok.` but the DLL then stopped with `SetUpView hook blocked by compatibility gate` when schema offsets were not ready yet.
 - SetUpView hook installation now requires only the trusted entity access, split-screen accessor, and patch site; schema offsets remain guarded lazily by the camera/target code that actually reads schema fields.
 - Rebuilt English and Chinese release DLLs with the MSVC runtime statically linked, so users do not need the Visual C++ Redistributable to load the DLL.
@@ -55,6 +57,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 新增内容：
 
+- 修复 demo 中加载 DLL 时的卡死：当 SetUpView hook 已不再依赖 schema 时，启动阶段不再等待 schema 解析。
+- 新增更安全的热补丁安装流程：如果有线程正在补丁区内执行，先让线程退出该范围再写入 SetUpView 跳转。
 - 修复别人电脑上出现 `LoadLibraryA Ok.` 但随后提示 `SetUpView hook blocked by compatibility gate` 的问题。原因是 schema offsets 还没准备好时，旧版本把 SetUpView hook 安装也一起阻塞了。
 - SetUpView hook 现在只要求实体入口、分屏入口和 patch site 可信；真正读取 schema 字段的人物/道具逻辑仍然会延迟检查 schema offsets，不会盲目读字段。
 - 中英文 release DLL 改为静态链接 MSVC 运行库，用户不需要安装 Visual C++ Redistributable 也能加载 DLL。

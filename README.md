@@ -5,7 +5,7 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.4`.
+Latest source/release package in this repository: `v0.3.5`.
 
 ## Supported Versions
 
@@ -58,9 +58,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.4` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, the UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`, so a missing VC++ runtime should not block loading.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.5` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, the UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`, so a missing VC++ runtime should not block loading.
 
-If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.4` or newer.
+If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.5` or newer.
+
+If the DLL is loaded while a demo is already playing, `v0.3.5` no longer waits for schema resolution before installing the camera hook. That avoids the startup hang seen in some demo-load cases.
 
 For slow-motion setup, use the CS2 demo UI / HLAE playback controls, or run this in the game console when available:
 

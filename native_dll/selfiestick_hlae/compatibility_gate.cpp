@@ -143,6 +143,23 @@ bool CanInstallSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept
         && compatibility.splitScreenAccessorReady;
 }
 
+bool IsInstructionPointerInsidePatchRange(
+    std::uintptr_t instructionPointer,
+    std::uintptr_t patchAddress,
+    std::size_t patchSize
+) noexcept {
+    if (instructionPointer == 0u || patchAddress == 0u || patchSize == 0u) {
+        return false;
+    }
+
+    const std::uintptr_t patchEnd = patchAddress + patchSize;
+    if (patchEnd <= patchAddress) {
+        return false;
+    }
+
+    return instructionPointer >= patchAddress && instructionPointer < patchEnd;
+}
+
 bool ShouldAcceptPropOwnerCandidate(
     unsigned int targetPawnHandle,
     unsigned int targetControllerHandle,
