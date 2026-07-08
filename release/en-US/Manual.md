@@ -17,7 +17,7 @@ The DLL is built with the MSVC runtime statically linked. You do not need to ins
 This package is marked for:
 
 - HLAE: `2.190.2`
-- Counter-Strike 2: Steam app `730`, buildid `23669931`
+- Counter-Strike 2: Steam app `730`, buildid `24074625`
 
 Use it for HLAE demo/cinematic workflows only.
 
@@ -39,9 +39,9 @@ mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 
 If loading succeeds, the console prints a selfiestick ready message. Press `Ins` to open the ImGui panel.
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`.
 
-Current release DLLs also avoid heavy startup schema resolving when the camera hook can be installed without schema offsets. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
+Current release DLLs also avoid heavy startup schema resolving and no longer install the SetUpView camera hotpatch during `mirv_loadlibrary`. The hotpatch is installed only when you press `F8` or click Enable; if that hook is not compatible with the current CS2 build, the DLL stays loaded and shows a Runtime reason instead of taking the demo process down. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 

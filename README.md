@@ -5,15 +5,15 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.8`.
+Latest source/release package in this repository: `v0.3.9`.
 
 ## Supported Versions
 
 This build is marked for:
 
 - HLAE: `2.190.2`
-- Counter-Strike 2: Steam app `730`, buildid `23669931`
-- CS2 app manifest timestamp used locally: `2026-06-11 08:24:56 +08:00`
+- Counter-Strike 2: Steam app `730`, buildid `24074625`
+- CS2 app manifest timestamp used locally: `2026-07-08 09:56:30 +08:00`
 
 CS2 and HLAE update often. If Valve or HLAE changes schema, entity layout, or `SetUpView`, load may fail by design and the panel will show a reason instead of silently using an unsafe fallback.
 
@@ -58,11 +58,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.8` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, the UCRT `api-ms-win-crt-*` DLLs, or a load-time `D3DCOMPILER_47.dll`, so a missing VC++ runtime should not block loading.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.9` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`, so a missing VC++ runtime or shader compiler DLL should not block loading.
 
-If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.8` or newer.
+If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.9` or newer.
 
-If the DLL is loaded while a demo is already playing, `v0.3.8` no longer waits for schema resolution before installing the camera hook and no longer starts heavy schema resolution at startup when the hook can install without schema offsets. Trace logging is also off by default in code and in the packaged `selfiestick.ini`, so ordinary PCs do not spend the first demo frames doing high-volume schema diagnostics and file writes. This targets the external-PC symptom where the lobby could load the DLL but the game became unresponsive after entering a demo.
+If the DLL is loaded while a demo is already playing, `v0.3.9` no longer installs the SetUpView camera hotpatch during `mirv_loadlibrary`. The hook is installed lazily only when the user presses `F8` or clicks Enable, and a failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging is also off by default in code and in the packaged `selfiestick.ini`, so ordinary PCs do not spend the first demo frames doing high-volume schema diagnostics and file writes. This targets the external-PC symptom where the lobby could load the DLL but the game became unresponsive or crashed after entering a demo.
 
 If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
@@ -197,7 +197,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check_dll_dependencies
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\check_dll_dependencies.ps1 -DllPath "release\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-The check fails if a release DLL has load-time dependencies on VC++ runtime DLLs or `D3DCOMPILER_47.dll`.
+The check fails if a release DLL has load-time dependencies on VC++ runtime DLLs, `D3DCOMPILER_*.dll`, or imports `D3DCompile`.
 
 Do not run `npm run build` during agent sessions for this repository. The native DLL flow is independent of the Next.js app guidance.
 

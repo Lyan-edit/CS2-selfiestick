@@ -143,6 +143,10 @@ bool CanInstallSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept
         && compatibility.splitScreenAccessorReady;
 }
 
+bool CanEnableCameraOverride(const RuntimeCompatibility& compatibility) noexcept {
+    return CanInstallSetUpViewHook(compatibility);
+}
+
 bool IsInstructionPointerInsidePatchRange(
     std::uintptr_t instructionPointer,
     std::uintptr_t patchAddress,

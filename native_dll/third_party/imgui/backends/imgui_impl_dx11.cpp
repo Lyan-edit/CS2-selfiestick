@@ -32,7 +32,7 @@
 //  2019-07-21: DirectX11: Backup, clear and restore Geometry Shader is any is bound when calling ImGui_ImplDX11_RenderDrawData. Clearing Hull/Domain/Compute shaders without backup/restore.
 //  2019-05-29: DirectX11: Added support for large mesh (64K+ vertices), enable ImGuiBackendFlags_RendererHasVtxOffset flag.
 //  2019-04-30: DirectX11: Added support for special ImDrawCallback_ResetRenderState callback to reset render state.
-//  2018-12-03: Misc: Added #pragma comment statement to automatically link with d3dcompiler.lib when using D3DCompile().
+//  2026-07-01: Misc: Use embedded shader bytecode to avoid runtime dependency on d3dcompiler_*.dll.
 //  2018-11-30: Misc: Setting up io.BackendRendererName so it can be displayed in the About Window.
 //  2018-08-01: DirectX11: Querying for IDXGIFactory instead of IDXGIFactory1 to increase compatibility.
 //  2018-07-13: DirectX11: Fixed unreleased resources in Init and Shutdown functions.
@@ -50,7 +50,7 @@
 #include <stdio.h>
 #include <windows.h>
 #include <d3d11.h>
-#include <d3dcompiler.h>
+#include "imgui_impl_dx11_shaders.h"
 
 // Clang/GCC warnings with -Weverything
 #if defined(__clang__)
@@ -91,54 +91,6 @@ struct VERTEX_CONSTANT_BUFFER_DX11
 {
     float   mvp[4][4];
 };
-
-typedef HRESULT (WINAPI *ImGui_ImplDX11_D3DCompileFn)(
-    LPCVOID pSrcData,
-    SIZE_T SrcDataSize,
-    LPCSTR pSourceName,
-    const D3D_SHADER_MACRO* pDefines,
-    ID3DInclude* pInclude,
-    LPCSTR pEntrypoint,
-    LPCSTR pTarget,
-    UINT Flags1,
-    UINT Flags2,
-    ID3DBlob** ppCode,
-    ID3DBlob** ppErrorMsgs
-);
-
-static ImGui_ImplDX11_D3DCompileFn ImGui_ImplDX11_GetD3DCompile()
-{
-    static bool attempted = false;
-    static HMODULE d3dcompiler_module = nullptr;
-    static ImGui_ImplDX11_D3DCompileFn d3d_compile = nullptr;
-
-    if (!attempted)
-    {
-        attempted = true;
-        const wchar_t* candidates[] =
-        {
-            L"d3dcompiler_47.dll",
-            L"d3dcompiler_46.dll",
-            L"d3dcompiler_43.dll"
-        };
-
-        for (const wchar_t* candidate : candidates)
-        {
-            d3dcompiler_module = LoadLibraryW(candidate);
-            if (d3dcompiler_module == nullptr)
-                continue;
-
-            d3d_compile = (ImGui_ImplDX11_D3DCompileFn)GetProcAddress(d3dcompiler_module, "D3DCompile");
-            if (d3d_compile != nullptr)
-                break;
-
-            FreeLibrary(d3dcompiler_module);
-            d3dcompiler_module = nullptr;
-        }
-    }
-
-    return d3d_compile;
-}
 
 // Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui contexts
 // It is STRONGLY preferred that you use docking branch with multi-viewports (== single Dear ImGui context + multiple windows) instead of multiple Dear ImGui contexts.
@@ -474,54 +426,10 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
         return false;
     ImGui_ImplDX11_InvalidateDeviceObjects();
 
-    // By using D3DCompile() from <d3dcompiler.h> / d3dcompiler.lib, we introduce a dependency to a given version of d3dcompiler_XX.dll (see D3DCOMPILER_DLL_A)
-    // If you would like to use this DX11 sample code but remove this dependency you can:
-    //  1) compile once, save the compiled shader blobs into a file or source code and pass them to CreateVertexShader()/CreatePixelShader() [preferred solution]
-    //  2) use code to detect any version of the DLL and grab a pointer to D3DCompile from the DLL.
-    // See https://github.com/ocornut/imgui/pull/638 for sources and details.
-
     // Create the vertex shader
     {
-        ImGui_ImplDX11_D3DCompileFn d3d_compile = ImGui_ImplDX11_GetD3DCompile();
-        if (d3d_compile == nullptr)
+        if (bd->pd3dDevice->CreateVertexShader(g_imguiDx11VertexShaderBytecode, g_imguiDx11VertexShaderBytecodeSize, nullptr, &bd->pVertexShader) != S_OK)
             return false;
-
-        static const char* vertexShader =
-            "cbuffer vertexBuffer : register(b0) \
-            {\
-              float4x4 ProjectionMatrix; \
-            };\
-            struct VS_INPUT\
-            {\
-              float2 pos : POSITION;\
-              float4 col : COLOR0;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            struct PS_INPUT\
-            {\
-              float4 pos : SV_POSITION;\
-              float4 col : COLOR0;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            PS_INPUT main(VS_INPUT input)\
-            {\
-              PS_INPUT output;\
-              output.pos = mul( ProjectionMatrix, float4(input.pos.xy, 0.f, 1.f));\
-              output.col = input.col;\
-              output.uv  = input.uv;\
-              return output;\
-            }";
-
-        ID3DBlob* vertexShaderBlob;
-        if (FAILED(d3d_compile(vertexShader, strlen(vertexShader), nullptr, nullptr, nullptr, "main", "vs_4_0", 0, 0, &vertexShaderBlob, nullptr)))
-            return false; // NB: Pass ID3DBlob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
-        if (bd->pd3dDevice->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), nullptr, &bd->pVertexShader) != S_OK)
-        {
-            vertexShaderBlob->Release();
-            return false;
-        }
 
         // Create the input layout
         D3D11_INPUT_ELEMENT_DESC local_layout[] =
@@ -530,12 +438,8 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
             { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (UINT)offsetof(ImDrawVert, uv),  D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (UINT)offsetof(ImDrawVert, col), D3D11_INPUT_PER_VERTEX_DATA, 0 },
         };
-        if (bd->pd3dDevice->CreateInputLayout(local_layout, 3, vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), &bd->pInputLayout) != S_OK)
-        {
-            vertexShaderBlob->Release();
+        if (bd->pd3dDevice->CreateInputLayout(local_layout, 3, g_imguiDx11VertexShaderBytecode, g_imguiDx11VertexShaderBytecodeSize, &bd->pInputLayout) != S_OK)
             return false;
-        }
-        vertexShaderBlob->Release();
 
         // Create the constant buffer
         {
@@ -551,35 +455,8 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
 
     // Create the pixel shader
     {
-        ImGui_ImplDX11_D3DCompileFn d3d_compile = ImGui_ImplDX11_GetD3DCompile();
-        if (d3d_compile == nullptr)
+        if (bd->pd3dDevice->CreatePixelShader(g_imguiDx11PixelShaderBytecode, g_imguiDx11PixelShaderBytecodeSize, nullptr, &bd->pPixelShader) != S_OK)
             return false;
-
-        static const char* pixelShader =
-            "struct PS_INPUT\
-            {\
-            float4 pos : SV_POSITION;\
-            float4 col : COLOR0;\
-            float2 uv  : TEXCOORD0;\
-            };\
-            sampler sampler0;\
-            Texture2D texture0;\
-            \
-            float4 main(PS_INPUT input) : SV_Target\
-            {\
-            float4 out_col = input.col * texture0.Sample(sampler0, input.uv); \
-            return out_col; \
-            }";
-
-        ID3DBlob* pixelShaderBlob;
-        if (FAILED(d3d_compile(pixelShader, strlen(pixelShader), nullptr, nullptr, nullptr, "main", "ps_4_0", 0, 0, &pixelShaderBlob, nullptr)))
-            return false; // NB: Pass ID3DBlob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
-        if (bd->pd3dDevice->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(), nullptr, &bd->pPixelShader) != S_OK)
-        {
-            pixelShaderBlob->Release();
-            return false;
-        }
-        pixelShaderBlob->Release();
     }
 
     // Create the blending setup

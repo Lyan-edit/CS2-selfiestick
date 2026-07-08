@@ -25,6 +25,7 @@ struct DeclaredClassProbe {
 int main() {
     using selfiestick::compat::CanProbeSetUpViewHook;
     using selfiestick::compat::CanInstallSetUpViewHook;
+    using selfiestick::compat::CanEnableCameraOverride;
     using selfiestick::compat::CanResolveFollowTarget;
     using selfiestick::compat::ClassifyEntityClassName;
     using selfiestick::compat::ClientEntityKind;
@@ -515,8 +516,18 @@ int main() {
         return ReportFailure("SetUpView hook probing should not require schema offsets");
     }
 
+    ready.setUpViewPatchReady = false;
+    if (CanEnableCameraOverride(ready)) {
+        return ReportFailure("camera override must not enable before SetUpView hook is installed");
+    }
+
+    ready.setUpViewPatchReady = true;
     if (!CanInstallSetUpViewHook(ready)) {
         return ReportFailure("SetUpView hook should install while schema offsets are still resolving");
+    }
+
+    if (!CanEnableCameraOverride(ready)) {
+        return ReportFailure("camera override should enable after SetUpView hook is installed");
     }
 
     ready.schemaOffsetsReady = true;

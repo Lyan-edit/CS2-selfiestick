@@ -1,10 +1,10 @@
-# CS2 Selfiestick v0.3.8 Release Notes
+# CS2 Selfiestick v0.3.9 Release Notes
 
 ## Supported Runtime
 
 - HLAE: `2.190.2`
-- Counter-Strike 2: Steam app `730`, buildid `23669931`
-- Local CS2 app manifest timestamp: `2026-06-11 08:24:56 +08:00`
+- Counter-Strike 2: Steam app `730`, buildid `24074625`
+- Local CS2 app manifest timestamp: `2026-07-08 09:56:30 +08:00`
 
 This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates can break schema, entity layout, or `SetUpView`; if that happens, the DLL reports a clear Runtime reason instead of silently falling back to unsafe behavior.
 
@@ -19,6 +19,9 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
+- Updated and rebuilt against the current local CS2 app `730` buildid `24074625`.
+- The DLL no longer installs the SetUpView camera hotpatch during `mirv_loadlibrary`; it loads first, then installs the hook lazily only when the user presses `F8` or clicks Enable.
+- If SetUpView hook installation is not compatible with the current CS2 build, the DLL now stays loaded, keeps the camera disabled, and reports a Runtime reason instead of taking the demo process down.
 - Fixed another external-PC demo-load no-response path found from a shared `selfiestick_trace.log`: the DLL was loaded successfully and `bridge-enter` was running, but startup schema diagnostics kept doing heavy schema probing and logging during early demo frames.
 - Startup schema resolution is now lazy when the SetUpView hook can install without schema offsets. Schema offsets are resolved only when player/prop camera code actually needs them.
 - Debug trace is now off by default both in code and in the packaged `selfiestick.ini`. Users can still enable `[Debug] TraceEnabled=1` when collecting diagnostics.
@@ -31,8 +34,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 - Fixed external-user startup where HLAE printed `LoadLibraryA Ok.` but the DLL then stopped with `SetUpView hook blocked by compatibility gate` when schema offsets were not ready yet.
 - SetUpView hook installation now requires only the trusted entity access, split-screen accessor, and patch site; schema offsets remain guarded lazily by the camera/target code that actually reads schema fields.
 - Rebuilt English and Chinese release DLLs with the MSVC runtime statically linked, so users do not need the Visual C++ Redistributable to load the DLL.
-- Removed load-time dependency on `D3DCOMPILER_47.dll`; the ImGui DX11 backend now loads D3DCompiler dynamically only when shader compilation is needed.
-- Added release dependency checks for VC++ runtime DLLs and `D3DCOMPILER_47.dll`.
+- Removed runtime dependency on `D3DCOMPILER_*.dll`; the ImGui DX11 backend now uses embedded shader bytecode instead of compiling shaders on the user's PC.
+- Added release dependency checks for VC++ runtime DLLs, `D3DCOMPILER_*.dll`, and `D3DCompile` imports.
 - Prop Selfie candidates now store and display the actual thrower handle.
 - Prop Selfie direction now prefers the actual projectile thrower instead of the current spectator target, fixing wrong look-back direction when teams or viewpoints differ.
 - Added a short smoke post-flight hold so smoke projectile shots do not end instantly when the flying smoke entity disappears.
@@ -60,10 +63,13 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 当前版本支持：
 
 - HLAE：`2.190.2`
-- CS2：Steam app `730`，buildid `23669931`
+- CS2：Steam app `730`，buildid `24074625`
 
 新增内容：
 
+- 已按当前本机 CS2 app `730` buildid `24074625` 重新构建。
+- DLL 不再在 `mirv_loadlibrary` 加载瞬间安装 SetUpView 相机热补丁；现在会先完成加载，只有按 `F8` 或点击启用自拍杆时才延迟安装 hook。
+- 如果当前 CS2 版本与 SetUpView hook 不兼容，DLL 会保持加载、保持相机关闭，并在 Runtime 区域显示原因，不再直接拖崩 demo 进程。
 - 修复部分别人电脑上“大厅能加载 DLL，但进入 demo 后游戏进程无响应”的问题：热补丁安装时不再在暂停其它线程的窗口内分配堆内存，降低死锁风险。
 - 根据别人电脑提供的 `selfiestick_trace.log` 继续修复一条进入 demo 后无响应路径：日志显示 DLL 已加载并进入 `bridge-enter`，但启动阶段仍在高频执行 schema 诊断和写日志。
 - 当 SetUpView hook 已经不需要 schema offsets 就能安装时，启动阶段不再主动启动重 schema 解析；真正的人物 / 道具相机代码需要读取字段时再延迟解析。
@@ -76,8 +82,8 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 - 修复别人电脑上出现 `LoadLibraryA Ok.` 但随后提示 `SetUpView hook blocked by compatibility gate` 的问题。原因是 schema offsets 还没准备好时，旧版本把 SetUpView hook 安装也一起阻塞了。
 - SetUpView hook 现在只要求实体入口、分屏入口和 patch site 可信；真正读取 schema 字段的人物/道具逻辑仍然会延迟检查 schema offsets，不会盲目读字段。
 - 中英文 release DLL 改为静态链接 MSVC 运行库，用户不需要安装 Visual C++ Redistributable 也能加载 DLL。
-- 移除对 `D3DCOMPILER_47.dll` 的加载时依赖；ImGui DX11 后端只在需要编译 shader 时动态加载 D3DCompiler。
-- 新增 release 依赖检查脚本，用来防止 VC++ 运行库和 `D3DCOMPILER_47.dll` 重新进入 DLL 导入表。
+- 移除对 `D3DCOMPILER_*.dll` 的运行时依赖；ImGui DX11 后端现在使用内置 shader 字节码，不再需要在用户电脑上编译 shader。
+- 新增 release 依赖检查脚本，用来防止 VC++ 运行库、`D3DCOMPILER_*.dll` 和 `D3DCompile` 导入重新进入 DLL。
 - 道具候选现在保存并显示实际投掷者 handle。
 - 道具自拍回看方向优先使用实际投掷该道具的玩家，不再单纯跟随当前观战目标方向，改善 T 方烟或切视角时朝向不对的问题。
 - 烟雾弹飞行实体消失后增加短暂镜头保留，避免烟刚爆开自拍镜头立刻结束。

@@ -55,6 +55,7 @@ PropProjectileKind ClassifyPropProjectileClassName(std::string_view className);
 bool CanResolveFollowTarget(const RuntimeCompatibility& compatibility) noexcept;
 bool CanProbeSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept;
 bool CanInstallSetUpViewHook(const RuntimeCompatibility& compatibility) noexcept;
+bool CanEnableCameraOverride(const RuntimeCompatibility& compatibility) noexcept;
 bool IsInstructionPointerInsidePatchRange(
     std::uintptr_t instructionPointer,
     std::uintptr_t patchAddress,

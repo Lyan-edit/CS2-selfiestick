@@ -1081,6 +1081,7 @@ std::mutex g_propCameraReferenceMutex;
 std::mutex g_propLookTargetMutex;
 std::mutex g_propPostFlightHoldMutex;
 std::mutex g_solidBrushCacheMutex;
+std::mutex g_setupViewHookInstallMutex;
 RuntimeState g_state;
 OverlayUiState g_ui;
 GunBasisContinuityState g_gunBasisContinuity;
@@ -1096,6 +1097,7 @@ DebugOptions g_debugOptions;
 std::atomic<bool> g_uiThreadStarted{false};
 std::atomic<bool> g_setupViewCallbackObserved{false};
 std::atomic<bool> g_enabledSetUpViewObserved{false};
+std::atomic<bool> g_setupViewHookInstallInProgress{false};
 std::atomic<unsigned long long> g_setupViewBridgeCounter{0};
 std::atomic<unsigned long long> g_traceFrameCounter{0};
 std::atomic<unsigned long long> g_followResolutionTraceCounter{0};
@@ -1759,13 +1761,38 @@ void SetHookFlags(bool setupViewHooked, bool frameStageHooked) {
     MarkOverlayDirty();
 }
 
-void SetEnabled(bool enabled) {
-    bool changed = false;
+bool IsSetUpViewHookInstalled() {
     std::lock_guard lock(g_stateMutex);
-    changed = g_state.enabled != enabled;
-    g_state.enabled = enabled;
-    RefreshStatusTextLocked();
-    MarkOverlayDirty();
+    return g_state.setUpViewHooked;
+}
+
+bool HookSetUpView();
+bool EnsureSetUpViewHookInstalled();
+
+void SetEnabled(bool enabled) {
+    if (enabled && !EnsureSetUpViewHookInstalled()) {
+        bool changed = false;
+        {
+            std::lock_guard lock(g_stateMutex);
+            changed = g_state.enabled;
+            g_state.enabled = false;
+            RefreshStatusTextLocked();
+            MarkOverlayDirty();
+        }
+        if (changed) {
+            ConsolePrintf(Texts().logEnabled, 0);
+        }
+        return;
+    }
+
+    bool changed = false;
+    {
+        std::lock_guard lock(g_stateMutex);
+        changed = g_state.enabled != enabled;
+        g_state.enabled = enabled;
+        RefreshStatusTextLocked();
+        MarkOverlayDirty();
+    }
     if (changed) {
         if (enabled) {
             g_enabledSetUpViewObserved.store(false, std::memory_order_relaxed);
@@ -1775,16 +1802,12 @@ void SetEnabled(bool enabled) {
 }
 
 void ToggleEnabled() {
-    bool enabled = false;
-    std::lock_guard lock(g_stateMutex);
-    g_state.enabled = !g_state.enabled;
-    enabled = g_state.enabled;
-    RefreshStatusTextLocked();
-    MarkOverlayDirty();
-    if (enabled) {
-        g_enabledSetUpViewObserved.store(false, std::memory_order_relaxed);
+    bool shouldEnable = false;
+    {
+        std::lock_guard lock(g_stateMutex);
+        shouldEnable = !g_state.enabled;
     }
-    ConsolePrintf(Texts().logEnabled, enabled ? 1 : 0);
+    SetEnabled(shouldEnable);
 }
 
 void SetLookMode(LookMode lookMode) {
@@ -7296,6 +7319,39 @@ bool HookSetUpView() {
     return true;
 }
 
+bool EnsureSetUpViewHookInstalled() {
+    if (IsSetUpViewHookInstalled()) {
+        return true;
+    }
+
+    std::unique_lock lock(g_setupViewHookInstallMutex);
+    if (IsSetUpViewHookInstalled()) {
+        return true;
+    }
+
+    g_setupViewHookInstallInProgress.store(true, std::memory_order_release);
+    TracePrintf("setupview-lazy-install enter");
+    const bool installed = HookSetUpView();
+    SetHookFlags(installed, false);
+    g_setupViewHookInstallInProgress.store(false, std::memory_order_release);
+
+    if (installed) {
+        SetInitialized(true, "");
+        TracePrintf("setupview-lazy-install ok");
+        return true;
+    }
+
+    const RuntimeState snapshot = SnapshotState();
+    const std::string reason = snapshot.lastFailureReason.empty()
+        ? FormatIncompatibleBuildReason("SetUpView hook unavailable")
+        : snapshot.lastFailureReason;
+    SetInitialized(true, reason);
+    UpdateFailureReason(reason, false);
+    ConsolePrintf(Texts().logHookInstallationFailed, reason.c_str());
+    TracePrintf("setupview-lazy-install failed reason=%s", reason.c_str());
+    return false;
+}
+
 void HandleLockCurrent() {
     const auto follow = ResolveFollowTarget();
     if (follow.entity == nullptr) {
@@ -10143,15 +10199,10 @@ DWORD InitializeSelfieStickImpl() {
 
     g_initStage.store(5, std::memory_order_relaxed);
     TracePrintf("init-stage stage=%d name=%s enter", 5, InitStageToString(5));
-    const bool setupViewHooked = HookSetUpView();
+    constexpr bool setupViewHooked = false;
     constexpr bool frameStageHooked = false;
     SetHookFlags(setupViewHooked, frameStageHooked);
-    TracePrintf("init-stage stage=%d name=%s result=%d", 5, InitStageToString(5), setupViewHooked ? 1 : 0);
-
-    if (!setupViewHooked) {
-        ConsolePrintf(Texts().logHookInstallationFailed, SnapshotState().lastFailureReason.c_str());
-        return 0;
-    }
+    TracePrintf("init-stage stage=%d name=%s deferred reason=lazy-set-up-view-hook", 5, InitStageToString(5));
 
     if (!overlayUiStarted) {
         return 0;

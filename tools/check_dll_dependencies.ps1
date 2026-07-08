@@ -16,11 +16,14 @@ if (-not (Test-Path -LiteralPath $DumpbinPath)) {
 }
 
 $output = & $DumpbinPath /dependents $DllPath
+$imports = & $DumpbinPath /imports $DllPath
 $blocked = @(
     "MSVCP140.dll",
     "VCRUNTIME140.dll",
     "VCRUNTIME140_1.dll",
-    "D3DCOMPILER_47.dll"
+    "D3DCOMPILER_47.dll",
+    "D3DCOMPILER_46.dll",
+    "D3DCOMPILER_43.dll"
 )
 
 $blocked += @(
@@ -38,6 +41,11 @@ foreach ($dependency in $blocked) {
     if ($output -match [regex]::Escape($dependency)) {
         $found += $dependency
     }
+}
+
+if ($imports -match "D3DCompile") {
+    Write-Host $imports
+    Write-Error "Blocked runtime shader compiler import found: D3DCompile"
 }
 
 if ($found.Count -gt 0) {
