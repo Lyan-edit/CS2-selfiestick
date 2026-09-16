@@ -18,6 +18,13 @@ struct SchemaRawScanLayout {
     std::size_t typeScopeBucketCount{};
 };
 
+struct SchemaDeclaredClassArrayLayout {
+    std::ptrdiff_t typeScopeDeclaredClassCountOffset{};
+    std::ptrdiff_t typeScopeDeclaredClassArrayOffset{};
+    std::ptrdiff_t declaredClassEntryStride{};
+    std::ptrdiff_t declaredClassEntryPayloadOffset{};
+};
+
 struct GenericRawFieldArrayLayoutCandidate {
     std::size_t wrapperOffset{};
     std::size_t arrayOffset{};
@@ -57,5 +64,6 @@ std::size_t BuildFocusedGenericRawFieldArrayLayoutCandidates(
 ) noexcept;
 bool TryGetSchemaClassFromDeclaredClassPayload(const void* payload, void*& schemaClass) noexcept;
 SchemaRawScanLayout GetSchemaRawScanLayout() noexcept;
+SchemaDeclaredClassArrayLayout GetSchemaDeclaredClassArrayLayout() noexcept;
 
 } // namespace selfiestick::schema

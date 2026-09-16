@@ -5,15 +5,15 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.3.9`.
+Latest source/release package in this repository: `v0.4.0`.
 
 ## Supported Versions
 
 This build is marked for:
 
-- HLAE: `2.190.2`
-- Counter-Strike 2: Steam app `730`, buildid `24074625`
-- CS2 app manifest timestamp used locally: `2026-07-08 09:56:30 +08:00`
+- HLAE: `2.192.2`
+- Counter-Strike 2: Steam app `730`, buildid `25218825`
+- CS2 app manifest timestamp used locally: `2026-09-10 09:28:58 +08:00`
 
 CS2 and HLAE update often. If Valve or HLAE changes schema, entity layout, or `SetUpView`, load may fail by design and the panel will show a reason instead of silently using an unsafe fallback.
 
@@ -39,7 +39,7 @@ Local native builds write the latest intermediate DLL to `bin/selfiestick_hlae.d
 
 ## Quick Start
 
-1. Start HLAE `2.190.2` and launch CS2.
+1. Start HLAE `2.192.2` and launch CS2.
 2. Open or play a demo in spectator mode.
 3. Load one DLL from the HLAE console.
 4. Press `Ins` to open the panel.
@@ -58,11 +58,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.3.9` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`, so a missing VC++ runtime or shader compiler DLL should not block loading.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.0` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`, so a missing VC++ runtime or shader compiler DLL should not block loading.
 
-If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but an older compatibility gate rejected hook installation while schema offsets were still resolving. Update to `v0.3.9` or newer.
+If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use `v0.4.0` with CS2 buildid `25218825`, or rebuild after validating a newer game binary.
 
-If the DLL is loaded while a demo is already playing, `v0.3.9` no longer installs the SetUpView camera hotpatch during `mirv_loadlibrary`. The hook is installed lazily only when the user presses `F8` or clicks Enable, and a failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging is also off by default in code and in the packaged `selfiestick.ini`, so ordinary PCs do not spend the first demo frames doing high-volume schema diagnostics and file writes. This targets the external-PC symptom where the lobby could load the DLL but the game became unresponsive or crashed after entering a demo.
+If the DLL is loaded while a demo is already playing, `v0.4.0` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. This release updates the SetUpView view pointer register, attachment accessors, schema memory layout, and build-gated fallback offsets for CS2 buildid `25218825`. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
 
 If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
@@ -163,7 +163,7 @@ selfiestick_trace.log
 The current trace marker is:
 
 ```text
-schema-probe-v20-left-selfie-offset-tune
+schema-probe-v21-cs2-25218825
 ```
 
 If the marker is older, HLAE/CS2 is loading an old DLL. Fully restart HLAE and CS2 after replacing DLLs because Windows keeps loaded DLLs inside the process.
@@ -189,6 +189,14 @@ native_dll/selfiestick_hlae_validation/
 ```
 
 The validation project checks compatibility gates, schema helpers, SetUpView patch helpers, prop projectile classification, owner matching, auto-lock policy, prop camera math, player angle trim, and camera smoothing helpers.
+
+Installed-CS2 binary compatibility check:
+
+```powershell
+py -3 tools\check_cs2_binary_compatibility.py --client "<CS2>\game\csgo\bin\win64\client.dll" --schema "<CS2>\game\bin\win64\schemasystem.dll"
+```
+
+This check validates the PE fingerprint, signature match counts, and relative call targets used by entity, attachment, schema, and SetUpView access.
 
 Release dependency check:
 

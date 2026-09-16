@@ -1,10 +1,10 @@
-# CS2 Selfiestick v0.3.9 Release Notes
+# CS2 Selfiestick v0.4.0 Release Notes
 
 ## Supported Runtime
 
-- HLAE: `2.190.2`
-- Counter-Strike 2: Steam app `730`, buildid `24074625`
-- Local CS2 app manifest timestamp: `2026-07-08 09:56:30 +08:00`
+- HLAE: `2.192.2`
+- Counter-Strike 2: Steam app `730`, buildid `25218825`
+- Local CS2 app manifest timestamp: `2026-09-10 09:28:58 +08:00`
 
 This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates can break schema, entity layout, or `SetUpView`; if that happens, the DLL reports a clear Runtime reason instead of silently falling back to unsafe behavior.
 
@@ -19,7 +19,13 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
-- Updated and rebuilt against the current local CS2 app `730` buildid `24074625`.
+- Updated and rebuilt against the current local CS2 app `730` buildid `25218825` and HLAE `2.192.2`.
+- Recovered unique current-client signatures for attachment access and the 17-byte SetUpView patch site; added a repeatable PE/signature compatibility checker.
+- Updated the SetUpView bridge to pass `CViewSetup` from `R14`, matching the current client code generation and preventing an invalid view pointer from reaching the callback.
+- Updated current Source 2 schema layout handling: direct declared-class array at `0x470/0x478`, class field span at `0x24/0x30`, and field name/type order.
+- Updated build-gated schema fallbacks for player/controller, scene node, view entity, viewmodel rendering, eye angles, and grenade ownership. Hardcoded fallbacks are disabled automatically when the client PE fingerprint changes.
+- Moved viewmodel and grenade owner queries to the classes that currently declare those fields: `C_BaseEntity` and `C_BaseGrenade`.
+- Cached RTTI names per vtable and reduced unlocked full-entity prop scans from about 33 Hz to 10 Hz to lower render-thread spikes without making candidate selection feel sluggish.
 - The DLL no longer installs the SetUpView camera hotpatch during `mirv_loadlibrary`; it loads first, then installs the hook lazily only when the user presses `F8` or clicks Enable.
 - If SetUpView hook installation is not compatible with the current CS2 build, the DLL now stays loaded, keeps the camera disabled, and reports a Runtime reason instead of taking the demo process down.
 - Fixed another external-PC demo-load no-response path found from a shared `selfiestick_trace.log`: the DLL was loaded successfully and `bridge-enter` was running, but startup schema diagnostics kept doing heavy schema probing and logging during early demo frames.
@@ -62,12 +68,17 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 当前版本支持：
 
-- HLAE：`2.190.2`
-- CS2：Steam app `730`，buildid `24074625`
+- HLAE：`2.192.2`
+- CS2：Steam app `730`，buildid `25218825`
 
 新增内容：
 
-- 已按当前本机 CS2 app `730` buildid `24074625` 重新构建。
+- 已按当前本机 CS2 app `730` buildid `25218825` 和 HLAE `2.192.2` 重新构建。
+- 恢复当前 client.dll 唯一命中的附件访问和 SetUpView 17 字节补丁特征码，并新增可重复运行的 PE / 特征码兼容检查脚本。
+- SetUpView 桥接改为从当前版本使用的 `R14` 传入 `CViewSetup`，避免把错误视角指针交给回调造成闪退。
+- 更新当前 Source 2 schema 内存布局：声明类数组 `0x470/0x478`、类字段跨度 `0x24/0x30`，并修正字段名 / 类型顺序。
+- 更新人物、控制器、场景节点、视角实体、第一人称渲染、眼睛角度和手雷归属字段回退；client.dll PE 指纹变化后会自动禁用硬编码回退。
+- RTTI 类名改为按 vtable 缓存，未锁定道具时的全实体扫描从约 33 次/秒降到 10 次/秒，降低渲染线程尖峰。
 - DLL 不再在 `mirv_loadlibrary` 加载瞬间安装 SetUpView 相机热补丁；现在会先完成加载，只有按 `F8` 或点击启用自拍杆时才延迟安装 hook。
 - 如果当前 CS2 版本与 SetUpView hook 不兼容，DLL 会保持加载、保持相机关闭，并在 Runtime 区域显示原因，不再直接拖崩 demo 进程。
 - 修复部分别人电脑上“大厅能加载 DLL，但进入 demo 后游戏进程无响应”的问题：热补丁安装时不再在暂停其它线程的窗口内分配堆内存，降低死锁风险。

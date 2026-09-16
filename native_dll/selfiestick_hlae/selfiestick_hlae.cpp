@@ -48,7 +48,10 @@ constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
 constexpr char kBuildTag[] = __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v20-left-selfie-offset-tune";
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v21-cs2-25218825";
+constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AA1AE5Eu;
+constexpr std::uint32_t kSupportedClientSizeOfImage = 0x027DE000u;
+constexpr std::uint32_t kSupportedClientChecksum = 0x023E080Fu;
 
 constexpr char kAnchorAttachmentName[] = "weapon_hand_r";
 constexpr char kGunSideAttachmentName[] = "weapon_hand_l";
@@ -120,9 +123,9 @@ constexpr COLORREF kColorWarn = RGB(255, 159, 67);
 constexpr char kPatternEntityList[] = "40 55 53 48 8d ac 24 ?? ?? ?? ?? 48 81 ec ?? ?? ?? ?? 48 8b 0d ?? ?? ?? ?? 33 d2 e8 ?? ?? ?? ??";
 constexpr char kPatternGetEntityFromIndex[] = "4c 8d 49 10 81 fa fe 7f 00 00";
 constexpr char kPatternGetSplitScreenPlayer[] = "48 83 EC ?? 83 F9 ?? 75 ?? 48 8B 0D ?? ?? ?? ?? 48 8D 54 24 ?? 48 8B 01 FF 90 ?? ?? ?? ?? 8B 08 48 63 C1 48 8D 0D ?? ?? ?? ?? 48 8B 04 C1 48 83 C4 ?? C3";
-constexpr char kPatternAttachmentAccess[] = "E8 ?? ?? ?? ?? 80 BD ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 0F B6 95 ?? ?? ?? ?? 84 D2 0F 84 ?? ?? ?? ?? 4C 8D 45 ?? 48 8B CF E8 ?? ?? ?? ??";
+constexpr char kPatternAttachmentAccess[] = "E8 ?? ?? ?? ?? 0F B6 95 ?? ?? ?? ?? 84 D2 74 29 4C 8D 45 B0 48 8B CE E8 ?? ?? ?? ??";
 constexpr char kPatternSchemaSystem[] = "48 89 05 ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 33 C0 48 C7 05";
-constexpr char kPatternSetupViewPatch[] = "BA FF FF FF FF 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 85 C0 75 0B 48 8B 05 ?? ?? ?? ?? 48 8B 40 08 4C 8D AE A0 04 00 00 48 8D 9E B8 04 00 00 44 38 20 75 2F";
+constexpr char kPatternSetupViewPatch[] = "BA FF FF FF FF 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 85 C0 75 0B 48 8B 05 ?? ?? ?? ?? 48 8B 40 08 80 38 00 48 8B 7D ?? 75 2F F2 41 0F 10 45 00";
 constexpr char kPatternSchemaQualifiedClassLookup[] = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B DA 48 8B F1 BA 21 00 00 00 49 8B C8 49 8B F8 E8 ?? ?? ?? ?? 48 8B E8 48 8B CE 48 8B 06 48 85 ED 75 15 FF 50 58 4C 8B C7 48 8B D3 48 8B C8 4C 8B 08 41 FF 51 18 EB 23 45 33 C0 48 8B D7 FF 50 68 48 8B C8 48 85 C0 75 05 48 89 03 EB 0D 48 8B 00 4C 8D 45 01 48 8B D3 FF 50 18";
 
 constexpr std::uint32_t kInvalidHandleValue = 0xFFFFFFFFu;
@@ -803,8 +806,8 @@ struct SchemaArray {
 };
 
 struct SchemaFieldModern {
-    void* type;
     const char* name;
+    void* type;
     std::uint32_t offset;
     std::byte padding0[0xC];
 };
@@ -817,7 +820,7 @@ struct SchemaClassInfoModern {
 };
 
 struct SchemaClassInfoLegacy {
-    std::byte padding0[0x1C];
+    std::byte padding0[0x24];
     std::uint16_t fieldCount;
     std::byte padding1[0xA];
     SchemaFieldModern* fields;
@@ -1107,6 +1110,7 @@ std::atomic<unsigned long long> g_lastPropCandidateRefreshTickMs{0};
 std::atomic<int> g_initStage{0};
 std::atomic<bool> g_schemaOffsetsResolved{false};
 std::atomic<bool> g_schemaResolveInProgress{false};
+std::atomic<bool> g_knownClientSchemaFallbackAllowed{false};
 std::atomic<unsigned long long> g_lastSchemaResolveAttemptTickMs{0};
 std::unordered_map<COLORREF, HBRUSH> g_solidBrushCache;
 std::mutex g_traceMutex;
@@ -1120,7 +1124,7 @@ void TracePrintf(const char* format, ...);
 void MarkOverlayDirty();
 std::wstring GetSettingsFilePath();
 void PersistCameraSettingsSnapshot(const RuntimeState& state);
-std::string TryGetEntityRttiClassName(void* entity);
+const std::string& TryGetEntityRttiClassName(void* entity);
 void StartOverlayHotkeyCapture();
 bool HandleOverlayHotkeyCaptureKeyDown(WPARAM wParam);
 const wchar_t* GetOverlayLifecycleText(const RuntimeState& state);
@@ -2388,6 +2392,45 @@ CreateInterfaceFn GetCreateInterface(HMODULE module) {
     return reinterpret_cast<CreateInterfaceFn>(GetProcAddress(module, "CreateInterface"));
 }
 
+bool TryGetModuleFingerprint(
+    HMODULE module,
+    std::uint32_t& timeDateStamp,
+    std::uint32_t& sizeOfImage,
+    std::uint32_t& checksum
+) {
+    timeDateStamp = 0u;
+    sizeOfImage = 0u;
+    checksum = 0u;
+    if (module == nullptr) {
+        return false;
+    }
+
+    __try {
+        const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+        if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE || dosHeader->e_lfanew <= 0) {
+            return false;
+        }
+
+        const auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+            reinterpret_cast<const std::byte*>(module) + dosHeader->e_lfanew
+        );
+        if (ntHeaders->Signature != IMAGE_NT_SIGNATURE) {
+            return false;
+        }
+
+        timeDateStamp = ntHeaders->FileHeader.TimeDateStamp;
+        sizeOfImage = ntHeaders->OptionalHeader.SizeOfImage;
+        checksum = ntHeaders->OptionalHeader.CheckSum;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        timeDateStamp = 0u;
+        sizeOfImage = 0u;
+        checksum = 0u;
+        return false;
+    }
+}
+
 bool LoadInterfaces() {
     g_clientModule = WaitForModule(kClientModuleName, 10000);
     g_schemaModule = WaitForModule(kSchemaModuleName, 10000);
@@ -2405,6 +2448,28 @@ bool LoadInterfaces() {
         SetInitialized(false, Texts().reasonSchemaModuleMissing);
         return false;
     }
+
+    std::uint32_t clientTimeDateStamp = 0u;
+    std::uint32_t clientSizeOfImage = 0u;
+    std::uint32_t clientChecksum = 0u;
+    const bool fingerprintReadable = TryGetModuleFingerprint(
+        g_clientModule,
+        clientTimeDateStamp,
+        clientSizeOfImage,
+        clientChecksum
+    );
+    const bool knownClientBuild = fingerprintReadable
+        && clientTimeDateStamp == kSupportedClientTimeDateStamp
+        && clientSizeOfImage == kSupportedClientSizeOfImage
+        && clientChecksum == kSupportedClientChecksum;
+    g_knownClientSchemaFallbackAllowed.store(knownClientBuild, std::memory_order_release);
+    TracePrintf(
+        "client-fingerprint timestamp=0x%08X image=0x%08X checksum=0x%08X supported=%d",
+        clientTimeDateStamp,
+        clientSizeOfImage,
+        clientChecksum,
+        knownClientBuild ? 1 : 0
+    );
 
     auto clientFactory = GetCreateInterface(g_clientModule);
     if (clientFactory == nullptr) {
@@ -2657,6 +2722,11 @@ bool TryReadSchemaFieldSpanDeclaredPayload(const void* payload, SchemaFieldModer
         return true;
     }
 
+    if (TryReadSchemaFieldSpanLegacy(schemaClass, fields, count)) {
+        layoutName = "declared-source2";
+        return true;
+    }
+
     if (TryReadSchemaFieldSpanModern(schemaClass, fields, count)) {
         layoutName = "declared-modern";
         return true;
@@ -2668,6 +2738,11 @@ bool TryReadSchemaFieldSpanDeclaredPayload(const void* payload, SchemaFieldModer
 bool TryReadSchemaFieldSpan(const void* classInfo, SchemaFieldModern*& fields, std::uint32_t& count, const char*& layoutName) {
     if (TryReadSchemaFieldArrayInfo(classInfo, fields, count)) {
         layoutName = "field-array";
+        return true;
+    }
+
+    if (TryReadSchemaFieldSpanLegacy(classInfo, fields, count)) {
+        layoutName = "source2";
         return true;
     }
 
@@ -3042,8 +3117,49 @@ bool TryCollectTypeScopeClassPayloads(void* scope, std::vector<void*>& payloads)
         return false;
     }
 
-    const auto layout = schema::GetSchemaRawScanLayout();
     const auto* scopeBytes = reinterpret_cast<const std::byte*>(scope);
+    const auto declaredArrayLayout = schema::GetSchemaDeclaredClassArrayLayout();
+    std::uint16_t declaredArrayCount = 0u;
+    void* declaredArray = nullptr;
+    if (TryReadMemoryValue(
+            reinterpret_cast<const std::uint16_t*>(scopeBytes + declaredArrayLayout.typeScopeDeclaredClassCountOffset),
+            declaredArrayCount
+        )
+        && TryReadMemoryValue(
+            reinterpret_cast<void* const*>(scopeBytes + declaredArrayLayout.typeScopeDeclaredClassArrayOffset),
+            declaredArray
+        )
+        && declaredArrayCount != 0u
+        && declaredArray != nullptr) {
+        const auto* entries = reinterpret_cast<const std::byte*>(declaredArray);
+        const std::size_t payloadLimit = static_cast<std::size_t>(declaredArrayCount);
+        std::unordered_set<void*> seenPayloads;
+        for (std::size_t index = 0u; index < payloadLimit; ++index) {
+            void* payload = nullptr;
+            const auto* payloadAddress = entries
+                + (index * static_cast<std::size_t>(declaredArrayLayout.declaredClassEntryStride))
+                + declaredArrayLayout.declaredClassEntryPayloadOffset;
+            if (TryReadMemoryValue(reinterpret_cast<void* const*>(payloadAddress), payload)
+                && payload != nullptr
+                && seenPayloads.insert(payload).second) {
+                payloads.push_back(payload);
+            }
+        }
+
+        TracePrintf(
+            "schema-declared-array collect scope=%p declaredCount=%u payloadLimit=%u payloads=%u",
+            scope,
+            static_cast<unsigned>(declaredArrayCount),
+            static_cast<unsigned>(payloadLimit),
+            static_cast<unsigned>(payloads.size())
+        );
+        if (!payloads.empty()) {
+            return true;
+        }
+    }
+
+    payloads.clear();
+    const auto layout = schema::GetSchemaRawScanLayout();
     std::int32_t declaredClassCountSigned = 0;
     if (!TryReadMemoryValue(
         reinterpret_cast<const std::int32_t*>(scopeBytes + layout.typeScopeDeclaredClassCountOffset),
@@ -3231,6 +3347,11 @@ bool TryReadSchemaFieldSpanAtPayloadPointerOffset(
 
     if (TryReadSchemaFieldArrayInfo(schemaClass, fields, fieldCount)) {
         layoutName = "declared-field-array";
+        return true;
+    }
+
+    if (TryReadSchemaFieldSpanLegacy(schemaClass, fields, fieldCount)) {
+        layoutName = "declared-source2";
         return true;
     }
 
@@ -3934,7 +4055,8 @@ bool TryGetSchemaFieldOffsetFromRawPayloads(
         return true;
     }
 
-    if (schema::TryGetKnownClientSchemaFieldOffsetFallback(traceClassName, fieldName, target)) {
+    if (g_knownClientSchemaFallbackAllowed.load(std::memory_order_acquire)
+        && schema::TryGetKnownClientSchemaFieldOffsetFallback(traceClassName, fieldName, target)) {
         TracePrintf(
             "schema-raw field=%s traceClass=%s layout=known-cs2-client-fallback target=0x%llX reason=schema-field-omitted-or-unresolved",
             fieldName,
@@ -4125,21 +4247,21 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
                 rawOk = sceneOriginOk && rawOk;
                 TryGetSchemaFieldOffsetFromRawPayloads(
                     rawPayloads,
-                    "C_BaseModelEntity",
+                    "C_BaseEntity",
                     "m_bRenderWithViewModels",
                     { "m_bRenderWithViewModels" },
                     rawResolvedOffsets.renderWithViewModels
                 );
                 TryGetSchemaFieldOffsetFromRawPayloads(
                     rawPayloads,
-                    "C_BaseCSGrenadeProjectile",
+                    "C_BaseGrenade",
                     "m_hThrower",
                     { "m_hThrower" },
                     rawResolvedOffsets.projectileThrower
                 );
                 TryGetSchemaFieldOffsetFromRawPayloads(
                     rawPayloads,
-                    "C_BaseCSGrenadeProjectile",
+                    "C_BaseGrenade",
                     "m_hOriginalThrower",
                     { "m_hOriginalThrower" },
                     rawResolvedOffsets.projectileOriginalThrower
@@ -4387,9 +4509,9 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
         sceneOriginOk = getOffset("CGameSceneNode", "local.origin", resolvedOffsets.sceneAbsOrigin);
     }
     ok = ok && sceneOriginOk;
-    getOffset("C_BaseModelEntity", "m_bRenderWithViewModels", resolvedOffsets.renderWithViewModels);
-    getOffset("C_BaseCSGrenadeProjectile", "m_hThrower", resolvedOffsets.projectileThrower);
-    getOffset("C_BaseCSGrenadeProjectile", "m_hOriginalThrower", resolvedOffsets.projectileOriginalThrower);
+    getOffset("C_BaseEntity", "m_bRenderWithViewModels", resolvedOffsets.renderWithViewModels);
+    getOffset("C_BaseGrenade", "m_hThrower", resolvedOffsets.projectileThrower);
+    getOffset("C_BaseGrenade", "m_hOriginalThrower", resolvedOffsets.projectileOriginalThrower);
     getOffset("C_BaseEntity", "m_hOwnerEntity", resolvedOffsets.projectileOwnerEntity);
 
     if (!ok) {
@@ -4606,13 +4728,24 @@ bool ResolveEntityAccess() {
 
     g_lookupAttachment = nullptr;
     g_getAttachment = nullptr;
-    const auto attachmentPattern = FindPattern(g_clientModule, kPatternAttachmentAccess);
-    if (attachmentPattern == 0) {
-        TracePrintf("attachment-pattern missing, enabling eye-angle fallback");
+    const auto attachmentPatterns = FindPatterns(g_clientModule, kPatternAttachmentAccess, 2u);
+    if (attachmentPatterns.size() != 1u) {
+        TracePrintf(
+            "attachment-pattern %s matches=%u, enabling eye-angle fallback",
+            attachmentPatterns.empty() ? "missing" : "ambiguous",
+            static_cast<unsigned>(attachmentPatterns.size())
+        );
     }
     else {
+        const auto attachmentPattern = attachmentPatterns.front();
         auto lookupAttachment = reinterpret_cast<LookupAttachmentFn>(attachmentPattern + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 1));
-        auto getAttachment = reinterpret_cast<GetAttachmentFn>(attachmentPattern + 40 + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 40 + 1));
+        constexpr std::uintptr_t kGetAttachmentCallOffset = 23u;
+        auto getAttachment = reinterpret_cast<GetAttachmentFn>(
+            attachmentPattern
+            + kGetAttachmentCallOffset
+            + 5u
+            + *reinterpret_cast<std::int32_t*>(attachmentPattern + kGetAttachmentCallOffset + 1u)
+        );
         if (!IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(lookupAttachment))
             || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(getAttachment))) {
             TracePrintf("attachment-accessors untrusted, enabling eye-angle fallback");
@@ -4917,64 +5050,73 @@ EntityHandle PawnGetActiveWeaponHandle(void* pawn) {
     return handle;
 }
 
-std::string TryGetEntityRttiClassName(void* entity) {
+const std::string& TryGetEntityRttiClassName(void* entity) {
+    static const std::string kEmptyClassName;
+    static thread_local std::unordered_map<void*, std::string> classNamesByVtable;
     if (entity == nullptr) {
-        return {};
+        return kEmptyClassName;
     }
 
-    MEMORY_BASIC_INFORMATION memoryInfo{};
-    if (VirtualQuery(entity, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return {};
+    void** vtable = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<void***>(entity), vtable) || vtable == nullptr) {
+        return kEmptyClassName;
     }
 
-    auto** vtable = *reinterpret_cast<void***>(entity);
-    if (vtable == nullptr) {
-        return {};
+    const auto cached = classNamesByVtable.find(vtable);
+    if (cached != classNamesByVtable.end()) {
+        return cached->second;
     }
 
-    auto* locator = reinterpret_cast<RttiCompleteObjectLocator*>(vtable[-1]);
-    if (locator == nullptr) {
-        return {};
+    const auto cacheEmpty = [&]() -> const std::string& {
+        return classNamesByVtable.emplace(vtable, std::string{}).first->second;
+    };
+
+    RttiCompleteObjectLocator* locator = nullptr;
+    if (!TryReadMemoryValue(reinterpret_cast<RttiCompleteObjectLocator* const*>(vtable - 1), locator)
+        || locator == nullptr
+        || !IsAddressReadableInModule(g_clientModule, locator)) {
+        return cacheEmpty();
     }
 
-    if (VirtualQuery(locator, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return {};
+    RttiCompleteObjectLocator locatorData{};
+    if (!TryReadMemoryValue(locator, locatorData)
+        || locatorData.selfOffset <= 0
+        || locatorData.typeDescriptorOffset <= 0) {
+        return cacheEmpty();
     }
 
-    const auto moduleBase = reinterpret_cast<std::uintptr_t>(locator) - static_cast<std::uintptr_t>(locator->selfOffset);
-    if (moduleBase == 0 || locator->typeDescriptorOffset <= 0) {
-        return {};
+    const auto moduleBase = reinterpret_cast<std::uintptr_t>(locator)
+        - static_cast<std::uintptr_t>(locatorData.selfOffset);
+    if (moduleBase != reinterpret_cast<std::uintptr_t>(g_clientModule)) {
+        return cacheEmpty();
     }
 
-    auto* typeDescriptor = reinterpret_cast<RttiTypeDescriptor*>(moduleBase + static_cast<std::uintptr_t>(locator->typeDescriptorOffset));
-    if (typeDescriptor == nullptr) {
-        return {};
+    auto* typeDescriptor = reinterpret_cast<RttiTypeDescriptor*>(
+        moduleBase + static_cast<std::uintptr_t>(locatorData.typeDescriptorOffset)
+    );
+    if (!IsAddressReadableInModule(g_clientModule, typeDescriptor)) {
+        return cacheEmpty();
     }
 
-    if (VirtualQuery(typeDescriptor, &memoryInfo, sizeof(memoryInfo)) == 0 || memoryInfo.State != MEM_COMMIT || (memoryInfo.Protect & PAGE_GUARD) != 0 || memoryInfo.Protect == PAGE_NOACCESS) {
-        return {};
+    std::string className;
+    if (!TryCopyCString(typeDescriptor->name, className, kMaxSchemaNameLength) || className.empty()) {
+        return cacheEmpty();
     }
 
-    const char* rawName = typeDescriptor->name;
-    if (rawName == nullptr) {
-        return {};
+    if (className.rfind(".?AV", 0u) == 0u || className.rfind(".?AU", 0u) == 0u) {
+        className.erase(0u, 4u);
     }
 
-    if (std::strncmp(rawName, ".?AV", 4) == 0) {
-        rawName += 4;
-    }
-
-    std::string className(rawName);
     const std::size_t terminator = className.find("@@");
     if (terminator != std::string::npos) {
         className.erase(terminator);
     }
 
-    return className;
+    return classNamesByVtable.emplace(vtable, std::move(className)).first->second;
 }
 
 std::string DescribeWeaponEntity(void* weaponEntity) {
-    const std::string className = TryGetEntityRttiClassName(weaponEntity);
+    const std::string& className = TryGetEntityRttiClassName(weaponEntity);
     if (!className.empty()) {
         return className;
     }
@@ -4988,7 +5130,7 @@ std::string DescribeWeaponEntity(void* weaponEntity) {
 }
 
 SupportedWeaponId TryGetSupportedWeaponId(void* weaponEntity) {
-    const std::string className = TryGetEntityRttiClassName(weaponEntity);
+    const std::string& className = TryGetEntityRttiClassName(weaponEntity);
     if (className.empty()) {
         return SupportedWeaponId::None;
     }
@@ -5032,7 +5174,7 @@ bool ContainsIgnoreCaseAscii(std::string_view haystack, std::string_view needle)
 }
 
 HeldItemKind ClassifyHeldItemEntity(void* weaponEntity) {
-    const std::string className = TryGetEntityRttiClassName(weaponEntity);
+    const std::string& className = TryGetEntityRttiClassName(weaponEntity);
     if (className.empty()) {
         return HeldItemKind::Unknown;
     }
@@ -5235,7 +5377,8 @@ void* ResolveControllerPawnEntity(void* controller) {
     }
 
     std::ptrdiff_t fallbackOffset = 0;
-    if (schema::TryGetKnownClientSchemaFieldOffsetFallback("CBasePlayerController", "m_hPawn", fallbackOffset)
+    if (g_knownClientSchemaFallbackAllowed.load(std::memory_order_acquire)
+        && schema::TryGetKnownClientSchemaFieldOffsetFallback("CBasePlayerController", "m_hPawn", fallbackOffset)
         && fallbackOffset != 0
         && fallbackOffset != g_offsets.controllerPawnHandle) {
         const EntityHandle fallbackHandle = ControllerGetPawnHandleAtOffset(controller, fallbackOffset);
@@ -5932,7 +6075,7 @@ bool IsPropProjectileForTarget(void* entity, EntityHandle targetHandle, EntityHa
         return false;
     }
 
-    const std::string className = TryGetEntityRttiClassName(entity);
+    const std::string& className = TryGetEntityRttiClassName(entity);
     const PropProjectileKind kind = compat::ClassifyPropProjectileClassName(className);
     if (kind == PropProjectileKind::Unknown) {
         return false;
@@ -5970,7 +6113,7 @@ bool IsLockedPropProjectileStillOwnedByThrower(
         return false;
     }
 
-    const std::string className = TryGetEntityRttiClassName(entity);
+    const std::string& className = TryGetEntityRttiClassName(entity);
     const PropProjectileKind kind = compat::ClassifyPropProjectileClassName(className);
     if (kind == PropProjectileKind::Unknown) {
         return false;
@@ -6130,7 +6273,7 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
 }
 
 bool ShouldRefreshPropCandidates(bool hasLockedProp) {
-    constexpr unsigned long long kUnlockedRefreshIntervalMs = 30u;
+    constexpr unsigned long long kUnlockedRefreshIntervalMs = 100u;
     constexpr unsigned long long kLockedRefreshIntervalMs = 250u;
 
     const unsigned long long nowTickMs = GetTickCount64();
@@ -7212,12 +7355,18 @@ bool HookSetUpView() {
         return false;
     }
 
-    const auto patchAddress = FindPattern(g_clientModule, kPatternSetupViewPatch);
-    if (patchAddress == 0) {
+    const auto patchMatches = FindPatterns(g_clientModule, kPatternSetupViewPatch, 2u);
+    if (patchMatches.empty()) {
         TracePrintf("setupview-fail reason=pattern-missing");
         SetInitialized(false, Texts().reasonSetUpViewPatchSiteMissing);
         return false;
     }
+    if (patchMatches.size() != 1u) {
+        TracePrintf("setupview-fail reason=pattern-ambiguous matches=%u", static_cast<unsigned>(patchMatches.size()));
+        SetInitialized(false, FormatIncompatibleBuildReason("SetUpView patch pattern is ambiguous"));
+        return false;
+    }
+    const auto patchAddress = patchMatches.front();
     TracePrintf("setupview-scan patch=%p", reinterpret_cast<void*>(patchAddress));
 
     hook::SetUpViewPatchSite patchSite{};
@@ -7227,6 +7376,7 @@ bool HookSetUpView() {
         SetInitialized(false, FormatIncompatibleBuildReason(hookError.c_str()));
         return false;
     }
+    patchSite.viewSetupRegister = hook::ViewSetupRegister::R14;
 
     g_setupViewPatchAddress = reinterpret_cast<void*>(patchSite.patchAddress);
     g_setupViewOriginalBytes = patchSite.originalBytes;

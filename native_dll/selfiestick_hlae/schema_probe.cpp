@@ -164,20 +164,26 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
     if (matches("CEntityInstance", "m_pEntity")) {
         target = 0x10;
     }
-    else if (matches("CBasePlayerController", "m_hPawn") || matches("CCSPlayerController", "m_hPlayerPawn")) {
-        target = 0x6C4;
+    else if (matches("CBasePlayerController", "m_hPawn")) {
+        target = 0x6BC;
+    }
+    else if (matches("CCSPlayerController", "m_hPlayerPawn")) {
+        target = 0x914;
     }
     else if (matches("C_BasePlayerPawn", "m_pWeaponServices")) {
-        target = 0x11E0;
+        target = 0x1208;
     }
     else if (matches("C_BasePlayerPawn", "m_pObserverServices")) {
-        target = 0x11F8;
+        target = 0x1220;
     }
     else if (matches("C_BasePlayerPawn", "m_pCameraServices")) {
-        target = 0x1218;
+        target = 0x1240;
     }
     else if (matches("C_BasePlayerPawn", "m_hController")) {
-        target = 0x13A8;
+        target = 0x13D0;
+    }
+    else if (matches("C_CSPlayerPawn", "m_angEyeAngles")) {
+        target = 0x3350;
     }
     else if (matches("CPlayer_ObserverServices", "m_iObserverMode")) {
         target = 0x48;
@@ -188,8 +194,29 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
     else if (matches("CPlayer_WeaponServices", "m_hActiveWeapon")) {
         target = 0x60;
     }
+    else if (matches("CPlayer_CameraServices", "m_hViewEntity")) {
+        target = 0xA4;
+    }
     else if (matches("C_BaseEntity", "m_pGameSceneNode")) {
-        target = 0x338;
+        target = 0x330;
+    }
+    else if (matches("C_BaseEntity", "m_hOwnerEntity")) {
+        target = 0x520;
+    }
+    else if (matches("C_BaseEntity", "m_bRenderWithViewModels")) {
+        target = 0x56A;
+    }
+    else if (matches("CGameSceneNode", "m_vecAbsOrigin")) {
+        target = 0xC8;
+    }
+    else if (matches("CGameSceneNode", "m_vecOrigin")) {
+        target = 0x80;
+    }
+    else if (matches("C_BaseGrenade", "m_hThrower")) {
+        target = 0x11A8;
+    }
+    else if (matches("C_BaseGrenade", "m_hOriginalThrower")) {
+        target = 0x11C4;
     }
 
     return target != 0;
@@ -228,6 +255,15 @@ SchemaRawScanLayout GetSchemaRawScanLayout() noexcept {
         .typeScopeBucketNodeNextOffset = 0x08,
         .typeScopeBucketNodePayloadOffset = 0x10,
         .typeScopeBucketCount = 0x100u
+    };
+}
+
+SchemaDeclaredClassArrayLayout GetSchemaDeclaredClassArrayLayout() noexcept {
+    return SchemaDeclaredClassArrayLayout{
+        .typeScopeDeclaredClassCountOffset = 0x470,
+        .typeScopeDeclaredClassArrayOffset = 0x478,
+        .declaredClassEntryStride = 0x18,
+        .declaredClassEntryPayloadOffset = 0x10
     };
 }
 

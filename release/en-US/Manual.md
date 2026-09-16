@@ -16,15 +16,15 @@ The DLL is built with the MSVC runtime statically linked. You do not need to ins
 
 This package is marked for:
 
-- HLAE: `2.190.2`
-- Counter-Strike 2: Steam app `730`, buildid `24074625`
+- HLAE: `2.192.2`
+- Counter-Strike 2: Steam app `730`, buildid `25218825`
 
 Use it for HLAE demo/cinematic workflows only.
 
 ## Load The DLL
 
 1. Copy the `en-US` folder to a stable location.
-2. Start HLAE `2.190.2`, launch CS2, and open a demo in spectator mode.
+2. Start HLAE `2.192.2`, launch CS2, and open a demo in spectator mode.
 3. Run this in the HLAE console:
 
 ```cfg

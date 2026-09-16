@@ -169,9 +169,23 @@ bool BuildSetUpViewDetourStub(
     appendByte(0x24);
     appendByte(0x50);
 
-    appendByte(0x48);
-    appendByte(0x8B);
-    appendByte(0xCE);
+    switch (site.viewSetupRegister) {
+    case ViewSetupRegister::Rsi:
+        // mov rcx, rsi
+        appendByte(0x48);
+        appendByte(0x8B);
+        appendByte(0xCE);
+        break;
+    case ViewSetupRegister::R14:
+        // mov rcx, r14
+        appendByte(0x49);
+        appendByte(0x8B);
+        appendByte(0xCE);
+        break;
+    default:
+        SetError(errorMessage, "SetUpView register selection was invalid");
+        return false;
+    }
 
     const auto callbackCallOffset = outBytes.size();
     std::int32_t callbackDisplacement{};

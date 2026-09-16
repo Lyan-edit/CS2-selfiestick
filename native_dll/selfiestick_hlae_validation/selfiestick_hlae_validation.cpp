@@ -75,12 +75,14 @@ int main() {
     using selfiestick::schema::BuildDeclaredClassSchemaClassPointerOffsets;
     using selfiestick::schema::BuildFocusedGenericRawFieldArrayLayoutCandidates;
     using selfiestick::schema::GetSchemaRawScanLayout;
+    using selfiestick::schema::GetSchemaDeclaredClassArrayLayout;
     using selfiestick::schema::TryGetSchemaClassFromDeclaredClassPayload;
     using selfiestick::hook::BuildSetUpViewDetourStub;
     using selfiestick::hook::BuildSetUpViewEntryPatch;
     using selfiestick::hook::DecodeSetUpViewPatchSite;
     using selfiestick::hook::kSetUpViewPatchSize;
     using selfiestick::hook::SetUpViewPatchSite;
+    using selfiestick::hook::ViewSetupRegister;
 
     if (ClassifyEntityClassName("C_CSPlayerPawn") != ClientEntityKind::PlayerPawn) {
         return ReportFailure("expected C_CSPlayerPawn to classify as PlayerPawn");
@@ -626,8 +628,23 @@ int main() {
 
     std::ptrdiff_t fallbackOffset = 0;
     if (!TryGetKnownClientSchemaFieldOffsetFallback("C_BasePlayerPawn", "m_pWeaponServices", fallbackOffset)
-        || fallbackOffset != 0x11E0) {
+        || fallbackOffset != 0x1208) {
         return ReportFailure("known schema fallback should cover the observed C_BasePlayerPawn weapon-services offset");
+    }
+
+    if (!TryGetKnownClientSchemaFieldOffsetFallback("CBasePlayerController", "m_hPawn", fallbackOffset)
+        || fallbackOffset != 0x6BC) {
+        return ReportFailure("known schema fallback should cover the current controller pawn offset");
+    }
+
+    if (!TryGetKnownClientSchemaFieldOffsetFallback("C_BaseEntity", "m_pGameSceneNode", fallbackOffset)
+        || fallbackOffset != 0x330) {
+        return ReportFailure("known schema fallback should cover the current scene-node offset");
+    }
+
+    if (!TryGetKnownClientSchemaFieldOffsetFallback("C_BaseGrenade", "m_hOriginalThrower", fallbackOffset)
+        || fallbackOffset != 0x11C4) {
+        return ReportFailure("known schema fallback should cover the current grenade owner offset");
     }
 
     if (!TryGetKnownClientSchemaFieldOffsetFallback("CPlayer_ObserverServices", "m_iObserverMode", fallbackOffset)
@@ -759,6 +776,14 @@ int main() {
         return ReportFailure("schema raw scan should enumerate all recovered type scope buckets");
     }
 
+    const auto declaredArrayLayout = GetSchemaDeclaredClassArrayLayout();
+    if (declaredArrayLayout.typeScopeDeclaredClassCountOffset != 0x470
+        || declaredArrayLayout.typeScopeDeclaredClassArrayOffset != 0x478
+        || declaredArrayLayout.declaredClassEntryStride != 0x18
+        || declaredArrayLayout.declaredClassEntryPayloadOffset != 0x10) {
+        return ReportFailure("schema declared class array should match the current Source 2 layout");
+    }
+
     std::array<selfiestick::schema::GenericRawFieldArrayLayoutCandidate, 12> focusedRawFieldLayouts{};
     const auto focusedRawFieldLayoutCount = BuildFocusedGenericRawFieldArrayLayoutCandidates(focusedRawFieldLayouts);
     if (focusedRawFieldLayoutCount == 0u || focusedRawFieldLayoutCount > focusedRawFieldLayouts.size()) {
@@ -819,6 +844,20 @@ int main() {
 
     if (!(stubBytes[0] == 0xF3 && stubBytes[1] == 0x0F && stubBytes[2] == 0x1E && stubBytes[3] == 0xFA)) {
         return ReportFailure("detour stub should begin with ENDBR64");
+    }
+
+    if (!(stubBytes[60] == 0x48 && stubBytes[61] == 0x8B && stubBytes[62] == 0xCE)) {
+        return ReportFailure("default SetUpView detour should forward RSI as the view setup pointer");
+    }
+
+    decodedSite.viewSetupRegister = ViewSetupRegister::R14;
+    std::vector<std::uint8_t> r14StubBytes;
+    if (!BuildSetUpViewDetourStub(detourStubAddress, decodedSite, callbackAddress, r14StubBytes, &error)) {
+        return ReportFailure(("failed to build R14 SetUpView detour stub: " + error).c_str());
+    }
+
+    if (!(r14StubBytes[60] == 0x49 && r14StubBytes[61] == 0x8B && r14StubBytes[62] == 0xCE)) {
+        return ReportFailure("current SetUpView detour should forward R14 as the view setup pointer");
     }
 
     const auto relocatedStringDisplacement = *reinterpret_cast<const std::int32_t*>(stubBytes.data() + 12);
