@@ -5,15 +5,15 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.4.0`.
+Latest source/release package in this repository: `v0.4.1`.
 
 ## Supported Versions
 
 This build is marked for:
 
-- HLAE: `2.192.2`
-- Counter-Strike 2: Steam app `730`, buildid `25218825`
-- CS2 app manifest timestamp used locally: `2026-09-10 09:28:58 +08:00`
+- HLAE: `2.192.6`
+- Counter-Strike 2: Steam app `730`, buildid `25640462`
+- CS2 app manifest timestamp used locally: `2026-10-01 09:16:31 +08:00`
 
 CS2 and HLAE update often. If Valve or HLAE changes schema, entity layout, or `SetUpView`, load may fail by design and the panel will show a reason instead of silently using an unsafe fallback.
 
@@ -39,7 +39,7 @@ Local native builds write the latest intermediate DLL to `bin/selfiestick_hlae.d
 
 ## Quick Start
 
-1. Start HLAE `2.192.2` and launch CS2.
+1. Start HLAE `2.192.6` and launch CS2.
 2. Open or play a demo in spectator mode.
 3. Load one DLL from the HLAE console.
 4. Press `Ins` to open the panel.
@@ -58,11 +58,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.0` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`, so a missing VC++ runtime or shader compiler DLL should not block loading.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.1` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`, so a missing VC++ runtime or shader compiler DLL should not block loading.
 
-If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use `v0.4.0` with CS2 buildid `25218825`, or rebuild after validating a newer game binary.
+If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use `v0.4.1` with CS2 buildid `25640462`, or rebuild after validating a newer game binary.
 
-If the DLL is loaded while a demo is already playing, `v0.4.0` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. This release updates the SetUpView view pointer register, attachment accessors, schema memory layout, and build-gated fallback offsets for CS2 buildid `25218825`. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
+If the DLL is loaded while a demo is already playing, `v0.4.1` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. This release updates the 16-byte SetUpView site and `RBX` view pointer, the `+27` attachment accessor call, and build-gated schema fallbacks for CS2 buildid `25640462`. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode spreads entity discovery across bounded 192-entity batches, limits an in-progress scan to one batch per 8 ms, and normally reads projectile position directly from `CGameSceneNode::m_vecAbsOrigin` instead of running the expensive dynamic-origin search every camera callback. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
 
 If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
@@ -131,7 +131,7 @@ Prop controls:
 - Angle sliders: medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders in the `-45` to `45` degree range.
 - Recent Props: shows recent projectile candidates, validity, handle, age, and lock buttons.
 
-The prop camera uses a smoothed, predicted projectile anchor to reduce stepping and jitter across slow motion and normal demo speed.
+The prop camera uses a smoothed, predicted projectile anchor to reduce stepping and jitter across slow motion and normal demo speed. It combines the current schema velocity direction (`C_BaseEntity::m_vecVelocity`) with the observed movement rate so prediction respects demo playback speed, falls back to measured position deltas when unavailable, stops extrapolating when demo motion pauses, and resets stale prediction immediately when `C_BaseCSGrenadeProjectile::m_nBounces` changes.
 
 ## Status And Debugging
 
@@ -163,7 +163,7 @@ selfiestick_trace.log
 The current trace marker is:
 
 ```text
-schema-probe-v21-cs2-25218825
+schema-probe-v23-cs2-25640462
 ```
 
 If the marker is older, HLAE/CS2 is loading an old DLL. Fully restart HLAE and CS2 after replacing DLLs because Windows keeps loaded DLLs inside the process.
@@ -196,7 +196,7 @@ Installed-CS2 binary compatibility check:
 py -3 tools\check_cs2_binary_compatibility.py --client "<CS2>\game\csgo\bin\win64\client.dll" --schema "<CS2>\game\bin\win64\schemasystem.dll"
 ```
 
-This check validates the PE fingerprint, signature match counts, and relative call targets used by entity, attachment, schema, and SetUpView access.
+This check validates the PE fingerprint, signature match counts, attachment call targets, the SetUpView 16-byte instruction boundary, and the `RBX` origin/angle context used by entity, attachment, schema, and camera access.
 
 Release dependency check:
 

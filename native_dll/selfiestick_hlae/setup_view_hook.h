@@ -8,17 +8,17 @@
 
 namespace selfiestick::hook {
 
-constexpr std::size_t kSetUpViewPatchSize = 17;
+constexpr std::size_t kSetUpViewPatchSize = 16;
 
 enum class ViewSetupRegister {
     Rsi,
-    R14
+    R14,
+    Rbx
 };
 
 struct SetUpViewPatchSite {
     std::uintptr_t patchAddress{};
-    std::uintptr_t helperStringAddress{};
-    std::uintptr_t helperCallTarget{};
+    std::uintptr_t engineClientStorageAddress{};
     std::uintptr_t returnAddress{};
     ViewSetupRegister viewSetupRegister{ViewSetupRegister::Rsi};
     std::array<std::uint8_t, kSetUpViewPatchSize> originalBytes{};

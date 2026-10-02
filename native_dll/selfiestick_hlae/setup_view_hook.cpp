@@ -53,19 +53,24 @@ bool DecodeSetUpViewPatchSite(const void* patchAddress, SetUpViewPatchSite& site
     site.patchAddress = address;
     std::memcpy(site.originalBytes.data(), patchAddress, site.originalBytes.size());
 
-    if (site.originalBytes[0] != 0xBA
-        || site.originalBytes[5] != 0x48
-        || site.originalBytes[6] != 0x8D
-        || site.originalBytes[7] != 0x0D
-        || site.originalBytes[12] != 0xE8) {
+    if (site.originalBytes[0] != 0x48
+        || site.originalBytes[1] != 0x8B
+        || site.originalBytes[2] != 0x0D
+        || site.originalBytes[7] != 0x48
+        || site.originalBytes[8] != 0x8B
+        || site.originalBytes[9] != 0x01
+        || site.originalBytes[10] != 0xFF
+        || site.originalBytes[11] != 0x90
+        || site.originalBytes[12] != 0x50
+        || site.originalBytes[13] != 0x01
+        || site.originalBytes[14] != 0x00
+        || site.originalBytes[15] != 0x00) {
         SetError(errorMessage, "SetUpView patch site instructions changed");
         return false;
     }
 
-    const auto helperStringDisplacement = *reinterpret_cast<const std::int32_t*>(site.originalBytes.data() + 8);
-    const auto helperCallDisplacement = *reinterpret_cast<const std::int32_t*>(site.originalBytes.data() + 13);
-    site.helperStringAddress = address + 12u + static_cast<std::intptr_t>(helperStringDisplacement);
-    site.helperCallTarget = address + 17u + static_cast<std::intptr_t>(helperCallDisplacement);
+    const auto engineClientStorageDisplacement = *reinterpret_cast<const std::int32_t*>(site.originalBytes.data() + 3);
+    site.engineClientStorageAddress = address + 7u + static_cast<std::intptr_t>(engineClientStorageDisplacement);
     site.returnAddress = address + kSetUpViewPatchSize;
     return true;
 }
@@ -110,21 +115,11 @@ bool BuildSetUpViewDetourStub(
     outBytes.insert(outBytes.end(), site.originalBytes.begin(), site.originalBytes.end());
     if (!PatchRel32(
             outBytes,
-            relocatedSetupOffset + 8u,
-            detourStubAddress + relocatedSetupOffset + 12u,
-            site.helperStringAddress,
+            relocatedSetupOffset + 3u,
+            detourStubAddress + relocatedSetupOffset + 7u,
+            site.engineClientStorageAddress,
             errorMessage,
-            "SetUpView helper string was out of rel32 range")) {
-        return false;
-    }
-
-    if (!PatchRel32(
-            outBytes,
-            relocatedSetupOffset + 13u,
-            detourStubAddress + relocatedSetupOffset + 17u,
-            site.helperCallTarget,
-            errorMessage,
-            "SetUpView helper call target was out of rel32 range")) {
+            "SetUpView engine client storage was out of rel32 range")) {
         return false;
     }
 
@@ -181,6 +176,12 @@ bool BuildSetUpViewDetourStub(
         appendByte(0x49);
         appendByte(0x8B);
         appendByte(0xCE);
+        break;
+    case ViewSetupRegister::Rbx:
+        // mov rcx, rbx
+        appendByte(0x48);
+        appendByte(0x89);
+        appendByte(0xD9);
         break;
     default:
         SetError(errorMessage, "SetUpView register selection was invalid");

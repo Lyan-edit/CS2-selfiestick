@@ -49,6 +49,8 @@ int main() {
     using selfiestick::compat::ShouldKeepManualPropLock;
     using selfiestick::compat::ShouldUseActualThrowerDirection;
     using selfiestick::compat::ShouldUseSmokePostFlightHold;
+    using selfiestick::compat::IsUsableProjectileVelocity;
+    using selfiestick::compat::DidProjectileBounce;
     using selfiestick::compat::TrySelectNearestPlausibleVector;
     using selfiestick::compat::TrySelectTrustedProjectileSceneOrigin;
     using selfiestick::compat::TrySelectDynamicProjectileOrigin;
@@ -204,6 +206,22 @@ int main() {
         return ReportFailure("live smoke projectiles should not be treated as post-flight hold frames");
     }
 
+    if (!IsUsableProjectileVelocity({ 1500.0f, -20.0f, 400.0f }, 100000.0f)) {
+        return ReportFailure("finite in-range projectile velocity should be accepted");
+    }
+    if (IsUsableProjectileVelocity({ NAN, 0.0f, 0.0f }, 100000.0f)
+        || IsUsableProjectileVelocity({ 100001.0f, 0.0f, 0.0f }, 100000.0f)
+        || IsUsableProjectileVelocity({ 0.0f, 0.0f, 0.0f }, 0.0f)) {
+        return ReportFailure("invalid or out-of-range projectile velocity should be rejected");
+    }
+    if (!DidProjectileBounce(true, 1, true, 2)
+        || !DidProjectileBounce(true, 2, true, 1)
+        || DidProjectileBounce(false, 0, true, 1)
+        || DidProjectileBounce(true, 1, false, 0)
+        || DidProjectileBounce(true, 1, true, 1)) {
+        return ReportFailure("projectile prediction should reset only when a valid bounce counter changes");
+    }
+
     const auto propImageStylePreset = GetImageStylePropCameraPreset();
     if (propImageStylePreset.offset.x != -8.0f
         || propImageStylePreset.offset.y != -22.0f
@@ -238,14 +256,15 @@ int main() {
     const OffsetCameraVector sceneNodeOriginCandidates[] = {
         { 0x30, { 149.248f, 0.0f, 1.0f } },
         { 0x88, { 151.0f, -1960.0f, 56.0f } },
-        { 0xD0, { 152.0f, -1961.0f, 57.0f } }
+        { 0xD0, { 152.0f, -1961.0f, 57.0f } },
+        { 0xC8, { 153.0f, -1962.0f, 58.0f } }
     };
     OffsetCameraVector selectedSceneNodeOrigin{};
-    if (!TrySelectTrustedProjectileSceneOrigin(sceneNodeOriginCandidates, 3u, { 151.965f, -1962.597f, 56.0f }, 4096.0f, selectedSceneNodeOrigin)) {
+    if (!TrySelectTrustedProjectileSceneOrigin(sceneNodeOriginCandidates, 4u, { 151.965f, -1962.597f, 56.0f }, 4096.0f, selectedSceneNodeOrigin)) {
         return ReportFailure("projectile scene origin should select a trusted scene-node offset");
     }
-    if (selectedSceneNodeOrigin.offset != 0xD0) {
-        return ReportFailure("projectile scene origin should prefer trusted abs-origin offset over nearer local-looking values");
+    if (selectedSceneNodeOrigin.offset != 0xC8) {
+        return ReportFailure("projectile scene origin should prefer the current schema abs-origin offset");
     }
 
     const OffsetCameraVector invalidSceneNodeOriginCandidates[] = {
@@ -628,8 +647,31 @@ int main() {
 
     std::ptrdiff_t fallbackOffset = 0;
     if (!TryGetKnownClientSchemaFieldOffsetFallback("C_BasePlayerPawn", "m_pWeaponServices", fallbackOffset)
-        || fallbackOffset != 0x1208) {
+        || fallbackOffset != 0x12F0) {
         return ReportFailure("known schema fallback should cover the observed C_BasePlayerPawn weapon-services offset");
+    }
+
+    struct ExpectedSchemaFallback {
+        const char* className;
+        const char* fieldName;
+        std::ptrdiff_t offset;
+    };
+    constexpr std::array<ExpectedSchemaFallback, 9> currentPlayerAndPropFallbacks{ {
+        { "CCSPlayerController", "m_hPlayerPawn", 0x92C },
+        { "C_BasePlayerPawn", "m_pObserverServices", 0x1308 },
+        { "C_BasePlayerPawn", "m_pCameraServices", 0x1328 },
+        { "C_BasePlayerPawn", "m_hController", 0x14BC },
+        { "C_CSPlayerPawn", "m_angEyeAngles", 0x35F0 },
+        { "C_BaseEntity", "m_vecVelocity", 0x430 },
+        { "C_BaseGrenade", "m_hThrower", 0x1290 },
+        { "C_BaseGrenade", "m_hOriginalThrower", 0x12AC },
+        { "C_BaseCSGrenadeProjectile", "m_nBounces", 0x12C8 }
+    } };
+    for (const auto& expected : currentPlayerAndPropFallbacks) {
+        if (!TryGetKnownClientSchemaFieldOffsetFallback(expected.className, expected.fieldName, fallbackOffset)
+            || fallbackOffset != expected.offset) {
+            return ReportFailure("known schema fallback should match current player and prop offsets");
+        }
     }
 
     if (!TryGetKnownClientSchemaFieldOffsetFallback("CBasePlayerController", "m_hPawn", fallbackOffset)
@@ -643,7 +685,7 @@ int main() {
     }
 
     if (!TryGetKnownClientSchemaFieldOffsetFallback("C_BaseGrenade", "m_hOriginalThrower", fallbackOffset)
-        || fallbackOffset != 0x11C4) {
+        || fallbackOffset != 0x12AC) {
         return ReportFailure("known schema fallback should cover the current grenade owner offset");
     }
 
@@ -799,15 +841,13 @@ int main() {
     }
 
     std::array<std::uint8_t, kSetUpViewPatchSize> patchBytes{
-        0xBA, 0xFF, 0xFF, 0xFF, 0xFF,
-        0x48, 0x8D, 0x0D, 0x00, 0x00, 0x00, 0x00,
-        0xE8, 0x00, 0x00, 0x00, 0x00
+        0x48, 0x8B, 0x0D, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0x8B, 0x01,
+        0xFF, 0x90, 0x50, 0x01, 0x00, 0x00
     };
     const auto patchAddress = reinterpret_cast<std::uintptr_t>(patchBytes.data());
-    const auto helperStringAddress = patchAddress + 0x1234;
-    const auto helperCallTarget = patchAddress + 0x4321;
-    *reinterpret_cast<std::int32_t*>(patchBytes.data() + 8) = static_cast<std::int32_t>(helperStringAddress - (patchAddress + 12u));
-    *reinterpret_cast<std::int32_t*>(patchBytes.data() + 13) = static_cast<std::int32_t>(helperCallTarget - (patchAddress + 17u));
+    const auto engineClientStorageAddress = patchAddress + 0x1234;
+    *reinterpret_cast<std::int32_t*>(patchBytes.data() + 3) = static_cast<std::int32_t>(engineClientStorageAddress - (patchAddress + 7u));
 
     SetUpViewPatchSite decodedSite{};
     std::string error;
@@ -819,12 +859,8 @@ int main() {
         return ReportFailure("decoded patch address mismatch");
     }
 
-    if (decodedSite.helperStringAddress != helperStringAddress) {
-        return ReportFailure("decoded helper string address mismatch");
-    }
-
-    if (decodedSite.helperCallTarget != helperCallTarget) {
-        return ReportFailure("decoded helper call target mismatch");
+    if (decodedSite.engineClientStorageAddress != engineClientStorageAddress) {
+        return ReportFailure("decoded engine client storage address mismatch");
     }
 
     if (decodedSite.returnAddress != patchAddress + kSetUpViewPatchSize) {
@@ -846,30 +882,29 @@ int main() {
         return ReportFailure("detour stub should begin with ENDBR64");
     }
 
-    if (!(stubBytes[60] == 0x48 && stubBytes[61] == 0x8B && stubBytes[62] == 0xCE)) {
+    constexpr std::size_t kViewSetupMoveOffset = 59u;
+    if (!(stubBytes[kViewSetupMoveOffset + 0u] == 0x48
+        && stubBytes[kViewSetupMoveOffset + 1u] == 0x8B
+        && stubBytes[kViewSetupMoveOffset + 2u] == 0xCE)) {
         return ReportFailure("default SetUpView detour should forward RSI as the view setup pointer");
     }
 
-    decodedSite.viewSetupRegister = ViewSetupRegister::R14;
-    std::vector<std::uint8_t> r14StubBytes;
-    if (!BuildSetUpViewDetourStub(detourStubAddress, decodedSite, callbackAddress, r14StubBytes, &error)) {
-        return ReportFailure(("failed to build R14 SetUpView detour stub: " + error).c_str());
+    decodedSite.viewSetupRegister = ViewSetupRegister::Rbx;
+    std::vector<std::uint8_t> rbxStubBytes;
+    if (!BuildSetUpViewDetourStub(detourStubAddress, decodedSite, callbackAddress, rbxStubBytes, &error)) {
+        return ReportFailure(("failed to build RBX SetUpView detour stub: " + error).c_str());
     }
 
-    if (!(r14StubBytes[60] == 0x49 && r14StubBytes[61] == 0x8B && r14StubBytes[62] == 0xCE)) {
-        return ReportFailure("current SetUpView detour should forward R14 as the view setup pointer");
+    if (!(rbxStubBytes[kViewSetupMoveOffset + 0u] == 0x48
+        && rbxStubBytes[kViewSetupMoveOffset + 1u] == 0x89
+        && rbxStubBytes[kViewSetupMoveOffset + 2u] == 0xD9)) {
+        return ReportFailure("current SetUpView detour should forward RBX as the view setup pointer");
     }
 
-    const auto relocatedStringDisplacement = *reinterpret_cast<const std::int32_t*>(stubBytes.data() + 12);
-    const auto relocatedCallDisplacement = *reinterpret_cast<const std::int32_t*>(stubBytes.data() + 17);
-    const auto relocatedStringAddress = (detourStubAddress + 16u) + static_cast<std::intptr_t>(relocatedStringDisplacement);
-    const auto relocatedCallAddress = (detourStubAddress + 21u) + static_cast<std::intptr_t>(relocatedCallDisplacement);
-    if (relocatedStringAddress != helperStringAddress) {
-        return ReportFailure("relocated helper string address mismatch");
-    }
-
-    if (relocatedCallAddress != helperCallTarget) {
-        return ReportFailure("relocated helper call target mismatch");
+    const auto relocatedStorageDisplacement = *reinterpret_cast<const std::int32_t*>(stubBytes.data() + 7);
+    const auto relocatedStorageAddress = (detourStubAddress + 11u) + static_cast<std::intptr_t>(relocatedStorageDisplacement);
+    if (relocatedStorageAddress != engineClientStorageAddress) {
+        return ReportFailure("relocated engine client storage address mismatch");
     }
 
     std::array<std::uint8_t, kSetUpViewPatchSize> entryPatch{};

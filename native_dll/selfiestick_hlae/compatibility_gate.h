@@ -91,6 +91,13 @@ bool ShouldUseActualThrowerDirection(
     bool actualThrowerResolved,
     bool currentTargetResolved
 ) noexcept;
+bool IsUsableProjectileVelocity(CameraVector velocity, float maxSpeed) noexcept;
+bool DidProjectileBounce(
+    bool previousBounceValid,
+    int previousBounceCount,
+    bool currentBounceValid,
+    int currentBounceCount
+) noexcept;
 PropCameraPreset GetImageStylePropCameraPreset() noexcept;
 bool ShouldUseObserverPawnAsFollowTarget(
     ClientEntityKind splitScreenEntityKind,

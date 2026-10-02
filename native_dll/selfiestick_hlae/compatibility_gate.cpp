@@ -10,10 +10,12 @@ constexpr float kLeftSelfieAdditionalBackOffset = 10.0f;
 
 int ProjectileSceneOriginOffsetPriority(std::ptrdiff_t offset) noexcept {
     switch (offset) {
-    case 0xD0:
+    case 0xC8:
         return 0;
-    case 0x88:
+    case 0xD0:
         return 1;
+    case 0x88:
+        return 2;
     default:
         return -1;
     }
@@ -229,6 +231,30 @@ bool ShouldUseActualThrowerDirection(
 ) noexcept {
     (void)currentTargetResolved;
     return actualThrowerResolved;
+}
+
+bool IsUsableProjectileVelocity(CameraVector velocity, float maxSpeed) noexcept {
+    if (!std::isfinite(velocity.x)
+        || !std::isfinite(velocity.y)
+        || !std::isfinite(velocity.z)
+        || !std::isfinite(maxSpeed)
+        || maxSpeed <= 0.0f) {
+        return false;
+    }
+
+    const float speedSquared = LengthSquared(velocity);
+    return std::isfinite(speedSquared) && speedSquared <= maxSpeed * maxSpeed;
+}
+
+bool DidProjectileBounce(
+    bool previousBounceValid,
+    int previousBounceCount,
+    bool currentBounceValid,
+    int currentBounceCount
+) noexcept {
+    return previousBounceValid
+        && currentBounceValid
+        && previousBounceCount != currentBounceCount;
 }
 
 PropCameraPreset GetImageStylePropCameraPreset() noexcept {

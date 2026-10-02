@@ -1,10 +1,10 @@
-# CS2 Selfiestick v0.4.0 Release Notes
+# CS2 Selfiestick v0.4.1 Release Notes
 
 ## Supported Runtime
 
-- HLAE: `2.192.2`
-- Counter-Strike 2: Steam app `730`, buildid `25218825`
-- Local CS2 app manifest timestamp: `2026-09-10 09:28:58 +08:00`
+- HLAE: `2.192.6`
+- Counter-Strike 2: Steam app `730`, buildid `25640462`
+- Local CS2 app manifest timestamp: `2026-10-01 09:16:31 +08:00`
 
 This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates can break schema, entity layout, or `SetUpView`; if that happens, the DLL reports a clear Runtime reason instead of silently falling back to unsafe behavior.
 
@@ -19,13 +19,20 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
-- Updated and rebuilt against the current local CS2 app `730` buildid `25218825` and HLAE `2.192.2`.
-- Recovered unique current-client signatures for attachment access and the 17-byte SetUpView patch site; added a repeatable PE/signature compatibility checker.
-- Updated the SetUpView bridge to pass `CViewSetup` from `R14`, matching the current client code generation and preventing an invalid view pointer from reaching the callback.
+- Updated and rebuilt against the current local CS2 app `730` buildid `25640462` and HLAE `2.192.6`.
+- Recovered the unique current-client attachment signature with its second call at `+27`, plus the unique 16-byte SetUpView patch site used by HLAE 2.192.6.
+- Updated the SetUpView trampoline to relocate the original `IsPlayingDemo` virtual call, preserve its return value, stop on an exact instruction boundary, and pass `CViewSetup` from `RBX`.
+- Extended the installed-binary checker to verify both attachment call targets, the SetUpView data reference, the 16-byte boundary, and nearby `[RBX+0x4A0]` / `[RBX+0x4B8]` accesses.
 - Updated current Source 2 schema layout handling: direct declared-class array at `0x470/0x478`, class field span at `0x24/0x30`, and field name/type order.
-- Updated build-gated schema fallbacks for player/controller, scene node, view entity, viewmodel rendering, eye angles, and grenade ownership. Hardcoded fallbacks are disabled automatically when the client PE fingerprint changes.
+- Updated build-gated schema fallbacks for player/controller services, camera/observer services, eye angles, and grenade ownership in build `25640462`. Hardcoded fallbacks are disabled automatically when the client PE fingerprint changes.
 - Moved viewmodel and grenade owner queries to the classes that currently declare those fields: `C_BaseEntity` and `C_BaseGrenade`.
-- Cached RTTI names per vtable and reduced unlocked full-entity prop scans from about 33 Hz to 10 Hz to lower render-thread spikes without making candidate selection feel sluggish.
+- Player Selfie now reuses the last trusted target handle between 50 ms refreshes instead of repeating the full split-screen observer chain in every SetUpView callback; target changes still refresh promptly.
+- Player and weapon attachment indices are cached per entity handle and attachment name, removing repeated `LookupAttachment` work from the per-frame camera path while invalidating safely when a transform fails.
+- Prop Selfie discovery no longer scans the entire entity list in one SetUpView callback. Each callback processes at most 192 entities and commits candidates only after the pass completes, reducing frame-time spikes while the locked projectile still tracks every frame.
+- In-progress Prop Selfie discovery is now limited to one 192-entity batch per 8 ms even if CS2 invokes SetUpView more than once in a rendered frame.
+- Projectile position now uses the current `CGameSceneNode::m_vecAbsOrigin` schema path first. The older `0x1800` dynamic-origin search remains only as a guarded fallback, removing its roughly 1,536 candidate-vector checks from the normal camera hot path.
+- Added build-gated/runtime schema support for `C_BaseEntity::m_vecVelocity` and `C_BaseCSGrenadeProjectile::m_nBounces`. Prop prediction combines the real velocity direction with measured movement rate so it respects demo timescale, keeps measured-delta fallback, stops extrapolating while playback is paused, and resets stale smoothing immediately after a bounce-counter change.
+- Cached RTTI names per vtable and retained the 10 Hz unlocked / 4 Hz locked discovery cadence between completed prop scans.
 - The DLL no longer installs the SetUpView camera hotpatch during `mirv_loadlibrary`; it loads first, then installs the hook lazily only when the user presses `F8` or clicks Enable.
 - If SetUpView hook installation is not compatible with the current CS2 build, the DLL now stays loaded, keeps the camera disabled, and reports a Runtime reason instead of taking the demo process down.
 - Fixed another external-PC demo-load no-response path found from a shared `selfiestick_trace.log`: the DLL was loaded successfully and `bridge-enter` was running, but startup schema diagnostics kept doing heavy schema probing and logging during early demo frames.
@@ -68,17 +75,24 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 当前版本支持：
 
-- HLAE：`2.192.2`
-- CS2：Steam app `730`，buildid `25218825`
+- HLAE：`2.192.6`
+- CS2：Steam app `730`，buildid `25640462`
 
 新增内容：
 
-- 已按当前本机 CS2 app `730` buildid `25218825` 和 HLAE `2.192.2` 重新构建。
-- 恢复当前 client.dll 唯一命中的附件访问和 SetUpView 17 字节补丁特征码，并新增可重复运行的 PE / 特征码兼容检查脚本。
-- SetUpView 桥接改为从当前版本使用的 `R14` 传入 `CViewSetup`，避免把错误视角指针交给回调造成闪退。
+- 已按当前本机 CS2 app `730` buildid `25640462` 和 HLAE `2.192.6` 重新构建。
+- 恢复当前 client.dll 唯一命中的附件访问特征码（第二个调用位于 `+27`）和 HLAE 2.192.6 使用的 16 字节 SetUpView 补丁位点。
+- SetUpView trampoline 会重放原始 `IsPlayingDemo` 虚调用并保留返回值，在完整指令边界结束，再从当前版本使用的 `RBX` 传入 `CViewSetup`，避免错误视角指针或半条指令导致闪退。
+- 二进制检查器新增附件两个调用目标、SetUpView 数据引用、16 字节边界和附近 `[RBX+0x4A0]` / `[RBX+0x4B8]` 上下文校验。
 - 更新当前 Source 2 schema 内存布局：声明类数组 `0x470/0x478`、类字段跨度 `0x24/0x30`，并修正字段名 / 类型顺序。
-- 更新人物、控制器、场景节点、视角实体、第一人称渲染、眼睛角度和手雷归属字段回退；client.dll PE 指纹变化后会自动禁用硬编码回退。
-- RTTI 类名改为按 vtable 缓存，未锁定道具时的全实体扫描从约 33 次/秒降到 10 次/秒，降低渲染线程尖峰。
+- 更新 build `25640462` 的人物/控制器服务、相机/观察服务、眼睛角度和手雷归属字段回退；client.dll PE 指纹变化后会自动禁用硬编码回退。
+- 人物自拍在 50ms 刷新间隔内复用上次可信的目标句柄，不再在每次 SetUpView 回调里重复完整的分屏观战目标链，同时仍能及时响应目标切换。
+- 人物与武器 attachment 索引按实体句柄和附件名缓存；transform 失败时会自动失效，减少每帧重复 `LookupAttachment`。
+- 道具候选扫描改为每次 SetUpView 最多处理 192 个实体，完整一轮后才提交候选，消除单帧全实体遍历尖峰；已锁定道具仍保持逐帧跟随。
+- 即使同一渲染帧内 SetUpView 被调用多次，进行中的道具扫描也限制为每 8ms 最多执行一批 192 个实体，避免批次在单帧内被连续跑完。
+- 道具位置优先直接读取当前 `CGameSceneNode::m_vecAbsOrigin` schema 路径；原有 `0x1800` 动态原点搜索只作为受保护的回退，正常相机热路径不再每次检查约 1536 个候选向量。
+- 新增 `C_BaseEntity::m_vecVelocity` 与 `C_BaseCSGrenadeProjectile::m_nBounces` 的运行时 schema / build 门禁回退。预测会把真实速度方向与实测移动速率结合，正确适配 demo 倍速；字段不可用时继续使用位置差分，播放暂停时停止外推，弹跳计数变化则立即清除旧预测，减少弹跳后拉扯和抖动。
+- RTTI 类名继续按 vtable 缓存，并保留完整扫描后的未锁定 10 Hz / 已锁定 4 Hz 间隔。
 - DLL 不再在 `mirv_loadlibrary` 加载瞬间安装 SetUpView 相机热补丁；现在会先完成加载，只有按 `F8` 或点击启用自拍杆时才延迟安装 hook。
 - 如果当前 CS2 版本与 SetUpView hook 不兼容，DLL 会保持加载、保持相机关闭，并在 Runtime 区域显示原因，不再直接拖崩 demo 进程。
 - 修复部分别人电脑上“大厅能加载 DLL，但进入 demo 后游戏进程无响应”的问题：热补丁安装时不再在暂停其它线程的窗口内分配堆内存，降低死锁风险。

@@ -74,6 +74,9 @@ class PeImage:
     def is_executable_rva(self, rva: int) -> bool:
         return any(section.contains_rva(rva) and section.characteristics & 0x20000000 for section in self.sections)
 
+    def contains_rva(self, rva: int) -> bool:
+        return any(section.contains_rva(rva) for section in self.sections)
+
 
 def parse_patterns(source: str) -> dict[str, tuple[int | None, ...]]:
     expressions = re.findall(r'constexpr char (kPattern\w+)\[\] = "([^"]+)";', source)
@@ -180,15 +183,28 @@ def main() -> int:
     attachment = resolved.get("kPatternAttachmentAccess", [])
     if len(attachment) == 1:
         check_call(client, attachment[0], 0, "LookupAttachment", failures)
-        check_call(client, attachment[0], 23, "GetAttachment", failures)
+        check_call(client, attachment[0], 27, "GetAttachment", failures)
 
     setup_view = resolved.get("kPatternSetupViewPatch", [])
     if len(setup_view) == 1:
-        check_call(client, setup_view[0], 12, "SetUpView helper", failures)
+        setup_offset = setup_view[0]
+        setup_rva = client.raw_to_rva(setup_offset)
+        engine_client_displacement = struct.unpack_from("<i", client.data, setup_offset + 3)[0]
+        engine_client_storage_rva = setup_rva + 7 + engine_client_displacement
+        if not client.contains_rva(engine_client_storage_rva):
+            failures.append(
+                f"SetUpView engine client storage RVA 0x{engine_client_storage_rva:X} is outside client.dll"
+            )
+
+        if client.data[setup_offset + 16 : setup_offset + 21] != b"\x0F\x57\xFF\x84\xC0":
+            failures.append("SetUpView 16-byte patch boundary no longer ends before xorps/test")
+
         context_start = max(0, setup_view[0] - 0x100)
-        r14_origin_access = b"\x49\x8D\x96\xA0\x04\x00\x00"
-        if r14_origin_access not in client.data[context_start : setup_view[0]]:
-            failures.append("SetUpView context no longer proves CViewSetup origin at [R14+0x4A0]")
+        setup_context = client.data[context_start : setup_view[0]]
+        rbx_origin_access = b"\x48\x8D\x93\xA0\x04\x00\x00"
+        rbx_angles_access = b"\x4C\x8D\x83\xB8\x04\x00\x00"
+        if rbx_origin_access not in setup_context or rbx_angles_access not in setup_context:
+            failures.append("SetUpView context no longer proves CViewSetup origin/angles at [RBX+0x4A0/0x4B8]")
 
     if failures:
         for failure in failures:

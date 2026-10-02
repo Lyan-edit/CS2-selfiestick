@@ -16,15 +16,15 @@ The DLL is built with the MSVC runtime statically linked. You do not need to ins
 
 This package is marked for:
 
-- HLAE: `2.192.2`
-- Counter-Strike 2: Steam app `730`, buildid `25218825`
+- HLAE: `2.192.6`
+- Counter-Strike 2: Steam app `730`, buildid `25640462`
 
 Use it for HLAE demo/cinematic workflows only.
 
 ## Load The DLL
 
 1. Copy the `en-US` folder to a stable location.
-2. Start HLAE `2.192.2`, launch CS2, and open a demo in spectator mode.
+2. Start HLAE `2.192.6`, launch CS2, and open a demo in spectator mode.
 3. Run this in the HLAE console:
 
 ```cfg
@@ -100,6 +100,8 @@ Behavior:
 - `CLEAR PROP` clears the current prop lock.
 - The camera direction prefers the actual projectile thrower, so look-back direction stays correct even if the spectator target changes.
 - Smoke projectile shots keep a short post-flight hold after the flying smoke entity disappears. Other projectile types end normally when the flying entity ends.
+- Tracking combines the projectile's schema velocity direction with its observed movement rate, so slow motion and normal playback use the correct prediction speed. It stops extrapolating when playback pauses and resets prediction when the bounce counter changes; the guarded measured-motion fallback remains active if either field is unavailable.
+- Projectile discovery is split into bounded batches, while the locked projectile's position uses the direct scene-node origin path on the supported build to avoid a full dynamic-origin search on every camera callback.
 
 Prop controls:
 

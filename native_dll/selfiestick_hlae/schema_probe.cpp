@@ -168,22 +168,22 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
         target = 0x6BC;
     }
     else if (matches("CCSPlayerController", "m_hPlayerPawn")) {
-        target = 0x914;
+        target = 0x92C;
     }
     else if (matches("C_BasePlayerPawn", "m_pWeaponServices")) {
-        target = 0x1208;
+        target = 0x12F0;
     }
     else if (matches("C_BasePlayerPawn", "m_pObserverServices")) {
-        target = 0x1220;
+        target = 0x1308;
     }
     else if (matches("C_BasePlayerPawn", "m_pCameraServices")) {
-        target = 0x1240;
+        target = 0x1328;
     }
     else if (matches("C_BasePlayerPawn", "m_hController")) {
-        target = 0x13D0;
+        target = 0x14BC;
     }
     else if (matches("C_CSPlayerPawn", "m_angEyeAngles")) {
-        target = 0x3350;
+        target = 0x35F0;
     }
     else if (matches("CPlayer_ObserverServices", "m_iObserverMode")) {
         target = 0x48;
@@ -203,6 +203,9 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
     else if (matches("C_BaseEntity", "m_hOwnerEntity")) {
         target = 0x520;
     }
+    else if (matches("C_BaseEntity", "m_vecVelocity")) {
+        target = 0x430;
+    }
     else if (matches("C_BaseEntity", "m_bRenderWithViewModels")) {
         target = 0x56A;
     }
@@ -213,10 +216,13 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
         target = 0x80;
     }
     else if (matches("C_BaseGrenade", "m_hThrower")) {
-        target = 0x11A8;
+        target = 0x1290;
     }
     else if (matches("C_BaseGrenade", "m_hOriginalThrower")) {
-        target = 0x11C4;
+        target = 0x12AC;
+    }
+    else if (matches("C_BaseCSGrenadeProjectile", "m_nBounces")) {
+        target = 0x12C8;
     }
 
     return target != 0;

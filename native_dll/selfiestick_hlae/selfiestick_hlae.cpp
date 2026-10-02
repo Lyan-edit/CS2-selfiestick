@@ -48,10 +48,10 @@ constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
 constexpr char kBuildTag[] = __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v21-cs2-25218825";
-constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AA1AE5Eu;
-constexpr std::uint32_t kSupportedClientSizeOfImage = 0x027DE000u;
-constexpr std::uint32_t kSupportedClientChecksum = 0x023E080Fu;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v23-cs2-25640462";
+constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6ABD720Fu;
+constexpr std::uint32_t kSupportedClientSizeOfImage = 0x02998000u;
+constexpr std::uint32_t kSupportedClientChecksum = 0x0256999Eu;
 
 constexpr char kAnchorAttachmentName[] = "weapon_hand_r";
 constexpr char kGunSideAttachmentName[] = "weapon_hand_l";
@@ -123,9 +123,9 @@ constexpr COLORREF kColorWarn = RGB(255, 159, 67);
 constexpr char kPatternEntityList[] = "40 55 53 48 8d ac 24 ?? ?? ?? ?? 48 81 ec ?? ?? ?? ?? 48 8b 0d ?? ?? ?? ?? 33 d2 e8 ?? ?? ?? ??";
 constexpr char kPatternGetEntityFromIndex[] = "4c 8d 49 10 81 fa fe 7f 00 00";
 constexpr char kPatternGetSplitScreenPlayer[] = "48 83 EC ?? 83 F9 ?? 75 ?? 48 8B 0D ?? ?? ?? ?? 48 8D 54 24 ?? 48 8B 01 FF 90 ?? ?? ?? ?? 8B 08 48 63 C1 48 8D 0D ?? ?? ?? ?? 48 8B 04 C1 48 83 C4 ?? C3";
-constexpr char kPatternAttachmentAccess[] = "E8 ?? ?? ?? ?? 0F B6 95 ?? ?? ?? ?? 84 D2 74 29 4C 8D 45 B0 48 8B CE E8 ?? ?? ?? ??";
+constexpr char kPatternAttachmentAccess[] = "E8 ?? ?? ?? ?? 0F B6 95 ?? ?? ?? ?? 84 D2 0F 84 ?? ?? ?? ?? 4C 8D 45 B0 48 8B CE E8 ?? ?? ?? ??";
 constexpr char kPatternSchemaSystem[] = "48 89 05 ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 33 C0 48 C7 05";
-constexpr char kPatternSetupViewPatch[] = "BA FF FF FF FF 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 85 C0 75 0B 48 8B 05 ?? ?? ?? ?? 48 8B 40 08 80 38 00 48 8B 7D ?? 75 2F F2 41 0F 10 45 00";
+constexpr char kPatternSetupViewPatch[] = "48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 50 01 00 00 0F 57 FF 84 C0 74 ?? 48 8D 0D";
 constexpr char kPatternSchemaQualifiedClassLookup[] = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B DA 48 8B F1 BA 21 00 00 00 49 8B C8 49 8B F8 E8 ?? ?? ?? ?? 48 8B E8 48 8B CE 48 8B 06 48 85 ED 75 15 FF 50 58 4C 8B C7 48 8B D3 48 8B C8 4C 8B 08 41 FF 51 18 EB 23 45 33 C0 48 8B D7 FF 50 68 48 8B C8 48 85 C0 75 05 48 89 03 EB 0D 48 8B 00 4C 8D 45 01 48 8B D3 FF 50 18";
 
 constexpr std::uint32_t kInvalidHandleValue = 0xFFFFFFFFu;
@@ -140,6 +140,8 @@ constexpr float kGunAnchorStabilizationFactor = 0.18f;
 constexpr float kScopedFovThreshold = 60.0f;
 constexpr float kFallbackUnscopedFov = 90.0f;
 constexpr std::size_t kMaxPropCandidates = 5u;
+constexpr int kPropCandidateScanBatchSize = 192;
+constexpr unsigned long long kPropCandidateScanBatchIntervalMs = 8ull;
 constexpr float kDefaultPropOffsetX = -8.0f;
 constexpr float kDefaultPropOffsetY = -22.0f;
 constexpr float kDefaultPropOffsetZ = 4.0f;
@@ -785,9 +787,11 @@ struct ClientOffsets {
     std::ptrdiff_t sceneNode{};
     std::ptrdiff_t sceneAbsOrigin{};
     std::ptrdiff_t renderWithViewModels{};
+    std::ptrdiff_t projectileVelocity{};
     std::ptrdiff_t projectileThrower{};
     std::ptrdiff_t projectileOriginalThrower{};
     std::ptrdiff_t projectileOwnerEntity{};
+    std::ptrdiff_t projectileBounceCount{};
 };
 
 struct SchemaField {
@@ -912,7 +916,16 @@ struct PropSmoothingState {
     double lastUpdateTimeSeconds{};
     unsigned long long lastRawTickMs{};
     unsigned long long lastUpdateTickMs{};
+    int bounceCount{};
+    bool bounceCountValid{false};
     bool valid{false};
+};
+
+struct ProjectileKinematicSample {
+    Vec3 velocity{};
+    int bounceCount{};
+    bool velocityValid{false};
+    bool bounceCountValid{false};
 };
 
 struct PropOriginHistoryState {
@@ -945,6 +958,17 @@ struct PropPostFlightHoldState {
     Vec3 forward{};
     double lastLiveTimeSeconds{};
     bool valid{false};
+};
+
+struct PropCandidateScanState {
+    void* entityList{};
+    EntityHandle targetHandle{};
+    EntityHandle controllerHandle{};
+    int nextEntityIndex{};
+    int highestEntityIndex{-1};
+    std::array<PropCandidate, kMaxPropCandidates> discovered{};
+    std::size_t discoveredCount{};
+    bool active{false};
 };
 
 enum OverlayControlId : int {
@@ -1083,6 +1107,7 @@ std::mutex g_propOriginHistoryMutex;
 std::mutex g_propCameraReferenceMutex;
 std::mutex g_propLookTargetMutex;
 std::mutex g_propPostFlightHoldMutex;
+std::mutex g_propCandidateScanMutex;
 std::mutex g_solidBrushCacheMutex;
 std::mutex g_setupViewHookInstallMutex;
 RuntimeState g_state;
@@ -1096,6 +1121,7 @@ PropOriginHistoryState g_propOriginHistory;
 PropCameraReferenceState g_propCameraReference;
 PropLookTargetState g_propLookTarget;
 PropPostFlightHoldState g_propPostFlightHold;
+PropCandidateScanState g_propCandidateScan;
 DebugOptions g_debugOptions;
 std::atomic<bool> g_uiThreadStarted{false};
 std::atomic<bool> g_setupViewCallbackObserved{false};
@@ -1104,9 +1130,12 @@ std::atomic<bool> g_setupViewHookInstallInProgress{false};
 std::atomic<unsigned long long> g_setupViewBridgeCounter{0};
 std::atomic<unsigned long long> g_traceFrameCounter{0};
 std::atomic<unsigned long long> g_followResolutionTraceCounter{0};
+std::atomic<unsigned long long> g_lastFollowTargetRefreshTickMs{0};
 std::atomic<unsigned long long> g_controllerPawnFallbackTraceCounter{0};
 std::atomic<unsigned long long> g_knifeFallbackAnchorTraceCounter{0};
 std::atomic<unsigned long long> g_lastPropCandidateRefreshTickMs{0};
+std::atomic<unsigned long long> g_lastPropCandidateScanBatchTickMs{0};
+std::atomic<bool> g_propCandidateScanInProgress{false};
 std::atomic<int> g_initStage{0};
 std::atomic<bool> g_schemaOffsetsResolved{false};
 std::atomic<bool> g_schemaResolveInProgress{false};
@@ -4219,6 +4248,13 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
                     { "m_pGameSceneNode" },
                     rawResolvedOffsets.sceneNode
                 ) && rawOk;
+                TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BaseEntity",
+                    "m_vecVelocity",
+                    { "m_pGameSceneNode", "m_vecVelocity", "m_hOwnerEntity" },
+                    rawResolvedOffsets.projectileVelocity
+                );
                 bool sceneOriginOk = TryGetSchemaFieldOffsetFromRawPayloads(
                     rawPayloads,
                     "CGameSceneNode",
@@ -4272,6 +4308,13 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
                     "m_hOwnerEntity",
                     { "m_hOwnerEntity" },
                     rawResolvedOffsets.projectileOwnerEntity
+                );
+                TryGetSchemaFieldOffsetFromRawPayloads(
+                    rawPayloads,
+                    "C_BaseCSGrenadeProjectile",
+                    "m_nBounces",
+                    { "m_vInitialPosition", "m_vInitialVelocity", "m_nBounces", "m_flSpawnTime" },
+                    rawResolvedOffsets.projectileBounceCount
                 );
 
                 if (rawOk) {
@@ -4501,6 +4544,7 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
     ok = ok && getOffset("CPlayer_CameraServices", "m_hViewEntity", resolvedOffsets.cameraViewEntity);
     ok = ok && getOffset("CPlayer_WeaponServices", "m_hActiveWeapon", resolvedOffsets.activeWeapon);
     ok = ok && getOffset("C_BaseEntity", "m_pGameSceneNode", resolvedOffsets.sceneNode);
+    getOffset("C_BaseEntity", "m_vecVelocity", resolvedOffsets.projectileVelocity);
     bool sceneOriginOk = getOffset("CGameSceneNode", "m_vecAbsOrigin", resolvedOffsets.sceneAbsOrigin);
     if (!sceneOriginOk) {
         sceneOriginOk = getOffset("CGameSceneNode", "m_vecOrigin", resolvedOffsets.sceneAbsOrigin);
@@ -4513,6 +4557,7 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
     getOffset("C_BaseGrenade", "m_hThrower", resolvedOffsets.projectileThrower);
     getOffset("C_BaseGrenade", "m_hOriginalThrower", resolvedOffsets.projectileOriginalThrower);
     getOffset("C_BaseEntity", "m_hOwnerEntity", resolvedOffsets.projectileOwnerEntity);
+    getOffset("C_BaseCSGrenadeProjectile", "m_nBounces", resolvedOffsets.projectileBounceCount);
 
     if (!ok) {
         failure = Texts().reasonRequiredSchemaOffsetsMissing;
@@ -4739,7 +4784,7 @@ bool ResolveEntityAccess() {
     else {
         const auto attachmentPattern = attachmentPatterns.front();
         auto lookupAttachment = reinterpret_cast<LookupAttachmentFn>(attachmentPattern + 5 + *reinterpret_cast<std::int32_t*>(attachmentPattern + 1));
-        constexpr std::uintptr_t kGetAttachmentCallOffset = 23u;
+        constexpr std::uintptr_t kGetAttachmentCallOffset = 27u;
         auto getAttachment = reinterpret_cast<GetAttachmentFn>(
             attachmentPattern
             + kGetAttachmentCallOffset
@@ -5696,6 +5741,17 @@ TargetResolution ResolveFollowSnapshotTarget(EntityHandle handle) {
 }
 
 bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& origin, std::string& failure) {
+    struct AttachmentIndexCacheEntry {
+        void* entity{};
+        void** vtable{};
+        std::uint32_t handleRaw{kInvalidHandleValue};
+        const char* attachmentName{};
+        std::uint8_t attachmentIndex{0xFFu};
+        bool valid{false};
+    };
+    static thread_local std::array<AttachmentIndexCacheEntry, 8> attachmentIndexCache{};
+    static thread_local std::size_t nextAttachmentCacheSlot = 0u;
+
     if (entity == nullptr) {
         failure = Texts().reasonTargetEntityMissing;
         return false;
@@ -5706,25 +5762,56 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
         return false;
     }
 
-    std::uint8_t attachmentIndex{ 0xFFu };
-    if (!TryInvokeLookupAttachment(entity, g_lookupAttachment, attachmentIndex, attachmentName)) {
-        failure = FormatIncompatibleBuildReason("attachment lookup faulted");
-        TracePrintf("attachment-lookup-fault entity=%p name=%s", entity, attachmentName);
-        return false;
+    void** vtable = nullptr;
+    (void)TryReadMemoryValue(reinterpret_cast<void***>(entity), vtable);
+    const std::uint32_t handleRaw = EntityGetHandle(entity).raw;
+    AttachmentIndexCacheEntry* cachedEntry = nullptr;
+    for (auto& entry : attachmentIndexCache) {
+        if (entry.valid
+            && entry.entity == entity
+            && entry.vtable == vtable
+            && entry.handleRaw == handleRaw
+            && entry.attachmentName != nullptr
+            && 0 == std::strcmp(entry.attachmentName, attachmentName)) {
+            cachedEntry = &entry;
+            break;
+        }
     }
-    if (attachmentIndex == 0xFFu) {
-        failure = FormatText(Texts().reasonAttachmentMissingFormat, attachmentName);
-        return false;
+
+    std::uint8_t attachmentIndex = cachedEntry != nullptr ? cachedEntry->attachmentIndex : 0xFFu;
+    if (cachedEntry == nullptr) {
+        if (!TryInvokeLookupAttachment(entity, g_lookupAttachment, attachmentIndex, attachmentName)) {
+            failure = FormatIncompatibleBuildReason("attachment lookup faulted");
+            TracePrintf("attachment-lookup-fault entity=%p name=%s", entity, attachmentName);
+            return false;
+        }
+        if (attachmentIndex == 0xFFu) {
+            failure = FormatText(Texts().reasonAttachmentMissingFormat, attachmentName);
+            return false;
+        }
+
+        cachedEntry = &attachmentIndexCache[nextAttachmentCacheSlot];
+        nextAttachmentCacheSlot = (nextAttachmentCacheSlot + 1u) % attachmentIndexCache.size();
+        *cachedEntry = AttachmentIndexCacheEntry{
+            entity,
+            vtable,
+            handleRaw,
+            attachmentName,
+            attachmentIndex,
+            true
+        };
     }
 
     alignas(16) float data[8]{};
     bool gotAttachment = false;
     if (!TryInvokeGetAttachment(entity, g_getAttachment, attachmentIndex, data, gotAttachment)) {
+        cachedEntry->valid = false;
         failure = FormatIncompatibleBuildReason("attachment transform faulted");
         TracePrintf("attachment-transform-fault entity=%p name=%s index=%u", entity, attachmentName, static_cast<unsigned>(attachmentIndex));
         return false;
     }
     if (!gotAttachment) {
+        cachedEntry->valid = false;
         failure = FormatText(Texts().reasonAttachmentMissingFormat, attachmentName);
         return false;
     }
@@ -6139,20 +6226,49 @@ bool IsLockedPropProjectileStillOwnedByThrower(
 
 void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) {
     if (targetPawn == nullptr || !targetHandle.IsValid() || g_entityListStorage == nullptr || *g_entityListStorage == nullptr) {
+        std::lock_guard scanLock(g_propCandidateScanMutex);
+        g_propCandidateScan = {};
+        g_propCandidateScanInProgress.store(false, std::memory_order_release);
         return;
     }
 
-    int highestIndex = -1;
-    if (!TryInvokeGetHighestEntityIndex(*g_entityListStorage, highestIndex)) {
-        return;
-    }
-
+    void* entityList = *g_entityListStorage;
     const EntityHandle controllerHandle = PawnGetControllerHandle(targetPawn);
-    std::array<PropCandidate, kMaxPropCandidates> discovered{};
-    std::size_t discoveredCount = 0u;
-    for (int entityIndex = 0; entityIndex <= highestIndex; ++entityIndex) {
+    std::unique_lock scanLock(g_propCandidateScanMutex, std::try_to_lock);
+    if (!scanLock.owns_lock()) {
+        return;
+    }
+    g_lastPropCandidateScanBatchTickMs.store(GetTickCount64(), std::memory_order_relaxed);
+
+    const bool targetChanged = !g_propCandidateScan.active
+        || g_propCandidateScan.entityList != entityList
+        || g_propCandidateScan.targetHandle.raw != targetHandle.raw
+        || g_propCandidateScan.controllerHandle.raw != controllerHandle.raw;
+    if (targetChanged) {
+        int highestIndex = -1;
+        if (!TryInvokeGetHighestEntityIndex(entityList, highestIndex)) {
+            g_propCandidateScan = {};
+            g_propCandidateScanInProgress.store(false, std::memory_order_release);
+            return;
+        }
+
+        g_propCandidateScan = {};
+        g_propCandidateScan.entityList = entityList;
+        g_propCandidateScan.targetHandle = targetHandle;
+        g_propCandidateScan.controllerHandle = controllerHandle;
+        g_propCandidateScan.nextEntityIndex = 0;
+        g_propCandidateScan.highestEntityIndex = highestIndex;
+        g_propCandidateScan.active = true;
+        g_propCandidateScanInProgress.store(true, std::memory_order_release);
+    }
+
+    const int batchEnd = std::min(
+        g_propCandidateScan.highestEntityIndex,
+        g_propCandidateScan.nextEntityIndex + kPropCandidateScanBatchSize - 1
+    );
+    for (int entityIndex = g_propCandidateScan.nextEntityIndex; entityIndex <= batchEnd; ++entityIndex) {
         void* entity = nullptr;
-        if (!TryInvokeGetEntityFromIndex(*g_entityListStorage, entityIndex, entity) || entity == nullptr) {
+        if (!TryInvokeGetEntityFromIndex(entityList, entityIndex, entity) || entity == nullptr) {
             continue;
         }
 
@@ -6162,20 +6278,35 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
         }
 
         bool duplicate = false;
-        for (std::size_t existing = 0u; existing < discoveredCount; ++existing) {
-            duplicate = duplicate || discovered[existing].handle.raw == candidate.handle.raw;
+        for (std::size_t existing = 0u; existing < g_propCandidateScan.discoveredCount; ++existing) {
+            duplicate = duplicate || g_propCandidateScan.discovered[existing].handle.raw == candidate.handle.raw;
         }
         if (duplicate) {
             continue;
         }
 
-        if (discoveredCount < discovered.size()) {
-            discovered[discoveredCount++] = candidate;
+        if (g_propCandidateScan.discoveredCount < g_propCandidateScan.discovered.size()) {
+            g_propCandidateScan.discovered[g_propCandidateScan.discoveredCount++] = candidate;
         }
         else {
+            g_propCandidateScan.nextEntityIndex = g_propCandidateScan.highestEntityIndex + 1;
             break;
         }
     }
+
+    if (g_propCandidateScan.nextEntityIndex <= batchEnd) {
+        g_propCandidateScan.nextEntityIndex = batchEnd + 1;
+    }
+    if (g_propCandidateScan.nextEntityIndex <= g_propCandidateScan.highestEntityIndex) {
+        return;
+    }
+
+    const auto discovered = g_propCandidateScan.discovered;
+    const std::size_t discoveredCount = g_propCandidateScan.discoveredCount;
+    g_propCandidateScan = {};
+    g_propCandidateScanInProgress.store(false, std::memory_order_release);
+    g_lastPropCandidateRefreshTickMs.store(GetTickCount64(), std::memory_order_relaxed);
+    scanLock.unlock();
 
     std::lock_guard lock(g_stateMutex);
     for (auto& existing : g_state.propCandidates) {
@@ -6277,6 +6408,22 @@ bool ShouldRefreshPropCandidates(bool hasLockedProp) {
     constexpr unsigned long long kLockedRefreshIntervalMs = 250u;
 
     const unsigned long long nowTickMs = GetTickCount64();
+    if (g_propCandidateScanInProgress.load(std::memory_order_acquire)) {
+        unsigned long long previousBatchTickMs = g_lastPropCandidateScanBatchTickMs.load(std::memory_order_relaxed);
+        while (previousBatchTickMs == 0u
+            || nowTickMs < previousBatchTickMs
+            || nowTickMs - previousBatchTickMs >= kPropCandidateScanBatchIntervalMs) {
+            if (g_lastPropCandidateScanBatchTickMs.compare_exchange_weak(
+                    previousBatchTickMs,
+                    nowTickMs,
+                    std::memory_order_relaxed,
+                    std::memory_order_relaxed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     const unsigned long long interval = hasLockedProp ? kLockedRefreshIntervalMs : kUnlockedRefreshIntervalMs;
     unsigned long long previousTickMs = g_lastPropCandidateRefreshTickMs.load(std::memory_order_relaxed);
     while (previousTickMs == 0u || nowTickMs < previousTickMs || nowTickMs - previousTickMs >= interval) {
@@ -6301,7 +6448,43 @@ Vec3 MoveTowardsVec3(const Vec3& current, const Vec3& target, float maxDistance)
     return Vec3{ moved.x, moved.y, moved.z };
 }
 
-Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float followSpeed) {
+ProjectileKinematicSample ReadProjectileKinematics(void* projectile) {
+    constexpr float kMaxProjectileVelocity = 100000.0f;
+    constexpr int kMaxReasonableProjectileBounceCount = 1024;
+
+    ProjectileKinematicSample sample{};
+    if (projectile == nullptr) {
+        return sample;
+    }
+
+    Vec3 velocity{};
+    if (g_offsets.projectileVelocity != 0
+        && TryReadOffsetValue(projectile, g_offsets.projectileVelocity, velocity)
+        && compat::IsUsableProjectileVelocity(
+            compat::CameraVector{ velocity.x, velocity.y, velocity.z },
+            kMaxProjectileVelocity)) {
+        sample.velocity = velocity;
+        sample.velocityValid = true;
+    }
+
+    int bounceCount = 0;
+    if (g_offsets.projectileBounceCount != 0
+        && TryReadOffsetValue(projectile, g_offsets.projectileBounceCount, bounceCount)
+        && bounceCount >= 0
+        && bounceCount <= kMaxReasonableProjectileBounceCount) {
+        sample.bounceCount = bounceCount;
+        sample.bounceCountValid = true;
+    }
+
+    return sample;
+}
+
+Vec3 SmoothPropAnchor(
+    EntityHandle propHandle,
+    const Vec3& rawOrigin,
+    const ProjectileKinematicSample& kinematics,
+    float followSpeed
+) {
     constexpr float kMinProjectileExtrapolateSeconds = 0.04f;
     constexpr float kMaxProjectileExtrapolateSeconds = 0.75f;
     constexpr float kProjectileExtrapolateIntervalScale = 4.0f;
@@ -6309,6 +6492,8 @@ Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float foll
     constexpr float kMaxProjectilePredictionLeadSeconds = 0.035f;
     constexpr float kProjectileVelocityResponseRate = 7.5f;
     constexpr float kMaxProjectileVelocity = 100000.0f;
+    constexpr float kMaxObservedPlaybackScale = 8.0f;
+    constexpr float kProjectileMotionStaleSeconds = 0.10f;
     constexpr float kRawOriginMoveThreshold = 0.01f;
     constexpr float kMinFrameSeconds = 0.001f;
     constexpr float kMaxFrameSeconds = 0.050f;
@@ -6323,13 +6508,46 @@ Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float foll
         g_propSmoothing.position = rawOrigin;
         g_propSmoothing.lastRawOrigin = rawOrigin;
         g_propSmoothing.velocity = Vec3{};
-        g_propSmoothing.targetVelocity = Vec3{};
+        g_propSmoothing.targetVelocity = g_propSmoothing.velocity;
         g_propSmoothing.lastRawIntervalSeconds = 0.0f;
         g_propSmoothing.lastRawTimeSeconds = nowSeconds;
         g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
         g_propSmoothing.lastRawTickMs = nowTickMs;
         g_propSmoothing.lastUpdateTickMs = nowTickMs;
+        g_propSmoothing.bounceCount = kinematics.bounceCount;
+        g_propSmoothing.bounceCountValid = kinematics.bounceCountValid;
         g_propSmoothing.valid = true;
+        return rawOrigin;
+    }
+
+    const bool bounced = compat::DidProjectileBounce(
+        g_propSmoothing.bounceCountValid,
+        g_propSmoothing.bounceCount,
+        kinematics.bounceCountValid,
+        kinematics.bounceCount
+    );
+    if (kinematics.bounceCountValid) {
+        g_propSmoothing.bounceCount = kinematics.bounceCount;
+        g_propSmoothing.bounceCountValid = true;
+    }
+    if (bounced) {
+        g_propSmoothing.position = rawOrigin;
+        g_propSmoothing.lastRawOrigin = rawOrigin;
+        g_propSmoothing.velocity = Vec3{};
+        g_propSmoothing.targetVelocity = g_propSmoothing.velocity;
+        g_propSmoothing.lastRawIntervalSeconds = 0.0f;
+        g_propSmoothing.lastRawTimeSeconds = nowSeconds;
+        g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
+        g_propSmoothing.lastRawTickMs = nowTickMs;
+        g_propSmoothing.lastUpdateTickMs = nowTickMs;
+        TracePrintf(
+            "prop-bounce-reset handle=%u bounces=%d velocity=(%.3f,%.3f,%.3f)",
+            propHandle.raw,
+            kinematics.bounceCount,
+            g_propSmoothing.velocity.x,
+            g_propSmoothing.velocity.y,
+            g_propSmoothing.velocity.z
+        );
         return rawOrigin;
     }
 
@@ -6340,7 +6558,8 @@ Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float foll
     updateSeconds = std::min(std::max(updateSeconds, kMinFrameSeconds), kMaxFrameSeconds);
 
     const Vec3 rawDelta = Subtract(rawOrigin, g_propSmoothing.lastRawOrigin);
-    if (IsFiniteVec3(rawDelta) && Length(rawDelta) > kRawOriginMoveThreshold) {
+    const bool rawOriginMoved = IsFiniteVec3(rawDelta) && Length(rawDelta) > kRawOriginMoveThreshold;
+    if (rawOriginMoved) {
         float rawSeconds = kOverlayTickSeconds;
         if (g_propSmoothing.lastRawTimeSeconds > 0.0 && nowSeconds > g_propSmoothing.lastRawTimeSeconds) {
             rawSeconds = static_cast<float>(nowSeconds - g_propSmoothing.lastRawTimeSeconds);
@@ -6348,13 +6567,32 @@ Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float foll
         rawSeconds = std::max(rawSeconds, kMinFrameSeconds);
         g_propSmoothing.lastRawIntervalSeconds = rawSeconds;
 
-        const Vec3 velocity = Scale(rawDelta, 1.0f / rawSeconds);
-        const float velocityLength = Length(velocity);
-        if (IsFiniteVec3(velocity) && std::isfinite(velocityLength) && velocityLength <= kMaxProjectileVelocity) {
-            g_propSmoothing.targetVelocity = velocity;
+        const Vec3 measuredVelocity = Scale(rawDelta, 1.0f / rawSeconds);
+        const float measuredVelocityLength = Length(measuredVelocity);
+        if (IsFiniteVec3(measuredVelocity)
+            && std::isfinite(measuredVelocityLength)
+            && measuredVelocityLength <= kMaxProjectileVelocity) {
+            Vec3 targetVelocity = measuredVelocity;
+            if (kinematics.velocityValid) {
+                const float schemaVelocityLength = Length(kinematics.velocity);
+                if (std::isfinite(schemaVelocityLength) && schemaVelocityLength > 0.001f) {
+                    const float observedPlaybackScale = std::min(
+                        kMaxObservedPlaybackScale,
+                        std::max(0.0f, measuredVelocityLength / schemaVelocityLength)
+                    );
+                    targetVelocity = Scale(kinematics.velocity, observedPlaybackScale);
+                }
+                else {
+                    targetVelocity = Vec3{};
+                }
+            }
+
+            g_propSmoothing.targetVelocity = targetVelocity;
             const float currentVelocityLength = Length(g_propSmoothing.velocity);
-            if (!IsFiniteVec3(g_propSmoothing.velocity) || !std::isfinite(currentVelocityLength) || currentVelocityLength <= 0.001f) {
-                g_propSmoothing.velocity = velocity;
+            if (!IsFiniteVec3(g_propSmoothing.velocity)
+                || !std::isfinite(currentVelocityLength)
+                || currentVelocityLength <= 0.001f) {
+                g_propSmoothing.velocity = targetVelocity;
             }
         }
         else {
@@ -6364,6 +6602,20 @@ Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float foll
         g_propSmoothing.lastRawOrigin = rawOrigin;
         g_propSmoothing.lastRawTimeSeconds = nowSeconds;
         g_propSmoothing.lastRawTickMs = nowTickMs;
+    }
+
+    const bool rawMotionStale = !rawOriginMoved
+        && g_propSmoothing.lastRawTimeSeconds > 0.0
+        && nowSeconds > g_propSmoothing.lastRawTimeSeconds
+        && nowSeconds - g_propSmoothing.lastRawTimeSeconds >= kProjectileMotionStaleSeconds;
+    if (rawMotionStale
+        || (kinematics.velocityValid && Length(kinematics.velocity) <= 0.001f)) {
+        g_propSmoothing.position = rawOrigin;
+        g_propSmoothing.velocity = Vec3{};
+        g_propSmoothing.targetVelocity = Vec3{};
+        g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
+        g_propSmoothing.lastUpdateTickMs = nowTickMs;
+        return rawOrigin;
     }
 
     float extrapolateSeconds = 0.0f;
@@ -6391,12 +6643,15 @@ Vec3 SmoothPropAnchor(EntityHandle propHandle, const Vec3& rawOrigin, float foll
     );
     const Vec3 predictedOrigin{ predicted.x, predicted.y, predicted.z };
 
-    (void)followSpeed;
     const float velocityBlend = std::min(1.0f, std::max(0.0f, updateSeconds * kProjectileVelocityResponseRate));
     g_propSmoothing.velocity = Lerp(g_propSmoothing.velocity, g_propSmoothing.targetVelocity, velocityBlend);
     const Vec3 integratedPosition = Add(g_propSmoothing.position, Scale(g_propSmoothing.velocity, updateSeconds));
     const float correctionBlend = std::min(kMaxAnchorCorrectionBlend, std::max(0.0f, updateSeconds * kAnchorCorrectionRate));
-    g_propSmoothing.position = Lerp(integratedPosition, predictedOrigin, correctionBlend);
+    const Vec3 correctedPosition = Lerp(integratedPosition, predictedOrigin, correctionBlend);
+    const float maxCorrectionDistance = std::isfinite(followSpeed) && followSpeed > 0.0f
+        ? std::max(1.0f, followSpeed * updateSeconds)
+        : std::numeric_limits<float>::max();
+    g_propSmoothing.position = MoveTowardsVec3(integratedPosition, correctedPosition, maxCorrectionDistance);
     g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
     g_propSmoothing.lastUpdateTickMs = nowTickMs;
     return g_propSmoothing.position;
@@ -6455,6 +6710,53 @@ bool TryGetProjectileOriginWithFallback(EntityHandle propHandle, void* propEntit
         (void)TryReadOffsetPointer(propEntity, g_offsets.sceneNode, sceneNode);
     }
 
+    Vec3 schemaOrigin{};
+    std::string schemaOriginFailure;
+    if (sceneNode != nullptr
+        && g_offsets.sceneAbsOrigin != 0
+        && TryGetEntityAbsOrigin(propEntity, schemaOrigin, schemaOriginFailure)) {
+        const compat::OffsetCameraVector schemaCandidate{
+            g_offsets.sceneAbsOrigin,
+            compat::CameraVector{ schemaOrigin.x, schemaOrigin.y, schemaOrigin.z }
+        };
+        compat::OffsetCameraVector trustedSchemaOrigin{};
+        if (compat::TrySelectTrustedProjectileSceneOrigin(
+                &schemaCandidate,
+                1u,
+                compat::CameraVector{ referenceOrigin.x, referenceOrigin.y, referenceOrigin.z },
+                kLockedProjectileOriginMaxDistance,
+                trustedSchemaOrigin)) {
+            origin = Vec3{
+                trustedSchemaOrigin.value.x,
+                trustedSchemaOrigin.value.y,
+                trustedSchemaOrigin.value.z
+            };
+            {
+                std::lock_guard lock(g_propOriginHistoryMutex);
+                g_propOriginHistory = {};
+                g_propOriginHistory.propHandle = propHandle;
+                g_propOriginHistory.lastOrigin = origin;
+                g_propOriginHistory.lastOriginValid = true;
+                g_propOriginHistory.valid = true;
+            }
+            static std::atomic<unsigned long long> schemaOriginTraceCounter{0};
+            const unsigned long long traceIndex = schemaOriginTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+            if (compat::ShouldEmitSampledTrace(traceIndex, 5u, 120u)) {
+                TracePrintf(
+                    "prop-origin-schema entity=%p sceneNode=%p offset=0x%llX origin=(%.3f,%.3f,%.3f)",
+                    propEntity,
+                    sceneNode,
+                    static_cast<unsigned long long>(g_offsets.sceneAbsOrigin),
+                    origin.x,
+                    origin.y,
+                    origin.z
+                );
+            }
+            failure.clear();
+            return true;
+        }
+    }
+
     std::array<compat::OffsetCameraVector, 1536> dynamicCandidates{};
     unsigned int dynamicCandidateCount = 0u;
     const auto addDynamicCandidate = [&](const void* base, std::ptrdiff_t offset) {
@@ -6476,10 +6778,6 @@ bool TryGetProjectileOriginWithFallback(EntityHandle propHandle, void* propEntit
             compat::CameraVector{ candidate.x, candidate.y, candidate.z }
         };
     };
-
-    for (std::ptrdiff_t offset = 0; offset <= 0x1800 && dynamicCandidateCount < dynamicCandidates.size(); offset += sizeof(float)) {
-        addDynamicCandidate(propEntity, offset);
-    }
 
     std::vector<compat::OffsetCameraVector> previousEntityCandidates;
     std::ptrdiff_t lockedEntityOffset = -1;
@@ -6522,6 +6820,10 @@ bool TryGetProjectileOriginWithFallback(EntityHandle propHandle, void* propEntit
             ++g_propOriginHistory.missedFrames;
         }
     };
+
+    for (std::ptrdiff_t offset = 0; offset <= 0x1800 && dynamicCandidateCount < dynamicCandidates.size(); offset += sizeof(float)) {
+        addDynamicCandidate(propEntity, offset);
+    }
 
     compat::OffsetCameraVector dynamicSelected{};
     if (lockedEntityOffset >= 0) {
@@ -6837,7 +7139,8 @@ bool TryBuildPropCameraPose(
     if (!TryGetProjectileOriginWithFallback(propHandle, propEntity, referenceOrigin, propOrigin, failure)) {
         return false;
     }
-    const Vec3 anchor = SmoothPropAnchor(propHandle, propOrigin, propFollowSpeed);
+    const ProjectileKinematicSample kinematics = ReadProjectileKinematics(propEntity);
+    const Vec3 anchor = SmoothPropAnchor(propHandle, propOrigin, kinematics, propFollowSpeed);
 
     Vec3 forward{};
     bool forwardAvailable = false;
@@ -7047,6 +7350,29 @@ OverrideConfig GetOverrideConfig() {
     };
 }
 
+EntityHandle GetLockedPropHandle() {
+    std::lock_guard lock(g_stateMutex);
+    return g_state.lockedPropHandle;
+}
+
+bool ShouldRefreshFollowTargetSnapshot() {
+    constexpr unsigned long long kFollowTargetRefreshIntervalMs = 50u;
+    const unsigned long long nowTickMs = GetTickCount64();
+    unsigned long long previousTickMs = g_lastFollowTargetRefreshTickMs.load(std::memory_order_relaxed);
+    while (previousTickMs == 0u
+        || nowTickMs < previousTickMs
+        || nowTickMs - previousTickMs >= kFollowTargetRefreshIntervalMs) {
+        if (g_lastFollowTargetRefreshTickMs.compare_exchange_weak(
+                previousTickMs,
+                nowTickMs,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void __fastcall SelfieStickSetUpView(void* viewSetup);
 
 DWORD __fastcall RunSelfieStickSetUpViewGuarded(void* viewSetup) {
@@ -7117,7 +7443,13 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         resolution = ResolveLockedTarget(config.lockedHandle);
     }
     else {
-        resolution = ResolveFollowTarget();
+        const bool refreshFollowTarget = ShouldRefreshFollowTargetSnapshot();
+        if (!refreshFollowTarget && config.followHandle.IsValid()) {
+            resolution = ResolveFollowSnapshotTarget(config.followHandle);
+        }
+        if (resolution.entity == nullptr) {
+            resolution = ResolveFollowTarget();
+        }
         SetCurrentFollowHandle(resolution.handle);
     }
 
@@ -7161,7 +7493,7 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         if (ShouldRefreshPropCandidates(lockedPropHandle.IsValid())) {
             UpdatePropCandidatesForTarget(resolution.entity, resolution.handle);
             if (!lockedPropHandle.IsValid()) {
-                lockedPropHandle = SnapshotState().lockedPropHandle;
+                lockedPropHandle = GetLockedPropHandle();
             }
         }
 
@@ -7376,17 +7708,15 @@ bool HookSetUpView() {
         SetInitialized(false, FormatIncompatibleBuildReason(hookError.c_str()));
         return false;
     }
-    patchSite.viewSetupRegister = hook::ViewSetupRegister::R14;
+    patchSite.viewSetupRegister = hook::ViewSetupRegister::Rbx;
 
     g_setupViewPatchAddress = reinterpret_cast<void*>(patchSite.patchAddress);
     g_setupViewOriginalBytes = patchSite.originalBytes;
-    if (!IsAddressReadableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.helperStringAddress))
-        || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.helperCallTarget))
+    if (!IsAddressReadableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.engineClientStorageAddress))
         || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.returnAddress))) {
         TracePrintf(
-            "setupview-fail reason=site-changed helperString=%p helperCall=%p return=%p",
-            reinterpret_cast<void*>(patchSite.helperStringAddress),
-            reinterpret_cast<void*>(patchSite.helperCallTarget),
+            "setupview-fail reason=site-changed engineClientStorage=%p return=%p",
+            reinterpret_cast<void*>(patchSite.engineClientStorageAddress),
             reinterpret_cast<void*>(patchSite.returnAddress)
         );
         SetInitialized(false, FormatIncompatibleBuildReason("SetUpView patch site changed"));
@@ -7458,10 +7788,9 @@ bool HookSetUpView() {
     }
 
     TracePrintf(
-        "setupview-ok patch=%p helperString=%p helperCall=%p return=%p stub=%p",
+        "setupview-ok patch=%p engineClientStorage=%p return=%p stub=%p",
         reinterpret_cast<void*>(patchSite.patchAddress),
-        reinterpret_cast<void*>(patchSite.helperStringAddress),
-        reinterpret_cast<void*>(patchSite.helperCallTarget),
+        reinterpret_cast<void*>(patchSite.engineClientStorageAddress),
         reinterpret_cast<void*>(patchSite.returnAddress),
         detourStub
     );
