@@ -28,3 +28,4 @@ worktrees/
 
 native_dll/**/intermediate/
 release/**/selfiestick.ini
+release/**/selfiestick_trace.log

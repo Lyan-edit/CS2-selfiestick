@@ -1,6 +1,5 @@
 #include <windows.h>
 #include <commctrl.h>
-#include <d3d11.h>
 #include <tlhelp32.h>
 
 #include <algorithm>
@@ -30,14 +29,8 @@
 #include "compatibility_gate.h"
 #include "schema_probe.h"
 #include "setup_view_hook.h"
-#include "imgui.h"
-#include "imgui_impl_dx11.h"
-#include "imgui_impl_win32.h"
 
 #pragma comment(lib, "Comctl32.lib")
-#pragma comment(lib, "d3d11.lib")
-
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
 namespace selfiestick {
 
@@ -48,10 +41,10 @@ constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
 constexpr char kBuildTag[] = __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v23-cs2-25640462";
-constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6ABD720Fu;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v26-cs2-25687242";
+constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AC02468u;
 constexpr std::uint32_t kSupportedClientSizeOfImage = 0x02998000u;
-constexpr std::uint32_t kSupportedClientChecksum = 0x0256999Eu;
+constexpr std::uint32_t kSupportedClientChecksum = 0x0255ED38u;
 
 constexpr char kAnchorAttachmentName[] = "weapon_hand_r";
 constexpr char kGunSideAttachmentName[] = "weapon_hand_l";
@@ -63,10 +56,11 @@ constexpr UINT_PTR kOverlayTimerId = 1;
 constexpr UINT kOverlayTimerIntervalMs = 33;
 constexpr UINT kOverlayShutdownMessage = WM_APP + 1;
 constexpr int kFollowRefreshFrameStage = 5;
-constexpr int kOverlayWidth = 540;
-constexpr int kOverlayHeight = 920;
+constexpr int kOverlayWidth = 560;
+constexpr int kOverlayExpandedHeight = 960;
+constexpr int kOverlayCollapsedHeight = 898;
 constexpr int kOverlayMinWidth = 500;
-constexpr int kOverlayMinHeight = 860;
+constexpr int kOverlayMinHeight = kOverlayCollapsedHeight;
 constexpr int kOverlayMargin = 24;
 constexpr int kOverlayHotkeyVirtualKey = VK_INSERT;
 constexpr int kToggleEnabledHotkeyVirtualKey = VK_F8;
@@ -101,19 +95,23 @@ constexpr std::uint16_t kMaxReasonableSchemaFieldCount = 2048u;
 constexpr std::size_t kMaxSchemaNameLength = 256u;
 constexpr std::size_t kSchemaDiagnosticStringSlotLimit = 0x80u;
 constexpr std::size_t kSchemaDiagnosticPayloadSampleLimit = 16u;
+// The broad payload walk is retained for offline compatibility diagnostics.
+// Production resolution uses exact class lookup first; the raw walk is both
+// ambiguous on inherited fields and unnecessarily expensive during demo load.
+constexpr bool kEnableRawSchemaCompatibilityProbe = false;
 
-constexpr COLORREF kColorPanel = RGB(13, 17, 23);
-constexpr COLORREF kColorPanelStrong = RGB(18, 25, 35);
-constexpr COLORREF kColorPanelElevated = RGB(22, 29, 41);
-constexpr COLORREF kColorPanelInset = RGB(9, 13, 20);
-constexpr COLORREF kColorInput = RGB(10, 16, 23);
-constexpr COLORREF kColorLine = RGB(39, 50, 70);
-constexpr COLORREF kColorLineStrong = RGB(68, 84, 112);
-constexpr COLORREF kColorText = RGB(243, 246, 251);
-constexpr COLORREF kColorTextMuted = RGB(149, 163, 182);
-constexpr COLORREF kColorAccent = RGB(87, 164, 255);
-constexpr COLORREF kColorAccentStrong = RGB(146, 202, 255);
-constexpr COLORREF kColorAccentSoft = RGB(34, 62, 95);
+constexpr COLORREF kColorPanel = RGB(25, 25, 27);
+constexpr COLORREF kColorPanelStrong = RGB(34, 34, 37);
+constexpr COLORREF kColorPanelElevated = RGB(45, 45, 49);
+constexpr COLORREF kColorPanelInset = RGB(20, 20, 22);
+constexpr COLORREF kColorInput = RGB(29, 29, 32);
+constexpr COLORREF kColorLine = RGB(57, 57, 63);
+constexpr COLORREF kColorLineStrong = RGB(78, 78, 86);
+constexpr COLORREF kColorText = RGB(240, 240, 242);
+constexpr COLORREF kColorTextMuted = RGB(158, 158, 166);
+constexpr COLORREF kColorAccent = RGB(76, 143, 205);
+constexpr COLORREF kColorAccentStrong = RGB(112, 177, 236);
+constexpr COLORREF kColorAccentSoft = RGB(36, 55, 73);
 constexpr COLORREF kColorSuccess = RGB(98, 214, 145);
 constexpr COLORREF kColorSuccessSoft = RGB(24, 56, 43);
 constexpr COLORREF kColorDanger = RGB(255, 101, 124);
@@ -126,6 +124,7 @@ constexpr char kPatternGetSplitScreenPlayer[] = "48 83 EC ?? 83 F9 ?? 75 ?? 48 8
 constexpr char kPatternAttachmentAccess[] = "E8 ?? ?? ?? ?? 0F B6 95 ?? ?? ?? ?? 84 D2 0F 84 ?? ?? ?? ?? 4C 8D 45 B0 48 8B CE E8 ?? ?? ?? ??";
 constexpr char kPatternSchemaSystem[] = "48 89 05 ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 33 C0 48 C7 05";
 constexpr char kPatternSetupViewPatch[] = "48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 50 01 00 00 0F 57 FF 84 C0 74 ?? 48 8D 0D";
+constexpr char kPatternSetupViewHlaePatch[] = "48 89 D9 48 B8 ?? ?? ?? ?? ?? ?? ?? ?? FF 10 90 0F 57 FF 84 C0 74 ?? 48 8D 0D";
 constexpr char kPatternSchemaQualifiedClassLookup[] = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B DA 48 8B F1 BA 21 00 00 00 49 8B C8 49 8B F8 E8 ?? ?? ?? ?? 48 8B E8 48 8B CE 48 8B 06 48 85 ED 75 15 FF 50 58 4C 8B C7 48 8B D3 48 8B C8 4C 8B 08 41 FF 51 18 EB 23 45 33 C0 48 8B D7 FF 50 68 48 8B C8 48 85 C0 75 05 48 89 03 EB 0D 48 8B 00 4C 8D 45 01 48 8B D3 FF 50 18";
 
 constexpr std::uint32_t kInvalidHandleValue = 0xFFFFFFFFu;
@@ -993,6 +992,11 @@ enum OverlayControlId : int {
     kControlEditPropYaw = 1019,
     kControlEditPropRoll = 1020,
     kControlButtonPropClear = 1021,
+    kControlEditPlayerPitch = 1022,
+    kControlEditPlayerYaw = 1023,
+    kControlEditPlayerRoll = 1024,
+    kControlButtonPropImageStyle = 1025,
+    kControlButtonRuntimeToggle = 1026,
     kControlButtonPropLock1 = 1031,
     kControlButtonPropLock2 = 1032,
     kControlButtonPropLock3 = 1033,
@@ -1008,6 +1012,9 @@ struct OverlayUiState {
     HWND offsetXEdit{};
     HWND offsetYEdit{};
     HWND offsetZEdit{};
+    HWND playerPitchEdit{};
+    HWND playerYawEdit{};
+    HWND playerRollEdit{};
     HWND lookSelfieLeftButton{};
     HWND lookSelfieRightButton{};
     HWND lookForwardButton{};
@@ -1015,6 +1022,7 @@ struct OverlayUiState {
     HWND targetLockButton{};
     HWND targetClearButton{};
     HWND overlayHotkeyButton{};
+    HWND runtimeToggleButton{};
     HWND statusEdit{};
     HWND cameraPlayerButton{};
     HWND cameraPropButton{};
@@ -1025,11 +1033,8 @@ struct OverlayUiState {
     HWND propYawEdit{};
     HWND propRollEdit{};
     HWND propClearButton{};
+    HWND propImageStyleButton{};
     std::array<HWND, kMaxPropCandidates> propLockButtons{};
-    ID3D11Device* d3dDevice{};
-    ID3D11DeviceContext* d3dDeviceContext{};
-    IDXGISwapChain* swapChain{};
-    ID3D11RenderTargetView* renderTargetView{};
     HFONT titleFont{};
     HFONT bodyFont{};
     HFONT monoFont{};
@@ -1040,11 +1045,11 @@ struct OverlayUiState {
     bool suppressOffsetSync{false};
     bool suppressPropEditSync{false};
     bool captureOverlayHotkey{false};
+    bool runtimeExpanded{false};
     bool overlayHotkeyWasDown{false};
     bool toggleHotkeyWasDown{false};
     bool lockHotkeyWasDown{false};
     bool followHotkeyWasDown{false};
-    bool imguiInitialized{false};
     bool overlayPlacementInitialized{false};
     bool hasLastHostRect{false};
     RECT lastHostRect{};
@@ -4149,19 +4154,27 @@ bool TryReadOffsetHandle(const void* base, std::ptrdiff_t offset, EntityHandle& 
 
 bool ResolveSchemaOffsetsNow(std::string& failure) {
     failure.clear();
+    TracePrintf(
+        "schema-resolve strategy=exact-class rawCompatibilityProbe=%d",
+        kEnableRawSchemaCompatibilityProbe ? 1 : 0
+    );
 
     void* rawSchemaSystem = nullptr;
     std::string rawSchemaFailure;
     bool rawScopeFound = false;
     bool rawPayloadsCollected = false;
-    if (TryResolveSchemaSystemFromPattern(rawSchemaSystem, rawSchemaFailure) && rawSchemaSystem != nullptr) {
+    if (kEnableRawSchemaCompatibilityProbe
+        && TryResolveSchemaSystemFromPattern(rawSchemaSystem, rawSchemaFailure)
+        && rawSchemaSystem != nullptr) {
         void* rawScope = nullptr;
         if (TryResolveClientSchemaTypeScopeRaw(rawSchemaSystem, rawScope) && rawScope != nullptr) {
             rawScopeFound = true;
             std::vector<void*> rawPayloads;
             if (TryCollectTypeScopeClassPayloads(rawScope, rawPayloads)) {
                 rawPayloadsCollected = true;
-                TraceSchemaRawPayloadDiagnostics(rawPayloads);
+                if (g_debugOptions.traceEnabled) {
+                    TraceSchemaRawPayloadDiagnostics(rawPayloads);
+                }
                 ClientOffsets rawResolvedOffsets{};
                 bool rawOk = true;
                 rawOk = TryGetSchemaFieldOffsetFromRawPayloads(
@@ -7687,7 +7700,12 @@ bool HookSetUpView() {
         return false;
     }
 
-    const auto patchMatches = FindPatterns(g_clientModule, kPatternSetupViewPatch, 2u);
+    auto patchMatches = FindPatterns(g_clientModule, kPatternSetupViewPatch, 2u);
+    bool foundHlaePatchedSite = false;
+    if (patchMatches.empty()) {
+        patchMatches = FindPatterns(g_clientModule, kPatternSetupViewHlaePatch, 2u);
+        foundHlaePatchedSite = !patchMatches.empty();
+    }
     if (patchMatches.empty()) {
         TracePrintf("setupview-fail reason=pattern-missing");
         SetInitialized(false, Texts().reasonSetUpViewPatchSiteMissing);
@@ -7699,7 +7717,11 @@ bool HookSetUpView() {
         return false;
     }
     const auto patchAddress = patchMatches.front();
-    TracePrintf("setupview-scan patch=%p", reinterpret_cast<void*>(patchAddress));
+    TracePrintf(
+        "setupview-scan patch=%p source=%s",
+        reinterpret_cast<void*>(patchAddress),
+        foundHlaePatchedSite ? "hlae-chain" : "engine"
+    );
 
     hook::SetUpViewPatchSite patchSite{};
     std::string hookError;
@@ -7712,11 +7734,36 @@ bool HookSetUpView() {
 
     g_setupViewPatchAddress = reinterpret_cast<void*>(patchSite.patchAddress);
     g_setupViewOriginalBytes = patchSite.originalBytes;
-    if (!IsAddressReadableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.engineClientStorageAddress))
+    void* chainedHookTarget = nullptr;
+    bool replayTargetValid = false;
+    if (patchSite.replayKind == hook::SetUpViewReplayKind::EngineClientIsPlayingDemo) {
+        replayTargetValid = IsAddressReadableInModule(
+            g_clientModule,
+            reinterpret_cast<void*>(patchSite.engineClientStorageAddress)
+        );
+    }
+    else if (patchSite.replayKind == hook::SetUpViewReplayKind::HlaeTrampoline) {
+        HMODULE hlaeModule = GetModuleHandleW(L"AfxHookSource2.dll");
+        replayTargetValid = hlaeModule != nullptr
+            && IsAddressReadableInModule(
+                hlaeModule,
+                reinterpret_cast<void*>(patchSite.chainedHookPointerStorageAddress)
+            )
+            && TryReadMemoryValue(
+                reinterpret_cast<void* const*>(patchSite.chainedHookPointerStorageAddress),
+                chainedHookTarget
+            )
+            && IsAddressExecutableInModule(hlaeModule, chainedHookTarget);
+    }
+
+    if (!replayTargetValid
         || !IsAddressExecutableInModule(g_clientModule, reinterpret_cast<void*>(patchSite.returnAddress))) {
         TracePrintf(
-            "setupview-fail reason=site-changed engineClientStorage=%p return=%p",
+            "setupview-fail reason=site-changed replay=%s engineClientStorage=%p chainedStorage=%p chainedTarget=%p return=%p",
+            patchSite.replayKind == hook::SetUpViewReplayKind::HlaeTrampoline ? "hlae-chain" : "engine",
             reinterpret_cast<void*>(patchSite.engineClientStorageAddress),
+            reinterpret_cast<void*>(patchSite.chainedHookPointerStorageAddress),
+            chainedHookTarget,
             reinterpret_cast<void*>(patchSite.returnAddress)
         );
         SetInitialized(false, FormatIncompatibleBuildReason("SetUpView patch site changed"));
@@ -7788,9 +7835,12 @@ bool HookSetUpView() {
     }
 
     TracePrintf(
-        "setupview-ok patch=%p engineClientStorage=%p return=%p stub=%p",
+        "setupview-ok patch=%p replay=%s engineClientStorage=%p chainedStorage=%p chainedTarget=%p return=%p stub=%p",
         reinterpret_cast<void*>(patchSite.patchAddress),
+        patchSite.replayKind == hook::SetUpViewReplayKind::HlaeTrampoline ? "hlae-chain" : "engine",
         reinterpret_cast<void*>(patchSite.engineClientStorageAddress),
+        reinterpret_cast<void*>(patchSite.chainedHookPointerStorageAddress),
+        chainedHookTarget,
         reinterpret_cast<void*>(patchSite.returnAddress),
         detourStub
     );
@@ -8289,6 +8339,8 @@ std::wstring GetOverlayButtonText(int controlId, HWND controlWindow, const Runti
         return Texts().uiButtonTargetClear;
     case kControlButtonPropClear:
         return Texts().uiButtonPropClear;
+    case kControlButtonPropImageStyle:
+        return Texts().uiButtonPropImageStyle;
     case kControlButtonPropLock1:
     case kControlButtonPropLock2:
     case kControlButtonPropLock3:
@@ -8302,6 +8354,12 @@ std::wstring GetOverlayButtonText(int controlId, HWND controlWindow, const Runti
     }
     case kControlButtonPanelHotkey:
         return BuildOverlayHotkeyButtonText();
+    case kControlButtonRuntimeToggle: {
+        std::wstring text = Texts().uiRuntimeSection;
+        text += g_ui.runtimeExpanded ? L"   \x25B2   " : L"   \x25BC   ";
+        text += Texts().uiRuntimeSubsection;
+        return text;
+    }
     default:
         return ReadWindowText(controlWindow);
     }
@@ -8478,7 +8536,12 @@ std::wstring BuildOverlayStatusText(const RuntimeState& state) {
 
 bool OverlayOffsetEditHasFocus() {
     const HWND focused = GetFocus();
-    return focused == g_ui.offsetXEdit || focused == g_ui.offsetYEdit || focused == g_ui.offsetZEdit;
+    return focused == g_ui.offsetXEdit
+        || focused == g_ui.offsetYEdit
+        || focused == g_ui.offsetZEdit
+        || focused == g_ui.playerPitchEdit
+        || focused == g_ui.playerYawEdit
+        || focused == g_ui.playerRollEdit;
 }
 
 bool OverlayPropEditHasFocus() {
@@ -8575,6 +8638,11 @@ void SyncOverlayFromState(bool force = false) {
         SetControlText(g_ui.cameraPlayerButton, Texts().uiCameraPlayer);
         SetControlText(g_ui.cameraPropButton, Texts().uiCameraProp);
         SetControlText(g_ui.propClearButton, Texts().uiButtonPropClear);
+        SetControlText(g_ui.propImageStyleButton, Texts().uiButtonPropImageStyle);
+        SetControlText(
+            g_ui.runtimeToggleButton,
+            GetOverlayButtonText(kControlButtonRuntimeToggle, g_ui.runtimeToggleButton, state)
+        );
         for (std::size_t index = 0u; index < kMaxPropCandidates; ++index) {
             SetControlText(g_ui.propLockButtons[index], Texts().uiButtonPropLock);
         }
@@ -8600,6 +8668,9 @@ void SyncOverlayFromState(bool force = false) {
         SetEditFloatText(g_ui.offsetXEdit, state.offset.x);
         SetEditFloatText(g_ui.offsetYEdit, state.offset.y);
         SetEditFloatText(g_ui.offsetZEdit, state.offset.z);
+        SetEditFloatText(g_ui.playerPitchEdit, state.playerRotation.x);
+        SetEditFloatText(g_ui.playerYawEdit, state.playerRotation.y);
+        SetEditFloatText(g_ui.playerRollEdit, state.playerRotation.z);
         g_ui.suppressOffsetSync = false;
     }
 
@@ -8619,6 +8690,10 @@ void SyncOverlayFromState(bool force = false) {
     InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
 }
 
+#if 0
+// Retained only as implementation history. The production panel intentionally
+// uses Win32/GDI controls so opening it never creates a DXGI swap chain inside
+// the ReShade-injected CS2 process.
 template <typename T>
 void SafeRelease(T*& value) {
     if (value != nullptr) {
@@ -9062,10 +9137,9 @@ void RenderImGuiOverlayFrame() {
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     g_ui.swapChain->Present(1, 0);
 }
+#endif
 
 void DestroyOverlayResources() {
-    CleanupImGuiOverlay();
-
     if (g_ui.panelBrush != nullptr) {
         DeleteObject(g_ui.panelBrush);
         g_ui.panelBrush = nullptr;
@@ -9275,7 +9349,10 @@ bool PositionOverlayWindow(bool activate) {
     }
 
     const RECT workArea = GetOverlayWorkArea();
-    const SIZE windowSize = GetOverlayWindowSizeForClient(kOverlayWidth, kOverlayHeight);
+    const SIZE windowSize = GetOverlayWindowSizeForClient(
+        kOverlayWidth,
+        g_ui.runtimeExpanded ? kOverlayExpandedHeight : kOverlayCollapsedHeight
+    );
     int x = targetRect.right - windowSize.cx - kOverlayMargin;
     int y = targetRect.top + kOverlayMargin;
     if (x < workArea.left + kOverlayMargin) {
@@ -9347,6 +9424,12 @@ struct OverlayLayout {
     RECT offsetXEditRect{};
     RECT offsetYEditRect{};
     RECT offsetZEditRect{};
+    RECT playerPitchLabelRect{};
+    RECT playerYawLabelRect{};
+    RECT playerRollLabelRect{};
+    RECT playerPitchEditRect{};
+    RECT playerYawEditRect{};
+    RECT playerRollEditRect{};
 
     RECT propLabelRect{};
     RECT propChipRect{};
@@ -9364,6 +9447,7 @@ struct OverlayLayout {
     RECT propRollEditRect{};
     RECT propLockButtonRects[kMaxPropCandidates]{};
     RECT propClearButtonRect{};
+    RECT propImageStyleButtonRect{};
 
     RECT lookLabelRect{};
     RECT lookChipRect{};
@@ -9377,6 +9461,7 @@ struct OverlayLayout {
     RECT targetLockButtonRect{};
     RECT targetClearButtonRect{};
 
+    RECT statusHeaderButtonRect{};
     RECT statusLabelRect{};
     RECT statusSubRect{};
     RECT statusEditRect{};
@@ -9386,12 +9471,15 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
     static OverlayLayout cachedLayout{};
     static int cachedClientWidth = -1;
     static int cachedClientHeight = -1;
+    static bool cachedRuntimeExpanded = false;
 
     RECT clientRect{};
     GetClientRect(window, &clientRect);
     const int clientWidth = RectWidth(clientRect);
     const int clientHeight = RectHeight(clientRect);
-    if (clientWidth == cachedClientWidth && clientHeight == cachedClientHeight) {
+    if (clientWidth == cachedClientWidth
+        && clientHeight == cachedClientHeight
+        && g_ui.runtimeExpanded == cachedRuntimeExpanded) {
         return cachedLayout;
     }
 
@@ -9400,15 +9488,15 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
 
     const int sideMargin = 16;
     const int topMargin = 10;
-    const int cardGap = 10;
+    const int cardGap = 8;
     const int sectionPadding = 12;
     const int buttonGap = 12;
     const int cardWidth = RectWidth(layout.clientRect) - sideMargin * 2;
     const int headerHeight = 110;
     const int enableHeight = 66;
     const int cameraHeight = 64;
-    const int offsetHeight = 100;
-    const int propHeight = 182;
+    const int offsetHeight = 148;
+    const int propHeight = 218;
     const int lookHeight = 86;
     const int targetHeight = 72;
 
@@ -9427,7 +9515,16 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
     currentTop = layout.lookCardRect.bottom + cardGap;
     layout.targetCardRect = MakeRect(sideMargin, currentTop, cardWidth, targetHeight);
     currentTop = layout.targetCardRect.bottom + cardGap;
-    layout.statusCardRect = MakeRect(sideMargin, currentTop, cardWidth, layout.clientRect.bottom - sideMargin - currentTop);
+    const int statusAvailableHeight = std::max(
+        52,
+        static_cast<int>(layout.clientRect.bottom) - sideMargin - currentTop
+    );
+    layout.statusCardRect = MakeRect(
+        sideMargin,
+        currentTop,
+        cardWidth,
+        g_ui.runtimeExpanded ? statusAvailableHeight : 52
+    );
 
     layout.titleRect = MakeRect(layout.headerRect.left + sectionPadding, layout.headerRect.top + 10, cardWidth - 220, 24);
     layout.subtitleRect = MakeRect(layout.headerRect.left + sectionPadding, layout.headerRect.top + 36, cardWidth - 220, 18);
@@ -9453,6 +9550,12 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
     layout.offsetXEditRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 50, offsetEditWidth, 30);
     layout.offsetYEditRect = MakeRect(layout.offsetXEditRect.right + buttonGap, layout.offsetCardRect.top + 50, offsetEditWidth, 30);
     layout.offsetZEditRect = MakeRect(layout.offsetYEditRect.right + buttonGap, layout.offsetCardRect.top + 50, offsetEditWidth, 30);
+    layout.playerPitchLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 82, 80, 14);
+    layout.playerYawLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + offsetEditWidth + buttonGap, layout.offsetCardRect.top + 82, 80, 14);
+    layout.playerRollLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + (offsetEditWidth + buttonGap) * 2, layout.offsetCardRect.top + 82, 80, 14);
+    layout.playerPitchEditRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 98, offsetEditWidth, 28);
+    layout.playerYawEditRect = MakeRect(layout.playerPitchEditRect.right + buttonGap, layout.offsetCardRect.top + 98, offsetEditWidth, 28);
+    layout.playerRollEditRect = MakeRect(layout.playerYawEditRect.right + buttonGap, layout.offsetCardRect.top + 98, offsetEditWidth, 28);
     layout.offsetHintRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.bottom - 20, cardWidth - sectionPadding * 2, 14);
 
     layout.propLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 12, 180, 16);
@@ -9480,6 +9583,7 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
         );
     }
     layout.propClearButtonRect = MakeRect(layout.propLockButtonRects[kMaxPropCandidates - 1u].right + buttonGap, layout.propCardRect.top + 140, propButtonWidth, 28);
+    layout.propImageStyleButtonRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 176, cardWidth - sectionPadding * 2, 28);
 
     layout.lookLabelRect = MakeRect(layout.lookCardRect.left + sectionPadding, layout.lookCardRect.top + 12, 180, 16);
     layout.lookChipRect = MakeRect(layout.lookCardRect.right - 116, layout.lookCardRect.top + 12, 104, 18);
@@ -9495,13 +9599,25 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
     layout.targetLockButtonRect = MakeRect(layout.targetFollowButtonRect.right + buttonGap, layout.targetCardRect.top + 30, targetButtonWidth, 30);
     layout.targetClearButtonRect = MakeRect(layout.targetLockButtonRect.right + buttonGap, layout.targetCardRect.top + 30, targetButtonWidth, 30);
 
-    layout.statusLabelRect = MakeRect(layout.statusCardRect.left + sectionPadding, layout.statusCardRect.top + 12, 180, 16);
-    layout.statusSubRect = MakeRect(layout.statusCardRect.right - 220, layout.statusCardRect.top + 12, 208, 16);
-    layout.statusEditRect = MakeRect(layout.statusCardRect.left + sectionPadding, layout.statusCardRect.top + 34, cardWidth - sectionPadding * 2, RectHeight(layout.statusCardRect) - 46);
+    layout.statusHeaderButtonRect = MakeRect(
+        layout.statusCardRect.left + 8,
+        layout.statusCardRect.top + 8,
+        cardWidth - 16,
+        34
+    );
+    layout.statusLabelRect = RECT{};
+    layout.statusSubRect = RECT{};
+    layout.statusEditRect = MakeRect(
+        layout.statusCardRect.left + sectionPadding,
+        layout.statusCardRect.top + 50,
+        cardWidth - sectionPadding * 2,
+        std::max(1, RectHeight(layout.statusCardRect) - 62)
+    );
 
     cachedLayout = layout;
     cachedClientWidth = clientWidth;
     cachedClientHeight = clientHeight;
+    cachedRuntimeExpanded = g_ui.runtimeExpanded;
     return cachedLayout;
 }
 
@@ -9525,6 +9641,9 @@ void LayoutOverlayControls(HWND overlayWindow) {
     MoveOverlayControl(g_ui.offsetXEdit, layout.offsetXEditRect);
     MoveOverlayControl(g_ui.offsetYEdit, layout.offsetYEditRect);
     MoveOverlayControl(g_ui.offsetZEdit, layout.offsetZEditRect);
+    MoveOverlayControl(g_ui.playerPitchEdit, layout.playerPitchEditRect);
+    MoveOverlayControl(g_ui.playerYawEdit, layout.playerYawEditRect);
+    MoveOverlayControl(g_ui.playerRollEdit, layout.playerRollEditRect);
     MoveOverlayControl(g_ui.propOffsetXEdit, layout.propOffsetXEditRect);
     MoveOverlayControl(g_ui.propOffsetYEdit, layout.propOffsetYEditRect);
     MoveOverlayControl(g_ui.propOffsetZEdit, layout.propOffsetZEditRect);
@@ -9535,6 +9654,7 @@ void LayoutOverlayControls(HWND overlayWindow) {
         MoveOverlayControl(g_ui.propLockButtons[index], layout.propLockButtonRects[index]);
     }
     MoveOverlayControl(g_ui.propClearButton, layout.propClearButtonRect);
+    MoveOverlayControl(g_ui.propImageStyleButton, layout.propImageStyleButtonRect);
     MoveOverlayControl(g_ui.lookSelfieLeftButton, layout.lookSelfieLeftButtonRect);
     MoveOverlayControl(g_ui.lookSelfieRightButton, layout.lookSelfieRightButtonRect);
     MoveOverlayControl(g_ui.lookForwardButton, layout.lookForwardButtonRect);
@@ -9542,7 +9662,9 @@ void LayoutOverlayControls(HWND overlayWindow) {
     MoveOverlayControl(g_ui.targetLockButton, layout.targetLockButtonRect);
     MoveOverlayControl(g_ui.targetClearButton, layout.targetClearButtonRect);
     MoveOverlayControl(g_ui.overlayHotkeyButton, layout.hotkeyButtonRect);
+    MoveOverlayControl(g_ui.runtimeToggleButton, layout.statusHeaderButtonRect);
     MoveOverlayControl(g_ui.statusEdit, layout.statusEditRect);
+    ShowWindow(g_ui.statusEdit, g_ui.runtimeExpanded ? SW_SHOW : SW_HIDE);
 }
 
 HWND CreateOverlayButton(HWND parent, int controlId, const wchar_t* text, int x, int y, int width, int height) {
@@ -9606,6 +9728,9 @@ bool CreateOverlayControls(HWND overlayWindow) {
     g_ui.offsetXEdit = CreateOverlayEdit(overlayWindow, kControlEditOffsetX, 0, 0, 1, 1, false);
     g_ui.offsetYEdit = CreateOverlayEdit(overlayWindow, kControlEditOffsetY, 0, 0, 1, 1, false);
     g_ui.offsetZEdit = CreateOverlayEdit(overlayWindow, kControlEditOffsetZ, 0, 0, 1, 1, false);
+    g_ui.playerPitchEdit = CreateOverlayEdit(overlayWindow, kControlEditPlayerPitch, 0, 0, 1, 1, false);
+    g_ui.playerYawEdit = CreateOverlayEdit(overlayWindow, kControlEditPlayerYaw, 0, 0, 1, 1, false);
+    g_ui.playerRollEdit = CreateOverlayEdit(overlayWindow, kControlEditPlayerRoll, 0, 0, 1, 1, false);
     g_ui.propOffsetXEdit = CreateOverlayEdit(overlayWindow, kControlEditPropOffsetX, 0, 0, 1, 1, false);
     g_ui.propOffsetYEdit = CreateOverlayEdit(overlayWindow, kControlEditPropOffsetY, 0, 0, 1, 1, false);
     g_ui.propOffsetZEdit = CreateOverlayEdit(overlayWindow, kControlEditPropOffsetZ, 0, 0, 1, 1, false);
@@ -9622,7 +9747,9 @@ bool CreateOverlayControls(HWND overlayWindow) {
         g_ui.propLockButtons[index] = CreateOverlayButton(overlayWindow, kControlButtonPropLock1 + static_cast<int>(index), Texts().uiButtonPropLock, 0, 0, 1, 1);
     }
     g_ui.propClearButton = CreateOverlayButton(overlayWindow, kControlButtonPropClear, Texts().uiButtonPropClear, 0, 0, 1, 1);
+    g_ui.propImageStyleButton = CreateOverlayButton(overlayWindow, kControlButtonPropImageStyle, Texts().uiButtonPropImageStyle, 0, 0, 1, 1);
     g_ui.overlayHotkeyButton = CreateOverlayButton(overlayWindow, kControlButtonPanelHotkey, BuildOverlayHotkeyButtonText().c_str(), 0, 0, 1, 1);
+    g_ui.runtimeToggleButton = CreateOverlayButton(overlayWindow, kControlButtonRuntimeToggle, Texts().uiRuntimeSection, 0, 0, 1, 1);
     g_ui.statusEdit = CreateOverlayEdit(overlayWindow, kControlEditStatus, 0, 0, 1, 1, true);
 
     bool propLockButtonsCreated = true;
@@ -9636,6 +9763,9 @@ bool CreateOverlayControls(HWND overlayWindow) {
         && g_ui.offsetXEdit != nullptr
         && g_ui.offsetYEdit != nullptr
         && g_ui.offsetZEdit != nullptr
+        && g_ui.playerPitchEdit != nullptr
+        && g_ui.playerYawEdit != nullptr
+        && g_ui.playerRollEdit != nullptr
         && g_ui.propOffsetXEdit != nullptr
         && g_ui.propOffsetYEdit != nullptr
         && g_ui.propOffsetZEdit != nullptr
@@ -9650,7 +9780,9 @@ bool CreateOverlayControls(HWND overlayWindow) {
         && g_ui.targetClearButton != nullptr
         && propLockButtonsCreated
         && g_ui.propClearButton != nullptr
+        && g_ui.propImageStyleButton != nullptr
         && g_ui.overlayHotkeyButton != nullptr
+        && g_ui.runtimeToggleButton != nullptr
         && g_ui.statusEdit != nullptr;
 
     if (created) {
@@ -9745,6 +9877,58 @@ void ToggleOverlayVisibility() {
     ShowOverlayWindow(!g_ui.overlayVisible);
 }
 
+void SetRuntimeStatusExpanded(bool expanded) {
+    if (g_ui.runtimeExpanded == expanded) {
+        return;
+    }
+
+    g_ui.runtimeExpanded = expanded;
+    if (!IsWindow(g_ui.overlayWindow)) {
+        return;
+    }
+
+    ShowWindow(g_ui.statusEdit, expanded ? SW_SHOW : SW_HIDE);
+
+    RECT clientRect{};
+    RECT windowRect{};
+    GetClientRect(g_ui.overlayWindow, &clientRect);
+    GetWindowRect(g_ui.overlayWindow, &windowRect);
+    const int clientWidth = std::max(kOverlayMinWidth, RectWidth(clientRect));
+    const SIZE targetSize = GetOverlayWindowSizeForClient(
+        clientWidth,
+        expanded ? kOverlayExpandedHeight : kOverlayCollapsedHeight
+    );
+
+    const RECT workArea = GetOverlayWorkArea();
+    int x = windowRect.left;
+    int y = windowRect.top;
+    if (x + targetSize.cx > workArea.right - kOverlayMargin) {
+        x = workArea.right - targetSize.cx - kOverlayMargin;
+    }
+    if (y + targetSize.cy > workArea.bottom - kOverlayMargin) {
+        y = workArea.bottom - targetSize.cy - kOverlayMargin;
+    }
+    x = std::max(x, static_cast<int>(workArea.left) + kOverlayMargin);
+    y = std::max(y, static_cast<int>(workArea.top) + kOverlayMargin);
+
+    SetWindowPos(
+        g_ui.overlayWindow,
+        nullptr,
+        x,
+        y,
+        targetSize.cx,
+        targetSize.cy,
+        SWP_NOZORDER | SWP_NOOWNERZORDER
+    );
+    const RuntimeState state = SnapshotState();
+    SetControlText(
+        g_ui.runtimeToggleButton,
+        GetOverlayButtonText(kControlButtonRuntimeToggle, g_ui.runtimeToggleButton, state)
+    );
+    LayoutOverlayControls(g_ui.overlayWindow);
+    InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
+}
+
 void ApplyOffsetFromEdits() {
     if (g_ui.suppressOffsetSync) {
         return;
@@ -9753,11 +9937,20 @@ void ApplyOffsetFromEdits() {
     float x{};
     float y{};
     float z{};
-    if (!TryReadFloatFromEdit(g_ui.offsetXEdit, x) || !TryReadFloatFromEdit(g_ui.offsetYEdit, y) || !TryReadFloatFromEdit(g_ui.offsetZEdit, z)) {
+    float pitch{};
+    float yaw{};
+    float roll{};
+    if (!TryReadFloatFromEdit(g_ui.offsetXEdit, x)
+        || !TryReadFloatFromEdit(g_ui.offsetYEdit, y)
+        || !TryReadFloatFromEdit(g_ui.offsetZEdit, z)
+        || !TryReadFloatFromEdit(g_ui.playerPitchEdit, pitch)
+        || !TryReadFloatFromEdit(g_ui.playerYawEdit, yaw)
+        || !TryReadFloatFromEdit(g_ui.playerRollEdit, roll)) {
         return;
     }
 
     SetOffset(Vec3{ x, y, z });
+    SetPlayerRotation(Vec3{ pitch, yaw, roll });
 }
 
 void ApplyPropEdits() {
@@ -9790,6 +9983,9 @@ void ResetOffsetEditsFromState() {
     SetEditFloatText(g_ui.offsetXEdit, state.offset.x);
     SetEditFloatText(g_ui.offsetYEdit, state.offset.y);
     SetEditFloatText(g_ui.offsetZEdit, state.offset.z);
+    SetEditFloatText(g_ui.playerPitchEdit, state.playerRotation.x);
+    SetEditFloatText(g_ui.playerYawEdit, state.playerRotation.y);
+    SetEditFloatText(g_ui.playerRollEdit, state.playerRotation.z);
     g_ui.suppressOffsetSync = false;
 }
 
@@ -9887,6 +10083,9 @@ void HandleOverlayCommand(WPARAM wParam) {
         case kControlButtonPropClear:
             ClearLockedProp();
             break;
+        case kControlButtonPropImageStyle:
+            ApplyPropImageStylePreset();
+            break;
         case kControlButtonPropLock1:
         case kControlButtonPropLock2:
         case kControlButtonPropLock3:
@@ -9897,6 +10096,9 @@ void HandleOverlayCommand(WPARAM wParam) {
         case kControlButtonPanelHotkey:
             StartOverlayHotkeyCapture();
             break;
+        case kControlButtonRuntimeToggle:
+            SetRuntimeStatusExpanded(!g_ui.runtimeExpanded);
+            break;
         default:
             break;
         }
@@ -9905,7 +10107,12 @@ void HandleOverlayCommand(WPARAM wParam) {
         return;
     }
 
-    const bool isOffsetEdit = controlId == kControlEditOffsetX || controlId == kControlEditOffsetY || controlId == kControlEditOffsetZ;
+    const bool isOffsetEdit = controlId == kControlEditOffsetX
+        || controlId == kControlEditOffsetY
+        || controlId == kControlEditOffsetZ
+        || controlId == kControlEditPlayerPitch
+        || controlId == kControlEditPlayerYaw
+        || controlId == kControlEditPlayerRoll;
     const bool isPropEdit = controlId == kControlEditPropOffsetX
         || controlId == kControlEditPropOffsetY
         || controlId == kControlEditPropOffsetZ
@@ -9958,7 +10165,15 @@ void HandleOverlayCommand(WPARAM wParam) {
         float x{};
         float y{};
         float z{};
-        if (!TryReadFloatFromEdit(g_ui.offsetXEdit, x) || !TryReadFloatFromEdit(g_ui.offsetYEdit, y) || !TryReadFloatFromEdit(g_ui.offsetZEdit, z)) {
+        float pitch{};
+        float yaw{};
+        float roll{};
+        if (!TryReadFloatFromEdit(g_ui.offsetXEdit, x)
+            || !TryReadFloatFromEdit(g_ui.offsetYEdit, y)
+            || !TryReadFloatFromEdit(g_ui.offsetZEdit, z)
+            || !TryReadFloatFromEdit(g_ui.playerPitchEdit, pitch)
+            || !TryReadFloatFromEdit(g_ui.playerYawEdit, yaw)
+            || !TryReadFloatFromEdit(g_ui.playerRollEdit, roll)) {
             ResetOffsetEditsFromState();
             InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
             return;
@@ -10012,6 +10227,9 @@ OverlayButtonVisual GetOverlayButtonVisual(int controlId, const RuntimeState& st
     case kControlButtonPropClear:
         warning = state.lockedPropHandle.IsValid();
         break;
+    case kControlButtonPropImageStyle:
+        warning = state.cameraMode == CameraMode::PropSelfie;
+        break;
     case kControlButtonPropLock1:
     case kControlButtonPropLock2:
     case kControlButtonPropLock3:
@@ -10026,6 +10244,9 @@ OverlayButtonVisual GetOverlayButtonVisual(int controlId, const RuntimeState& st
     }
     case kControlButtonPanelHotkey:
         active = g_ui.captureOverlayHotkey;
+        break;
+    case kControlButtonRuntimeToggle:
+        active = g_ui.runtimeExpanded;
         break;
     default:
         break;
@@ -10075,47 +10296,31 @@ LRESULT HandleOverlayDrawItem(const DRAWITEMSTRUCT* drawItem) {
     RECT frameRect = drawItem->rcItem;
     const bool focused = (drawItem->itemState & ODS_FOCUS) != 0;
     const COLORREF borderColor = focused ? kColorAccentStrong : visual.border;
-    const COLORREF innerBorderColor = focused ? kColorAccent : kColorLine;
 
-    if (HBRUSH frameBrush = GetCachedSolidBrush(kColorPanelInset)) {
-        FillRect(drawItem->hDC, &frameRect, frameBrush);
-    }
-
-    RECT innerRect = frameRect;
-    InflateRect(&innerRect, -1, -1);
-    if (HBRUSH innerBrush = GetCachedSolidBrush(visual.background)) {
-        FillRect(drawItem->hDC, &innerRect, innerBrush);
-    }
-
-    RECT accentRect = innerRect;
-    accentRect.bottom = accentRect.top + 3;
-    if (HBRUSH accentBrush = GetCachedSolidBrush(borderColor)) {
-        FillRect(drawItem->hDC, &accentRect, accentBrush);
-    }
-
-    RECT sideAccentRect = innerRect;
-    sideAccentRect.right = sideAccentRect.left + 3;
-    if (HBRUSH sideAccentBrush = GetCachedSolidBrush(borderColor)) {
-        FillRect(drawItem->hDC, &sideAccentRect, sideAccentBrush);
+    if (HBRUSH backgroundBrush = GetCachedSolidBrush(visual.background)) {
+        FillRect(drawItem->hDC, &frameRect, backgroundBrush);
     }
 
     if (HBRUSH borderBrush = GetCachedSolidBrush(borderColor)) {
         FrameRect(drawItem->hDC, &frameRect, borderBrush);
     }
 
-    if (HBRUSH innerBorderBrush = GetCachedSolidBrush(innerBorderColor)) {
+    RECT innerRect = frameRect;
+    InflateRect(&innerRect, -1, -1);
+    if (focused && GetCachedSolidBrush(kColorAccent) != nullptr) {
+        HBRUSH innerBorderBrush = GetCachedSolidBrush(kColorAccent);
         FrameRect(drawItem->hDC, &innerRect, innerBorderBrush);
     }
 
-    RECT textRect = innerRect;
+    RECT textRect = frameRect;
     InflateRect(&textRect, -12, -4);
-    textRect.left += 4;
     SetBkMode(drawItem->hDC, TRANSPARENT);
     SetTextColor(drawItem->hDC, visual.text);
     SelectObject(drawItem->hDC, g_ui.bodyFont);
 
     const std::wstring text = GetOverlayButtonText(static_cast<int>(drawItem->CtlID), drawItem->hwndItem, state);
-    DrawTextW(drawItem->hDC, text.c_str(), -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    const UINT alignment = drawItem->CtlID == kControlButtonRuntimeToggle ? DT_LEFT : DT_CENTER;
+    DrawTextW(drawItem->hDC, text.c_str(), -1, &textRect, alignment | DT_VCENTER | DT_SINGLELINE);
 
     return TRUE;
 }
@@ -10150,14 +10355,6 @@ bool ControlHasFocus(HWND control) {
 void DrawSectionCard(HDC dc, const RECT& rect, COLORREF fillColor, COLORREF borderColor) {
     FillSolidRect(dc, rect, fillColor);
     DrawRectOutline(dc, rect, borderColor);
-
-    RECT innerRect = rect;
-    InflateRect(&innerRect, -1, -1);
-    DrawRectOutline(dc, innerRect, kColorPanelInset);
-
-    RECT accentRect = innerRect;
-    accentRect.bottom = accentRect.top + 3;
-    FillSolidRect(dc, accentRect, borderColor);
 }
 
 void DrawOverlayText(HDC dc, const wchar_t* text, const RECT& rect, HFONT font, COLORREF color, UINT format);
@@ -10178,16 +10375,8 @@ void DrawInputChrome(HDC dc, HWND parent, HWND control, COLORREF borderColor) {
 
     RECT outerRect = rect;
     InflateRect(&outerRect, 2, 2);
-    FillSolidRect(dc, outerRect, kColorPanelInset);
+    FillSolidRect(dc, outerRect, kColorInput);
     DrawRectOutline(dc, outerRect, borderColor);
-
-    RECT innerRect = outerRect;
-    InflateRect(&innerRect, -1, -1);
-    DrawRectOutline(dc, innerRect, kColorLine);
-
-    RECT accentRect = innerRect;
-    accentRect.bottom = accentRect.top + 3;
-    FillSolidRect(dc, accentRect, borderColor);
 }
 
 const wchar_t* GetOverlayLifecycleText(const RuntimeState& state) {
@@ -10257,25 +10446,24 @@ void DrawOverlayWindow(HDC dc, HWND window) {
         hotkeyChipText = fallbackHotkeyChipText.c_str();
     }
     FillSolidRect(dc, clientRect, kColorPanel);
-    DrawRectOutline(dc, clientRect, kColorLineStrong);
-
-    RECT innerPanel = clientRect;
-    InflateRect(&innerPanel, -1, -1);
-    DrawRectOutline(dc, innerPanel, kColorPanelInset);
-
-    RECT accentBar{ 1, 1, clientRect.right - 1, 4 };
-    FillSolidRect(dc, accentBar, kColorAccent);
+    DrawRectOutline(dc, clientRect, kColorLine);
 
     DrawSectionCard(dc, layout.headerRect, kColorPanelStrong, kColorLineStrong);
     DrawSectionCard(dc, layout.enableCardRect, state.enabled ? kColorPanelElevated : kColorPanelStrong, state.enabled ? kColorAccentStrong : kColorLineStrong);
     DrawSectionCard(dc, layout.cameraCardRect, kColorPanelStrong, state.cameraMode == CameraMode::PropSelfie ? kColorWarn : kColorAccentStrong);
     DrawSectionCard(dc, layout.offsetCardRect, kColorPanelStrong, kColorLineStrong);
     DrawSectionCard(dc, layout.propCardRect, kColorPanelStrong, state.lockedPropHandle.IsValid() ? kColorWarn : kColorLineStrong);
-    DrawSectionCard(dc, layout.lookCardRect, kColorPanelStrong, kColorAccentStrong);
+    DrawSectionCard(dc, layout.lookCardRect, kColorPanelStrong, kColorLine);
     DrawSectionCard(dc, layout.targetCardRect, kColorPanelStrong, state.targetMode == TargetMode::Locked ? kColorWarn : kColorLineStrong);
-    DrawSectionCard(dc, layout.statusCardRect, kColorPanelStrong, state.lastOverrideSucceeded ? kColorSuccess : (state.enabled ? kColorDanger : kColorLineStrong));
+    DrawSectionCard(dc, layout.statusCardRect, kColorPanelStrong, kColorLine);
 
-    DrawOverlayText(dc, Texts().uiTitle, layout.titleRect, g_ui.titleFont, kColorAccentStrong, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT titleAccent = layout.headerRect;
+    titleAccent.left += 8;
+    titleAccent.right = titleAccent.left + 3;
+    titleAccent.top += 12;
+    titleAccent.bottom -= 12;
+    FillSolidRect(dc, titleAccent, kColorAccent);
+    DrawOverlayText(dc, Texts().uiTitle, layout.titleRect, g_ui.titleFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, Texts().uiSubtitle, layout.subtitleRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawChip(dc, layout.statusChipRect, GetOverlayLifecycleText(state), g_ui.bodyFont, GetOverlayLifecycleFill(state), GetOverlayLifecycleBorder(state), kColorText);
     DrawChip(dc, layout.hotkeyChipRect, hotkeyChipText, g_ui.bodyFont, g_ui.captureOverlayHotkey ? kColorAccentSoft : kColorPanelElevated, g_ui.captureOverlayHotkey ? kColorAccentStrong : kColorLineStrong, kColorText);
@@ -10290,6 +10478,9 @@ void DrawOverlayWindow(HDC dc, HWND window) {
     DrawOverlayText(dc, L"R", layout.offsetXLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, L"B", layout.offsetYLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, L"U", layout.offsetZLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawOverlayText(dc, Texts().uiPlayerPitchLabel, layout.playerPitchLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawOverlayText(dc, Texts().uiPlayerYawLabel, layout.playerYawLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawOverlayText(dc, Texts().uiPlayerRollLabel, layout.playerRollLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, Texts().uiOffsetHint, layout.offsetHintRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     DrawOverlayText(dc, Texts().uiPropLabel, layout.propLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -10307,19 +10498,21 @@ void DrawOverlayWindow(HDC dc, HWND window) {
     DrawOverlayText(dc, Texts().uiTargetSection, layout.targetLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawChip(dc, layout.targetChipRect, state.targetMode == TargetMode::Locked ? Texts().uiTargetChipLocked : Texts().uiTargetChipFollow, g_ui.bodyFont, state.targetMode == TargetMode::Locked ? RGB(53, 32, 24) : kColorPanelElevated, state.targetMode == TargetMode::Locked ? kColorWarn : kColorLineStrong, kColorText);
 
-    DrawOverlayText(dc, Texts().uiRuntimeSection, layout.statusLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawOverlayText(dc, Texts().uiRuntimeSubsection, layout.statusSubRect, g_ui.bodyFont, kColorTextMuted, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-
     DrawInputChrome(dc, window, g_ui.offsetXEdit, ControlHasFocus(g_ui.offsetXEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.offsetYEdit, ControlHasFocus(g_ui.offsetYEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.offsetZEdit, ControlHasFocus(g_ui.offsetZEdit) ? kColorAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.playerPitchEdit, ControlHasFocus(g_ui.playerPitchEdit) ? kColorAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.playerYawEdit, ControlHasFocus(g_ui.playerYawEdit) ? kColorAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.playerRollEdit, ControlHasFocus(g_ui.playerRollEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.propOffsetXEdit, ControlHasFocus(g_ui.propOffsetXEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.propOffsetYEdit, ControlHasFocus(g_ui.propOffsetYEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.propOffsetZEdit, ControlHasFocus(g_ui.propOffsetZEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.propPitchEdit, ControlHasFocus(g_ui.propPitchEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.propYawEdit, ControlHasFocus(g_ui.propYawEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.propRollEdit, ControlHasFocus(g_ui.propRollEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.statusEdit, state.lastOverrideSucceeded ? kColorSuccess : (state.enabled ? kColorDanger : kColorLineStrong));
+    if (g_ui.runtimeExpanded) {
+        DrawInputChrome(dc, window, g_ui.statusEdit, state.lastOverrideSucceeded ? kColorSuccess : (state.enabled ? kColorDanger : kColorLineStrong));
+    }
 }
 
 void HandleBuiltInActionHotkeys() {
@@ -10371,8 +10564,6 @@ void HandleOverlayTimer() {
     if (g_ui.dirty.exchange(false, std::memory_order_relaxed)) {
         SyncOverlayFromState();
     }
-
-    InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
 }
 
 DWORD WINAPI OverlayUiThreadMain(LPVOID) {
@@ -10418,7 +10609,7 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
             continue;
         }
 
-        if (!g_ui.imguiInitialized && g_ui.overlayVisible && IsWindow(g_ui.overlayWindow) && IsDialogMessageW(g_ui.overlayWindow, &message)) {
+        if (g_ui.overlayVisible && IsWindow(g_ui.overlayWindow) && IsDialogMessageW(g_ui.overlayWindow, &message)) {
             continue;
         }
 
@@ -10434,6 +10625,20 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
     g_ui.offsetXEdit = nullptr;
     g_ui.offsetYEdit = nullptr;
     g_ui.offsetZEdit = nullptr;
+    g_ui.playerPitchEdit = nullptr;
+    g_ui.playerYawEdit = nullptr;
+    g_ui.playerRollEdit = nullptr;
+    g_ui.cameraPlayerButton = nullptr;
+    g_ui.cameraPropButton = nullptr;
+    g_ui.propOffsetXEdit = nullptr;
+    g_ui.propOffsetYEdit = nullptr;
+    g_ui.propOffsetZEdit = nullptr;
+    g_ui.propPitchEdit = nullptr;
+    g_ui.propYawEdit = nullptr;
+    g_ui.propRollEdit = nullptr;
+    g_ui.propClearButton = nullptr;
+    g_ui.propImageStyleButton = nullptr;
+    g_ui.propLockButtons.fill(nullptr);
     g_ui.lookSelfieLeftButton = nullptr;
     g_ui.lookSelfieRightButton = nullptr;
     g_ui.lookForwardButton = nullptr;
@@ -10441,6 +10646,7 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
     g_ui.targetLockButton = nullptr;
     g_ui.targetClearButton = nullptr;
     g_ui.overlayHotkeyButton = nullptr;
+    g_ui.runtimeToggleButton = nullptr;
     g_ui.statusEdit = nullptr;
     g_ui.titleFont = nullptr;
     g_ui.bodyFont = nullptr;
@@ -10451,6 +10657,7 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
     g_ui.overlayVisible = false;
     g_ui.suppressOffsetSync = false;
     g_ui.captureOverlayHotkey = false;
+    g_ui.runtimeExpanded = false;
     g_ui.overlayHotkeyWasDown = false;
     g_ui.toggleHotkeyWasDown = false;
     g_ui.lockHotkeyWasDown = false;
@@ -10513,22 +10720,19 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         return 0;
     }
 
-    if (g_ui.imguiInitialized && ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam)) {
-        return TRUE;
-    }
-
     switch (message) {
     case WM_CREATE:
-        if (!InitializeImGuiOverlay(window)) {
+        if (!CreateOverlayControls(window)) {
             return -1;
         }
-        MarkOverlayDirty();
-        SyncOverlayFromState(true);
         return 0;
     case WM_GETMINMAXINFO: {
         auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
         if (minMaxInfo != nullptr) {
-            const SIZE minSize = GetOverlayWindowSizeForClient(kOverlayMinWidth, kOverlayMinHeight);
+            const SIZE minSize = GetOverlayWindowSizeForClient(
+                kOverlayMinWidth,
+                g_ui.runtimeExpanded ? kOverlayExpandedHeight : kOverlayMinHeight
+            );
             minMaxInfo->ptMinTrackSize.x = minSize.cx;
             minMaxInfo->ptMinTrackSize.y = minSize.cy;
         }
@@ -10536,7 +10740,7 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
     }
     case WM_SIZE:
         if (wParam != SIZE_MINIMIZED) {
-            ResizeImGuiOverlay(LOWORD(lParam), HIWORD(lParam));
+            LayoutOverlayControls(window);
         }
         InvalidateRect(window, nullptr, FALSE);
         return 0;
@@ -10561,8 +10765,8 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         return 1;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
-        BeginPaint(window, &paint);
-        RenderImGuiOverlayFrame();
+        HDC dc = BeginPaint(window, &paint);
+        DrawOverlayWindow(dc, window);
         EndPaint(window, &paint);
         return 0;
     }
@@ -10570,7 +10774,6 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         ShowOverlayWindow(false);
         return 0;
     case WM_DESTROY:
-        CleanupImGuiOverlay();
         g_ui.overlayCreated = false;
         g_ui.overlayVisible = false;
         g_ui.hasLastHostRect = false;
@@ -10580,6 +10783,20 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         g_ui.offsetXEdit = nullptr;
         g_ui.offsetYEdit = nullptr;
         g_ui.offsetZEdit = nullptr;
+        g_ui.playerPitchEdit = nullptr;
+        g_ui.playerYawEdit = nullptr;
+        g_ui.playerRollEdit = nullptr;
+        g_ui.cameraPlayerButton = nullptr;
+        g_ui.cameraPropButton = nullptr;
+        g_ui.propOffsetXEdit = nullptr;
+        g_ui.propOffsetYEdit = nullptr;
+        g_ui.propOffsetZEdit = nullptr;
+        g_ui.propPitchEdit = nullptr;
+        g_ui.propYawEdit = nullptr;
+        g_ui.propRollEdit = nullptr;
+        g_ui.propClearButton = nullptr;
+        g_ui.propImageStyleButton = nullptr;
+        g_ui.propLockButtons.fill(nullptr);
         g_ui.lookSelfieLeftButton = nullptr;
         g_ui.lookSelfieRightButton = nullptr;
         g_ui.lookForwardButton = nullptr;
@@ -10587,8 +10804,10 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         g_ui.targetLockButton = nullptr;
         g_ui.targetClearButton = nullptr;
         g_ui.overlayHotkeyButton = nullptr;
+        g_ui.runtimeToggleButton = nullptr;
         g_ui.statusEdit = nullptr;
         g_ui.captureOverlayHotkey = false;
+        g_ui.runtimeExpanded = false;
         g_ui.overlayPlacementInitialized = false;
         return 0;
     default:
@@ -10614,6 +10833,7 @@ DWORD InitializeSelfieStickImpl() {
         g_debugOptions.disableGunStabilization ? 1 : 0
     );
     TracePrintf("trace-version schema=%s build=%s", kSchemaProbeTraceVersion, kBuildTag);
+    TracePrintf("ui-backend=win32-gdi d3d11=0 dxgi=0 present=0");
 
     g_initStage.store(1, std::memory_order_relaxed);
     TracePrintf("init-stage stage=%d name=%s enter", 1, InitStageToString(1));

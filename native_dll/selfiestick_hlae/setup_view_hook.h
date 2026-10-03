@@ -16,11 +16,18 @@ enum class ViewSetupRegister {
     Rbx
 };
 
+enum class SetUpViewReplayKind {
+    EngineClientIsPlayingDemo,
+    HlaeTrampoline
+};
+
 struct SetUpViewPatchSite {
     std::uintptr_t patchAddress{};
     std::uintptr_t engineClientStorageAddress{};
+    std::uintptr_t chainedHookPointerStorageAddress{};
     std::uintptr_t returnAddress{};
     ViewSetupRegister viewSetupRegister{ViewSetupRegister::Rsi};
+    SetUpViewReplayKind replayKind{SetUpViewReplayKind::EngineClientIsPlayingDemo};
     std::array<std::uint8_t, kSetUpViewPatchSize> originalBytes{};
 };
 

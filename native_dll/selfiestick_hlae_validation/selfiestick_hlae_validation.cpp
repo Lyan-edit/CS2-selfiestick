@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <string_view>
 
@@ -84,6 +86,7 @@ int main() {
     using selfiestick::hook::DecodeSetUpViewPatchSite;
     using selfiestick::hook::kSetUpViewPatchSize;
     using selfiestick::hook::SetUpViewPatchSite;
+    using selfiestick::hook::SetUpViewReplayKind;
     using selfiestick::hook::ViewSetupRegister;
 
     if (ClassifyEntityClassName("C_CSPlayerPawn") != ClientEntityKind::PlayerPawn) {
@@ -777,12 +780,16 @@ int main() {
         return ReportFailure("startup should launch schema resolve when hook installation still requires schema");
     }
 
-    if (ShouldUseSchemaInterfaceFallback(true, true, false)) {
-        return ReportFailure("schema interface fallback should stay disabled after raw schema payloads are found but incomplete");
+    if (!ShouldUseSchemaInterfaceFallback(true, true, false)) {
+        return ReportFailure("schema interface fallback should run after raw schema payloads are found but incomplete");
     }
 
     if (!ShouldUseSchemaInterfaceFallback(false, false, false)) {
         return ReportFailure("schema interface fallback should remain available when raw schema cannot be inspected");
+    }
+
+    if (ShouldUseSchemaInterfaceFallback(true, true, true)) {
+        return ReportFailure("schema interface fallback should remain disabled after a complete raw schema resolution");
     }
 
     const auto rawScanLayout = GetSchemaRawScanLayout();
@@ -863,6 +870,10 @@ int main() {
         return ReportFailure("decoded engine client storage address mismatch");
     }
 
+    if (decodedSite.replayKind != SetUpViewReplayKind::EngineClientIsPlayingDemo) {
+        return ReportFailure("original SetUpView site should replay the engine client call");
+    }
+
     if (decodedSite.returnAddress != patchAddress + kSetUpViewPatchSize) {
         return ReportFailure("decoded return address mismatch");
     }
@@ -905,6 +916,51 @@ int main() {
     const auto relocatedStorageAddress = (detourStubAddress + 11u) + static_cast<std::intptr_t>(relocatedStorageDisplacement);
     if (relocatedStorageAddress != engineClientStorageAddress) {
         return ReportFailure("relocated engine client storage address mismatch");
+    }
+
+    std::array<std::uint8_t, kSetUpViewPatchSize> hlaePatchBytes{
+        0x48, 0x89, 0xD9,
+        0x48, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xFF, 0x10, 0x90
+    };
+    constexpr std::uintptr_t hlaeHookPointerStorageAddress = 0x7FFF123456789AB0ull;
+    std::memcpy(
+        hlaePatchBytes.data() + 5u,
+        &hlaeHookPointerStorageAddress,
+        sizeof(hlaeHookPointerStorageAddress)
+    );
+
+    SetUpViewPatchSite hlaeDecodedSite{};
+    const auto hlaePatchAddress = reinterpret_cast<std::uintptr_t>(hlaePatchBytes.data());
+    if (!DecodeSetUpViewPatchSite(hlaePatchBytes.data(), hlaeDecodedSite, &error)) {
+        return ReportFailure(("failed to decode HLAE SetUpView patch site: " + error).c_str());
+    }
+
+    if (hlaeDecodedSite.replayKind != SetUpViewReplayKind::HlaeTrampoline
+        || hlaeDecodedSite.chainedHookPointerStorageAddress != hlaeHookPointerStorageAddress
+        || hlaeDecodedSite.engineClientStorageAddress != 0u
+        || hlaeDecodedSite.returnAddress != hlaePatchAddress + kSetUpViewPatchSize) {
+        return ReportFailure("decoded HLAE SetUpView trampoline metadata mismatch");
+    }
+
+    hlaeDecodedSite.viewSetupRegister = ViewSetupRegister::Rbx;
+    std::vector<std::uint8_t> hlaeStubBytes;
+    if (!BuildSetUpViewDetourStub(detourStubAddress, hlaeDecodedSite, callbackAddress, hlaeStubBytes, &error)) {
+        return ReportFailure(("failed to build HLAE chained SetUpView detour stub: " + error).c_str());
+    }
+
+    if (hlaeStubBytes.size() < 4u + hlaePatchBytes.size()
+        || !std::equal(
+            hlaePatchBytes.begin(),
+            hlaePatchBytes.end(),
+            hlaeStubBytes.begin() + 4u)) {
+        return ReportFailure("HLAE SetUpView trampoline should be replayed byte-for-byte");
+    }
+
+    if (!(hlaeStubBytes[kViewSetupMoveOffset + 0u] == 0x48
+        && hlaeStubBytes[kViewSetupMoveOffset + 1u] == 0x89
+        && hlaeStubBytes[kViewSetupMoveOffset + 2u] == 0xD9)) {
+        return ReportFailure("HLAE chained SetUpView detour should forward RBX as the view setup pointer");
     }
 
     std::array<std::uint8_t, kSetUpViewPatchSize> entryPatch{};

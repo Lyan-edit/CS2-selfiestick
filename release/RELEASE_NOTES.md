@@ -1,10 +1,10 @@
-# CS2 Selfiestick v0.4.1 Release Notes
+# CS2 Selfiestick v0.4.3 Release Notes
 
 ## Supported Runtime
 
 - HLAE: `2.192.6`
-- Counter-Strike 2: Steam app `730`, buildid `25640462`
-- Local CS2 app manifest timestamp: `2026-10-01 09:16:31 +08:00`
+- Counter-Strike 2: Steam app `730`, buildid `25687242`
+- Local CS2 app manifest timestamp: `2026-10-03 08:39:58 +08:00`
 
 This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates can break schema, entity layout, or `SetUpView`; if that happens, the DLL reports a clear Runtime reason instead of silently falling back to unsafe behavior.
 
@@ -19,12 +19,22 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 
 ## What's New
 
-- Updated and rebuilt against the current local CS2 app `730` buildid `25640462` and HLAE `2.192.6`.
+- Updated and rebuilt against the current local CS2 app `730` buildid `25687242` and HLAE `2.192.6`.
+- Fixed the current-build startup failure: an incomplete broad raw-schema scan no longer suppresses the exact schema interface path. Production resolution now starts from an exact class lookup and scans only that class's declared fields, avoiding inherited-field ambiguity.
+- Disabled the expensive broad raw payload diagnostic pass in production. It remains available only as an offline compatibility probe, removing the multi-second scan/log burst seen during demo activation.
+- Restyled the ReShade-safe Win32/GDI panel with the flatter neutral nSkinz visual hierarchy, single borders, and clearer active states while retaining the no-D3D/no-Present backend.
+- Added a collapsed-by-default Runtime diagnostics bar. Expanding it resizes the panel to reveal the full live status; collapsing it restores the compact layout.
+- Removed the unconditional 33 ms window repaint. The panel now repaints only when state, focus, input, or visibility changes, reducing UI work while a demo is playing.
+- Replaced the in-process Dear ImGui/DX11 panel with a native Win32/GDI pseudo-ImGui window. Pressing `Ins` no longer creates a D3D device, DXGI swap chain, or Present call inside the ReShade-injected CS2 process.
+- Removed direct `D3D11.dll` and `DXGI.dll` imports from both release DLLs. The dependency audit now rejects either import so the ReShade-safe UI path cannot regress silently.
+- Preserved native controls for Player `R/B/U`, Player `Pitch/Yaw/Roll`, Prop `X/Y/Z`, Prop `Pitch/Yaw/Roll`, camera/target/look modes, prop candidates, hotkey capture, runtime status, and the Image Style preset.
+- Fixed live loading after HLAE 2.192.6 has already patched the shared SetUpView site. Selfiestick now recognizes HLAE's 16-byte trampoline, chains it first, preserves its return value, and then applies the camera callback.
+- Added native regression coverage for both the untouched CS2 SetUpView call site and the HLAE-prepatched call site, including byte-for-byte trampoline replay and `RBX` view-pointer forwarding.
 - Recovered the unique current-client attachment signature with its second call at `+27`, plus the unique 16-byte SetUpView patch site used by HLAE 2.192.6.
 - Updated the SetUpView trampoline to relocate the original `IsPlayingDemo` virtual call, preserve its return value, stop on an exact instruction boundary, and pass `CViewSetup` from `RBX`.
 - Extended the installed-binary checker to verify both attachment call targets, the SetUpView data reference, the 16-byte boundary, and nearby `[RBX+0x4A0]` / `[RBX+0x4B8]` accesses.
 - Updated current Source 2 schema layout handling: direct declared-class array at `0x470/0x478`, class field span at `0x24/0x30`, and field name/type order.
-- Updated build-gated schema fallbacks for player/controller services, camera/observer services, eye angles, and grenade ownership in build `25640462`. Hardcoded fallbacks are disabled automatically when the client PE fingerprint changes.
+- Updated build-gated schema fallbacks for player/controller services, camera/observer services, eye angles, and grenade ownership in build `25687242`. Hardcoded fallbacks are disabled automatically when the client PE fingerprint changes.
 - Moved viewmodel and grenade owner queries to the classes that currently declare those fields: `C_BaseEntity` and `C_BaseGrenade`.
 - Player Selfie now reuses the last trusted target handle between 50 ms refreshes instead of repeating the full split-screen observer chain in every SetUpView callback; target changes still refresh promptly.
 - Player and weapon attachment indices are cached per entity handle and attachment name, removing repeated `LookupAttachment` work from the per-frame camera path while invalidating safely when a transform fails.
@@ -47,7 +57,7 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 - Fixed external-user startup where HLAE printed `LoadLibraryA Ok.` but the DLL then stopped with `SetUpView hook blocked by compatibility gate` when schema offsets were not ready yet.
 - SetUpView hook installation now requires only the trusted entity access, split-screen accessor, and patch site; schema offsets remain guarded lazily by the camera/target code that actually reads schema fields.
 - Rebuilt English and Chinese release DLLs with the MSVC runtime statically linked, so users do not need the Visual C++ Redistributable to load the DLL.
-- Removed runtime dependency on `D3DCOMPILER_*.dll`; the ImGui DX11 backend now uses embedded shader bytecode instead of compiling shaders on the user's PC.
+- Removed runtime dependency on `D3DCOMPILER_*.dll`; v0.4.2 subsequently removed the DX11 UI backend entirely.
 - Added release dependency checks for VC++ runtime DLLs, `D3DCOMPILER_*.dll`, and `D3DCompile` imports.
 - Prop Selfie candidates now store and display the actual thrower handle.
 - Prop Selfie direction now prefers the actual projectile thrower instead of the current spectator target, fixing wrong look-back direction when teams or viewpoints differ.
@@ -55,13 +65,11 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 - Added shared `Image Style` prop preset values: `X=-8`, `Y=-22`, `Z=4`, `Pitch=1`, `Yaw=0`, `Roll=0`.
 - Added an `IMAGE STYLE` / `截图风格` button in the Prop Selfie panel.
 - Documented the recommended Prop Selfie workflow: tune projectile camera shots at `0.1x` demo playback speed for the smoothest setup and centering.
-- Added full six-parameter ImGui controls for Player Selfie: `R / B / U` position trim plus `Pitch / Yaw / Roll` angle trim.
-- Added labeled Player Selfie sliders for `RIGHT`, `BACK`, `UP`, `PITCH`, `YAW`, and `ROLL`.
-- Added labeled Prop Selfie position sliders for `X`, `Y`, and `Z`; prop angle sliders remain available for `Pitch`, `Yaw`, and `Roll`.
+- Added full six-parameter native controls for Player Selfie: `R / B / U` position trim plus `Pitch / Yaw / Roll` angle trim.
+- Added native numeric fields for Player and Prop position/rotation tuning.
 - Added persistent `PlayerPitch`, `PlayerYaw`, and `PlayerRoll` settings in `selfiestick.ini`.
-- Fixed ImGui numeric editing for prop angle fields. Number input now accepts typed digits again.
-- Added medium-sensitivity `Pitch`, `Yaw`, and `Roll` sliders for prop camera angle trimming.
-- Added ImGui control panel.
+- Fixed numeric editing for prop angle fields. Number input accepts typed digits.
+- Added the standalone control panel, now rendered through Win32/GDI in v0.4.2.
 - Added bilingual English / Chinese DLL builds.
 - Added `Player Selfie` / `Prop Selfie` camera mode switch.
 - Added Prop Selfie camera for smoke, fire, HE, flashbang, and decoy flying projectile entities.
@@ -76,16 +84,26 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 当前版本支持：
 
 - HLAE：`2.192.6`
-- CS2：Steam app `730`，buildid `25640462`
+- CS2：Steam app `730`，buildid `25687242`
 
 新增内容：
 
-- 已按当前本机 CS2 app `730` buildid `25640462` 和 HLAE `2.192.6` 重新构建。
+- 已按当前本机 CS2 app `730` buildid `25687242` 和 HLAE `2.192.6` 重新构建。
+- 修复当前版本的启动失败：原始 schema 扫描不完整时不再错误跳过精确 schema 接口；正式解析改为先按类名精确取类，再只遍历该类声明字段，避免继承字段重复导致歧义。
+- 正式运行默认停用昂贵的全量原始 payload 诊断扫描，仅保留为离线兼容探针，消除启用自拍杆时持续数秒的扫描与日志突发。
+- 在保持 Win32/GDI、无 D3D、无 Present 的前提下，改为更接近 nSkinz 的扁平中性层级、单线边框和清晰选中状态。
+- 底部运行诊断改为默认收起的栏；展开时窗口自动增高显示完整实时状态，收起后恢复紧凑高度。
+- 移除每 33ms 无条件重绘窗口，只有状态、焦点、输入或可见性发生变化时才重绘，减少 demo 播放期间的 UI 开销。
+- 把进程内 Dear ImGui/DX11 面板替换为纯 Win32/GDI 绘制的伪 ImGui 独立窗口；按 `Ins` 不再在注入 ReShade 的 CS2 进程中创建 D3D 设备、DXGI 交换链或调用 Present。
+- 中英文 DLL 已移除对 `D3D11.dll`、`DXGI.dll` 的直接导入；依赖审计会阻止这两个依赖重新进入发布包。
+- 保留人物 `右/后/上`、人物 `俯仰/偏航/翻滚`、道具 `X/Y/Z`、道具 `俯仰/偏航/翻滚`、模式切换、道具候选、热键修改、运行状态与截图风格预设。
+- 修复 HLAE 2.192.6 已先改写同一 SetUpView 位点后再加载自拍杆的兼容问题：现在会识别 HLAE 的 16 字节 trampoline，先串接执行 HLAE、保留返回值，再执行自拍杆相机回调。
+- 新增原始 CS2 SetUpView 位点和 HLAE 已改写位点两条原生回归测试，校验 trampoline 原样重放与 `RBX` 视角指针传递。
 - 恢复当前 client.dll 唯一命中的附件访问特征码（第二个调用位于 `+27`）和 HLAE 2.192.6 使用的 16 字节 SetUpView 补丁位点。
 - SetUpView trampoline 会重放原始 `IsPlayingDemo` 虚调用并保留返回值，在完整指令边界结束，再从当前版本使用的 `RBX` 传入 `CViewSetup`，避免错误视角指针或半条指令导致闪退。
 - 二进制检查器新增附件两个调用目标、SetUpView 数据引用、16 字节边界和附近 `[RBX+0x4A0]` / `[RBX+0x4B8]` 上下文校验。
 - 更新当前 Source 2 schema 内存布局：声明类数组 `0x470/0x478`、类字段跨度 `0x24/0x30`，并修正字段名 / 类型顺序。
-- 更新 build `25640462` 的人物/控制器服务、相机/观察服务、眼睛角度和手雷归属字段回退；client.dll PE 指纹变化后会自动禁用硬编码回退。
+- 更新 build `25687242` 的人物/控制器服务、相机/观察服务、眼睛角度和手雷归属字段回退；client.dll PE 指纹变化后会自动禁用硬编码回退。
 - 人物自拍在 50ms 刷新间隔内复用上次可信的目标句柄，不再在每次 SetUpView 回调里重复完整的分屏观战目标链，同时仍能及时响应目标切换。
 - 人物与武器 attachment 索引按实体句柄和附件名缓存；transform 失败时会自动失效，减少每帧重复 `LookupAttachment`。
 - 道具候选扫描改为每次 SetUpView 最多处理 192 个实体，完整一轮后才提交候选，消除单帧全实体遍历尖峰；已锁定道具仍保持逐帧跟随。
@@ -107,7 +125,7 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 - 修复别人电脑上出现 `LoadLibraryA Ok.` 但随后提示 `SetUpView hook blocked by compatibility gate` 的问题。原因是 schema offsets 还没准备好时，旧版本把 SetUpView hook 安装也一起阻塞了。
 - SetUpView hook 现在只要求实体入口、分屏入口和 patch site 可信；真正读取 schema 字段的人物/道具逻辑仍然会延迟检查 schema offsets，不会盲目读字段。
 - 中英文 release DLL 改为静态链接 MSVC 运行库，用户不需要安装 Visual C++ Redistributable 也能加载 DLL。
-- 移除对 `D3DCOMPILER_*.dll` 的运行时依赖；ImGui DX11 后端现在使用内置 shader 字节码，不再需要在用户电脑上编译 shader。
+- 移除对 `D3DCOMPILER_*.dll` 的运行时依赖；v0.4.2 又进一步完全移除了 DX11 面板后端。
 - 新增 release 依赖检查脚本，用来防止 VC++ 运行库、`D3DCOMPILER_*.dll` 和 `D3DCompile` 导入重新进入 DLL。
 - 道具候选现在保存并显示实际投掷者 handle。
 - 道具自拍回看方向优先使用实际投掷该道具的玩家，不再单纯跟随当前观战目标方向，改善 T 方烟或切视角时朝向不对的问题。
@@ -115,13 +133,11 @@ This build is intended for HLAE demo/cinematic workflows. CS2 and HLAE updates c
 - 新增统一截图风格道具参数：`X=-8`、`Y=-22`、`Z=4`、`俯仰=1`、`偏航=0`、`翻滚=0`。
 - 道具自拍面板新增 `截图风格` 按钮，一键写入这组参数。
 - 文档新增推荐使用方法：道具自拍建议先把 demo 调到 `0.1x` 倍速，再锁定道具并调节构图，最适合保持快速道具居中。
-- 人物自拍新增完整六参数 ImGui 控制：`右 / 后 / 上` 位置微调，加 `俯仰 / 偏航 / 翻滚` 角度微调。
-- 人物自拍新增标注清楚的 `右`、`后`、`上`、`俯仰`、`偏航`、`翻滚` 六条滑轨。
-- 道具自拍补齐 `X`、`Y`、`Z` 位置滑轨，道具角度 `俯仰 / 偏航 / 翻滚` 滑轨继续保留。
+- 人物自拍保留完整六参数原生控件：`右 / 后 / 上` 位置微调，加 `俯仰 / 偏航 / 翻滚` 角度微调。
+- 人物与道具位置/角度改为原生数字输入框。
 - `selfiestick.ini` 新增 `PlayerPitch`、`PlayerYaw`、`PlayerRoll` 持久化键。
 - 修复道具角度数字输入框无法输入数字、只能删除的问题。
-- 给道具相机 `俯仰 / 偏航 / 翻滚` 增加中等灵敏度滑轨。
-- 面板切换为 ImGui。
+- 控制面板在 v0.4.2 改为 Win32/GDI 伪 ImGui 绘制。
 - 保留英文 DLL，同时新增完整中文 DLL。
 - 新增 `人物自拍 / 道具自拍` 相机模式切换。
 - 道具自拍支持烟、火、雷、闪、诱饵飞行实体。

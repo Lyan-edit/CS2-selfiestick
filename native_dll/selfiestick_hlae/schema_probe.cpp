@@ -107,12 +107,11 @@ bool ShouldStartSchemaResolveAtStartup(bool setupViewHookCanInstallWithoutSchema
     return !setupViewHookCanInstallWithoutSchema;
 }
 
-bool ShouldUseSchemaInterfaceFallback(bool rawScopeFound, bool rawPayloadsCollected, bool rawOffsetsComplete) noexcept {
-    if (rawOffsetsComplete) {
-        return false;
-    }
-
-    return !(rawScopeFound && rawPayloadsCollected);
+bool ShouldUseSchemaInterfaceFallback(bool, bool, bool rawOffsetsComplete) noexcept {
+    // A readable raw payload is not necessarily a complete resolution.
+    // Current CS2 exposes inherited/duplicate field descriptors in that
+    // payload, so an incomplete raw pass must still reach exact class lookup.
+    return !rawOffsetsComplete;
 }
 
 bool BuildQualifiedClassName(const char* moduleName, const char* className, std::string& qualifiedName) {

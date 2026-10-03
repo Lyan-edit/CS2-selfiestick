@@ -53,24 +53,49 @@ bool DecodeSetUpViewPatchSite(const void* patchAddress, SetUpViewPatchSite& site
     site.patchAddress = address;
     std::memcpy(site.originalBytes.data(), patchAddress, site.originalBytes.size());
 
-    if (site.originalBytes[0] != 0x48
-        || site.originalBytes[1] != 0x8B
-        || site.originalBytes[2] != 0x0D
-        || site.originalBytes[7] != 0x48
-        || site.originalBytes[8] != 0x8B
-        || site.originalBytes[9] != 0x01
-        || site.originalBytes[10] != 0xFF
-        || site.originalBytes[11] != 0x90
-        || site.originalBytes[12] != 0x50
-        || site.originalBytes[13] != 0x01
-        || site.originalBytes[14] != 0x00
-        || site.originalBytes[15] != 0x00) {
+    const bool isEngineClientCall = site.originalBytes[0] == 0x48
+        && site.originalBytes[1] == 0x8B
+        && site.originalBytes[2] == 0x0D
+        && site.originalBytes[7] == 0x48
+        && site.originalBytes[8] == 0x8B
+        && site.originalBytes[9] == 0x01
+        && site.originalBytes[10] == 0xFF
+        && site.originalBytes[11] == 0x90
+        && site.originalBytes[12] == 0x50
+        && site.originalBytes[13] == 0x01
+        && site.originalBytes[14] == 0x00
+        && site.originalBytes[15] == 0x00;
+    const bool isHlaeTrampoline = site.originalBytes[0] == 0x48
+        && site.originalBytes[1] == 0x89
+        && site.originalBytes[2] == 0xD9
+        && site.originalBytes[3] == 0x48
+        && site.originalBytes[4] == 0xB8
+        && site.originalBytes[13] == 0xFF
+        && site.originalBytes[14] == 0x10
+        && site.originalBytes[15] == 0x90;
+
+    if (!isEngineClientCall && !isHlaeTrampoline) {
         SetError(errorMessage, "SetUpView patch site instructions changed");
         return false;
     }
 
-    const auto engineClientStorageDisplacement = *reinterpret_cast<const std::int32_t*>(site.originalBytes.data() + 3);
-    site.engineClientStorageAddress = address + 7u + static_cast<std::intptr_t>(engineClientStorageDisplacement);
+    if (isEngineClientCall) {
+        const auto engineClientStorageDisplacement = *reinterpret_cast<const std::int32_t*>(site.originalBytes.data() + 3);
+        site.engineClientStorageAddress = address + 7u + static_cast<std::intptr_t>(engineClientStorageDisplacement);
+        site.replayKind = SetUpViewReplayKind::EngineClientIsPlayingDemo;
+    }
+    else {
+        std::memcpy(
+            &site.chainedHookPointerStorageAddress,
+            site.originalBytes.data() + 5u,
+            sizeof(site.chainedHookPointerStorageAddress)
+        );
+        if (site.chainedHookPointerStorageAddress == 0u) {
+            SetError(errorMessage, "HLAE SetUpView trampoline pointer storage was null");
+            return false;
+        }
+        site.replayKind = SetUpViewReplayKind::HlaeTrampoline;
+    }
     site.returnAddress = address + kSetUpViewPatchSize;
     return true;
 }
@@ -113,13 +138,26 @@ bool BuildSetUpViewDetourStub(
 
     const std::size_t relocatedSetupOffset = outBytes.size();
     outBytes.insert(outBytes.end(), site.originalBytes.begin(), site.originalBytes.end());
-    if (!PatchRel32(
-            outBytes,
-            relocatedSetupOffset + 3u,
-            detourStubAddress + relocatedSetupOffset + 7u,
-            site.engineClientStorageAddress,
-            errorMessage,
-            "SetUpView engine client storage was out of rel32 range")) {
+    switch (site.replayKind) {
+    case SetUpViewReplayKind::EngineClientIsPlayingDemo:
+        if (!PatchRel32(
+                outBytes,
+                relocatedSetupOffset + 3u,
+                detourStubAddress + relocatedSetupOffset + 7u,
+                site.engineClientStorageAddress,
+                errorMessage,
+                "SetUpView engine client storage was out of rel32 range")) {
+            return false;
+        }
+        break;
+    case SetUpViewReplayKind::HlaeTrampoline:
+        if (site.chainedHookPointerStorageAddress == 0u) {
+            SetError(errorMessage, "HLAE SetUpView trampoline metadata was incomplete");
+            return false;
+        }
+        break;
+    default:
+        SetError(errorMessage, "SetUpView replay kind was invalid");
         return false;
     }
 
