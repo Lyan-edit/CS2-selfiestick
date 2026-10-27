@@ -52,9 +52,9 @@ $headers = @{
 }
 $apiRoot = "https://api.github.com/repos/$Repository"
 
+$release = $null
 try {
-    Invoke-RestMethod -Method Get -Uri "$apiRoot/releases/tags/$Version" -Headers $headers | Out-Null
-    throw "A GitHub Release already exists for $Version; refusing to replace it."
+    $release = Invoke-RestMethod -Method Get -Uri "$apiRoot/releases/tags/$Version" -Headers $headers
 }
 catch {
     $statusCode = $null
@@ -64,6 +64,15 @@ catch {
     if ($statusCode -ne 404) {
         throw
     }
+}
+if ($null -eq $release) {
+    # GitHub's tag endpoint omits draft releases, so search the authenticated
+    # release list before creating a new draft for the same tag.
+    $releaseList = Invoke-RestMethod -Method Get -Uri "$apiRoot/releases?per_page=100" -Headers $headers
+    $release = $releaseList | Where-Object { $_.draft -and $_.tag_name -eq $Version } | Select-Object -First 1
+}
+if ($null -ne $release -and -not $release.draft) {
+    throw "A published GitHub Release already exists for $Version; refusing to replace it."
 }
 
 $tagRef = Invoke-RestMethod -Method Get -Uri "$apiRoot/git/ref/tags/$Version" -Headers $headers
@@ -81,13 +90,21 @@ $releasePayload = @{
     prerelease = $false
     generate_release_notes = $false
 } | ConvertTo-Json -Depth 5
-$release = Invoke-RestMethod -Method Post -Uri "$apiRoot/releases" -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $releasePayload
+if ($null -eq $release) {
+    $release = Invoke-RestMethod -Method Post -Uri "$apiRoot/releases" -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $releasePayload
+}
+else {
+    Write-Host "Resuming draft release: $($release.html_url)"
+}
 
 try {
     $uploadRoot = $release.upload_url -replace '\{\?name,label\}$', ''
     $uploadedAssets = foreach ($asset in $assets) {
-        $encodedName = [Uri]::EscapeDataString($asset.Name)
-        $uploaded = Invoke-RestMethod -Method Post -Uri "$uploadRoot?name=$encodedName" -Headers $headers -ContentType 'application/octet-stream' -InFile $asset.FullName
+        $uploaded = @($release.assets | Where-Object name -EQ $asset.Name) | Select-Object -First 1
+        if ($null -eq $uploaded) {
+            $encodedName = [Uri]::EscapeDataString($asset.Name)
+            $uploaded = Invoke-RestMethod -Method Post -Uri "${uploadRoot}?name=$encodedName" -Headers $headers -ContentType 'application/octet-stream' -InFile $asset.FullName
+        }
         if ([int64]$uploaded.size -ne [int64]$asset.Length) {
             throw "Uploaded size mismatch for $($asset.Name)."
         }

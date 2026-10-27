@@ -214,14 +214,16 @@ Do not run `npm run build` during agent sessions for this repository. The native
 
 The release packager follows the same five-asset layout used by nSkinz: English DLL, Chinese DLL, bilingual Windows ZIP, complete source ZIP, and `SHA256SUMS.txt`.
 
+Use PowerShell 7 (`pwsh`) for the release scripts:
+
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.4 -Cs2Build 26144732 -HlaeVersion 2.192.10
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.4 -Cs2Build 26144732 -HlaeVersion 2.192.10
 ```
 
 After committing and pushing the matching tag, the publisher creates a draft GitHub Release, uploads all five assets through the GitHub REST API, verifies remote byte sizes and SHA-256 hashes, and only then publishes it as the latest release. Authentication is read from Git Credential Manager and is never printed.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.4
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.4
 ```
 
 ## Repository Layout
