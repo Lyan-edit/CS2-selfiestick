@@ -664,7 +664,7 @@ int main() {
         { "C_BasePlayerPawn", "m_pObserverServices", 0x1308 },
         { "C_BasePlayerPawn", "m_pCameraServices", 0x1328 },
         { "C_BasePlayerPawn", "m_hController", 0x14BC },
-        { "C_CSPlayerPawn", "m_angEyeAngles", 0x35F0 },
+        { "C_CSPlayerPawn", "m_angEyeAngles", 0x3600 },
         { "C_BaseEntity", "m_vecVelocity", 0x430 },
         { "C_BaseGrenade", "m_hThrower", 0x1290 },
         { "C_BaseGrenade", "m_hOriginalThrower", 0x12AC },

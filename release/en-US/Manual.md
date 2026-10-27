@@ -16,15 +16,15 @@ The DLL is built with the MSVC runtime statically linked. You do not need to ins
 
 This package is marked for:
 
-- HLAE: `2.192.6`
-- Counter-Strike 2: Steam app `730`, buildid `25687242`
+- HLAE: `2.192.10` (AfxHookSource2 `0.41.9`)
+- Counter-Strike 2: Steam app `730`, buildid `26144732`
 
 Use it for HLAE demo/cinematic workflows only.
 
 ## Load The DLL
 
 1. Copy the `en-US` folder to a stable location.
-2. Start HLAE `2.192.6`, launch CS2, and open a demo in spectator mode.
+2. Start HLAE `2.192.10`, launch CS2, and open a demo in spectator mode.
 3. Run this in the HLAE console:
 
 ```cfg
@@ -41,11 +41,11 @@ If loading succeeds, the console prints a selfiestick ready message. Press `Ins`
 
 If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`.
 
-Current release DLLs also avoid heavy startup schema resolving and no longer install the SetUpView camera hotpatch during `mirv_loadlibrary`. The hotpatch is installed only when you press `F8` or click Enable. If HLAE 2.192.6 already patched the same site, the DLL chains HLAE's trampoline first and then runs the Selfiestick callback. If the current CS2 build is incompatible, the DLL stays loaded and shows a Runtime reason instead of taking the demo process down. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
+Current release DLLs also avoid heavy startup schema resolving and no longer install the SetUpView camera hotpatch during `mirv_loadlibrary`. The hotpatch is installed only when you press `F8` or click Enable. If HLAE 2.192.10 / AfxHookSource2 0.41.9 already patched the same site, the DLL chains HLAE's trampoline first and then runs the Selfiestick callback. If the current CS2 build is incompatible, the DLL stays loaded and shows a Runtime reason instead of taking the demo process down. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 
-The current v0.4.3 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.3, then inspect the remaining graphics injectors independently.
+The current v0.4.4 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.4, then inspect the remaining graphics injectors independently.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 

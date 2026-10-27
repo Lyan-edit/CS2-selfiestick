@@ -182,7 +182,7 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
         target = 0x14BC;
     }
     else if (matches("C_CSPlayerPawn", "m_angEyeAngles")) {
-        target = 0x35F0;
+        target = 0x3600;
     }
     else if (matches("CPlayer_ObserverServices", "m_iObserverMode")) {
         target = 0x48;

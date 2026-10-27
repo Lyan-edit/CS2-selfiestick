@@ -41,10 +41,10 @@ constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
 constexpr char kBuildTag[] = __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v26-cs2-25687242";
-constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AC02468u;
-constexpr std::uint32_t kSupportedClientSizeOfImage = 0x02998000u;
-constexpr std::uint32_t kSupportedClientChecksum = 0x0255ED38u;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v27-cs2-26144732";
+constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6ADA7340u;
+constexpr std::uint32_t kSupportedClientSizeOfImage = 0x029A0000u;
+constexpr std::uint32_t kSupportedClientChecksum = 0x02572520u;
 
 constexpr char kAnchorAttachmentName[] = "weapon_hand_r";
 constexpr char kGunSideAttachmentName[] = "weapon_hand_l";
