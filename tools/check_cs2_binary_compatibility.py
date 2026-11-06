@@ -93,6 +93,69 @@ def parse_hex_constant(source: str, name: str) -> int:
     return int(match.group(1), 16)
 
 
+def check_static_schema(image: PeImage, source_path: Path, failures: list[str]) -> None:
+    """Read PE-resident class/field tables without loading the DLL or invoking schema APIs."""
+    data = image.data
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    image_base = struct.unpack_from("<Q", data, pe + 24 + 24)[0]
+
+    def raw_pointer(pointer: int) -> int:
+        rva = pointer - image_base
+        for section in image.sections:
+            if section.virtual_address <= rva < section.virtual_address + section.raw_size:
+                return section.raw_offset + rva - section.virtual_address
+        raise ValueError("pointer outside file-backed sections")
+
+    def string_pointer(pointer: int) -> str:
+        offset = raw_pointer(pointer)
+        end = data.find(b"\0", offset, offset + 512)
+        if end < 0:
+            raise ValueError("unterminated schema name")
+        return data[offset:end].decode("ascii")
+
+    source = source_path.read_text(encoding="utf-8")
+    expected_fields = re.findall(
+        r'matches\("([^"]+)", "([^"]+)"\)\)\s*\{\s*target = (0x[0-9A-Fa-f]+);', source
+    )
+    if not expected_fields:
+        failures.append("no build-gated schema fields found in source")
+        return
+    for class_name, field_name, expected in expected_fields:
+        candidates: set[int] = set()
+        cursor = 0
+        name = class_name.encode("ascii") + b"\0"
+        while (name_offset := data.find(name, cursor)) >= 0:
+            cursor = name_offset + len(name)
+            try:
+                pointer = struct.pack("<Q", image_base + image.raw_to_rva(name_offset))
+            except ValueError:
+                continue
+            reference_cursor = 0
+            while (reference := data.find(pointer, reference_cursor)) >= 0:
+                reference_cursor = reference + 8
+                class_start = reference - 8
+                try:
+                    count = struct.unpack_from("<H", data, class_start + 0x24)[0]
+                    if not 0 < count < 4096:
+                        continue
+                    fields = raw_pointer(struct.unpack_from("<Q", data, class_start + 0x30)[0])
+                    entries = []
+                    for index in range(count):
+                        entry = fields + index * 0x20
+                        entry_name = string_pointer(struct.unpack_from("<Q", data, entry)[0])
+                        if not entry_name or not all(32 <= ord(char) < 127 for char in entry_name):
+                            raise ValueError("invalid field name")
+                        entries.append((entry_name, struct.unpack_from("<I", data, entry + 0x10)[0]))
+                    candidates.update(offset for name, offset in entries if name == field_name)
+                except (ValueError, struct.error, UnicodeDecodeError):
+                    continue
+        wanted = int(expected, 16)
+        found = ",".join(f"0x{value:X}" for value in sorted(candidates)) or "none"
+        print(f"schema {class_name}::{field_name}: expected={expected} file={found}")
+        if candidates != {wanted}:
+            failures.append(f"static schema mismatch or ambiguity: {class_name}::{field_name}")
+
+
 def find_pattern(data: bytes, pattern: tuple[int | None, ...], limit: int = 3) -> list[int]:
     matches: list[int] = []
     concrete = next((index for index, value in enumerate(pattern) if value is not None), None)
@@ -205,6 +268,8 @@ def main() -> int:
         rbx_angles_access = b"\x4C\x8D\x83\xB8\x04\x00\x00"
         if rbx_origin_access not in setup_context or rbx_angles_access not in setup_context:
             failures.append("SetUpView context no longer proves CViewSetup origin/angles at [RBX+0x4A0/0x4B8]")
+
+    check_static_schema(client, args.source.with_name("schema_probe.cpp"), failures)
 
     if failures:
         for failure in failures:

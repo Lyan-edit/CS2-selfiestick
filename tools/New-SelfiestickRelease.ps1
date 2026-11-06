@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.4',
-    [string]$Cs2Build = '26144732',
+    [string]$Version = 'v0.4.5beta',
+    [string]$Cs2Build = '26445667',
     [string]$HlaeVersion = '2.192.10'
 )
 
@@ -10,7 +10,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $outputRoot = Join-Path $repoRoot (Join-Path 'dist' $Version)
 $stageRoot = Join-Path $outputRoot '_stage'
 
-if ($Version -notmatch '^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+if ($Version -notmatch '^v\d+\.\d+\.\d+(?:beta\d*|[-+][0-9A-Za-z.-]+)?$') {
     throw "Invalid release version: $Version"
 }
 if ($Cs2Build -notmatch '^\d+$') {
@@ -38,16 +38,16 @@ $chineseAsset = Join-Path $outputRoot "Lyan_selfiestick-$Version-zh-CN.dll"
 $binaryZip = Join-Path $outputRoot "Lyan_selfiestick-$Version-CS2-$Cs2Build-HLAE-$HlaeVersion-windows-x64.zip"
 $sourceZip = Join-Path $outputRoot "Lyan_selfiestick-$Version-source.zip"
 $checksumFile = Join-Path $outputRoot 'SHA256SUMS.txt'
+$defaultSettings = Join-Path $repoRoot 'release\defaults\selfiestick.ini'
 
 foreach ($requiredFile in @(
     $englishSource,
     $chineseSource,
     (Join-Path $repoRoot 'release\en-US\Manual.md'),
     (Join-Path $repoRoot 'release\en-US\selfiestick_bind.cfg'),
-    (Join-Path $repoRoot 'release\en-US\selfiestick.ini'),
+    $defaultSettings,
     (Join-Path (Join-Path $repoRoot 'release\zh-CN') $chineseManualName),
     (Join-Path $repoRoot 'release\zh-CN\selfiestick_bind.cfg'),
-    (Join-Path $repoRoot 'release\zh-CN\selfiestick.ini'),
     (Join-Path $repoRoot 'release\RELEASE_NOTES.md')
 )) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
@@ -65,11 +65,11 @@ New-Item -ItemType Directory -Path $packageEnglish, $packageChinese -Force | Out
 Copy-Item -LiteralPath $englishSource -Destination (Join-Path $packageEnglish "Lyan's selfiestick.dll")
 Copy-Item -LiteralPath (Join-Path $repoRoot 'release\en-US\Manual.md') -Destination $packageEnglish
 Copy-Item -LiteralPath (Join-Path $repoRoot 'release\en-US\selfiestick_bind.cfg') -Destination $packageEnglish
-Copy-Item -LiteralPath (Join-Path $repoRoot 'release\en-US\selfiestick.ini') -Destination $packageEnglish
+Copy-Item -LiteralPath $defaultSettings -Destination $packageEnglish
 Copy-Item -LiteralPath $chineseSource -Destination (Join-Path $packageChinese $chineseDllName)
 Copy-Item -LiteralPath (Join-Path (Join-Path $repoRoot 'release\zh-CN') $chineseManualName) -Destination $packageChinese
 Copy-Item -LiteralPath (Join-Path $repoRoot 'release\zh-CN\selfiestick_bind.cfg') -Destination $packageChinese
-Copy-Item -LiteralPath (Join-Path $repoRoot 'release\zh-CN\selfiestick.ini') -Destination $packageChinese
+Copy-Item -LiteralPath $defaultSettings -Destination $packageChinese
 Copy-Item -LiteralPath (Join-Path $repoRoot 'release\RELEASE_NOTES.md') -Destination $packageRoot
 Compress-Archive -LiteralPath $packageRoot -DestinationPath $binaryZip -CompressionLevel Optimal
 

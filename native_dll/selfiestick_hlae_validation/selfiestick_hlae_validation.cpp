@@ -50,6 +50,7 @@ int main() {
     using selfiestick::compat::ShouldAutoLockSinglePropCandidate;
     using selfiestick::compat::ShouldKeepManualPropLock;
     using selfiestick::compat::ShouldUseActualThrowerDirection;
+    using selfiestick::compat::ShouldUsePropPostFlightHold;
     using selfiestick::compat::ShouldUseSmokePostFlightHold;
     using selfiestick::compat::IsUsableProjectileVelocity;
     using selfiestick::compat::DidProjectileBounce;
@@ -57,6 +58,7 @@ int main() {
     using selfiestick::compat::TrySelectTrustedProjectileSceneOrigin;
     using selfiestick::compat::TrySelectDynamicProjectileOrigin;
     using selfiestick::compat::TryBuildPropCenteredViewDirection;
+    using selfiestick::compat::TryBuildPropLaunchLookbackDirection;
     using selfiestick::compat::TrySelectLockedProjectileOrigin;
     using selfiestick::compat::TrySelectMovingProjectileOrigin;
     using selfiestick::compat::MoveTowards;
@@ -73,6 +75,8 @@ int main() {
     using selfiestick::schema::ShouldStartSchemaResolveAtStartup;
     using selfiestick::schema::ShouldWaitForStartupSchemaResolve;
     using selfiestick::schema::ShouldUseSchemaInterfaceFallback;
+    using selfiestick::schema::DetermineRuntimeSchemaResolveStrategy;
+    using selfiestick::schema::RuntimeSchemaResolveStrategy;
     using selfiestick::schema::BuildQualifiedClassName;
     using selfiestick::schema::BuildSchemaClassLookupCandidates;
     using selfiestick::schema::TryGetKnownClientSchemaFieldOffsetFallback;
@@ -209,6 +213,22 @@ int main() {
         return ReportFailure("live smoke projectiles should not be treated as post-flight hold frames");
     }
 
+    if (!ShouldUsePropPostFlightHold(PropProjectileKind::Flash, false, 0.30, 1.2, 0.45)) {
+        return ReportFailure("short-lived projectile should use the generic post-flight hold");
+    }
+
+    if (ShouldUsePropPostFlightHold(PropProjectileKind::Flash, false, 0.50, 1.2, 0.45)) {
+        return ReportFailure("short-lived projectile hold should expire after the configured duration");
+    }
+
+    if (!ShouldUsePropPostFlightHold(PropProjectileKind::Smoke, false, 1.0, 1.2, 0.45)) {
+        return ReportFailure("smoke projectile should retain the longer post-flight hold");
+    }
+
+    if (ShouldUsePropPostFlightHold(PropProjectileKind::Unknown, false, 0.1, 1.2, 0.45)) {
+        return ReportFailure("unknown projectile must not use post-flight hold");
+    }
+
     if (!IsUsableProjectileVelocity({ 1500.0f, -20.0f, 400.0f }, 100000.0f)) {
         return ReportFailure("finite in-range projectile velocity should be accepted");
     }
@@ -226,10 +246,10 @@ int main() {
     }
 
     const auto propImageStylePreset = GetImageStylePropCameraPreset();
-    if (propImageStylePreset.offset.x != -8.0f
-        || propImageStylePreset.offset.y != -22.0f
-        || propImageStylePreset.offset.z != 4.0f
-        || propImageStylePreset.rotation.x != 1.0f
+    if (propImageStylePreset.offset.x != 0.0f
+        || propImageStylePreset.offset.y != -13.5f
+        || propImageStylePreset.offset.z != 2.25f
+        || propImageStylePreset.rotation.x != 0.0f
         || propImageStylePreset.rotation.y != 0.0f
         || propImageStylePreset.rotation.z != 0.0f) {
         return ReportFailure("image-style prop camera preset should match the shared screenshot framing values");
@@ -400,6 +420,38 @@ int main() {
         return ReportFailure("player selfie angle trim should add independent local pitch/yaw/roll trim");
     }
 
+    // Exercise the production selfie composition in both world orientations,
+    // with mirrored sides, old positive Back trims and a behind-body anchor.
+    for (int axis = 0; axis < 2; ++axis) {
+        for (float side : {-5.0f, 5.0f}) {
+            for (float back : {-19.0f, 48.0f}) {
+                for (float anchorDistance : {24.0f, -40.0f}) {
+                    const CameraVector forward = axis == 0 ? CameraVector{1, 0, 0} : CameraVector{0, 1, 0};
+                    const CameraVector right = axis == 0 ? CameraVector{0, -1, 0} : CameraVector{1, 0, 0};
+                    const CameraVector anchor{100 + forward.x * anchorDistance, 200 + forward.y * anchorDistance, 62};
+                    CameraVector position{}, direction{};
+                    if (!selfiestick::compat::TryBuildPlayerSelfiePose(anchor, {100, 200, 64},
+                            forward, right, {0, 0, 1}, {side, back, 3.25f}, position, direction)) {
+                        return ReportFailure("player selfie composition must produce a valid pose");
+                    }
+                    const float front = (position.x - 100) * forward.x + (position.y - 200) * forward.y;
+                    const float facing = direction.x * forward.x + direction.y * forward.y;
+                    const CameraVector toTarget{100 - position.x, 200 - position.y, 64 - position.z};
+                    const float crossX = toTarget.y * direction.z - toTarget.z * direction.y;
+                    const float crossY = toTarget.z * direction.x - toTarget.x * direction.z;
+                    const float crossZ = toTarget.x * direction.y - toTarget.y * direction.x;
+                    if (front < 7.999f || facing >= 0 || crossX * crossX + crossY * crossY + crossZ * crossZ > 0.0001f) {
+                        return ReportFailure("player selfie must stay in front and center the agent on its optical axis");
+                    }
+                }
+            }
+        }
+    }
+    CameraVector invalidPosition{}, invalidDirection{};
+    if (selfiestick::compat::TryBuildPlayerSelfiePose({}, {}, {}, {1, 0, 0}, {0, 0, 1}, {}, invalidPosition, invalidDirection)) {
+        return ReportFailure("player selfie must reject a degenerate forward axis");
+    }
+
     CameraVector propCenteredDirection{};
     if (!TryBuildPropCenteredViewDirection({ 0.0f, -18.0f, 6.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, propCenteredDirection)) {
         return ReportFailure("prop centered camera direction should point from camera to projectile center");
@@ -413,6 +465,29 @@ int main() {
     }
     if (propCenteredDirection.x != 0.0f || propCenteredDirection.y != 1.0f || propCenteredDirection.z != 0.0f) {
         return ReportFailure("prop centered camera direction should normalize the fallback direction");
+    }
+
+    CameraVector propLaunchLookback{};
+    if (!TryBuildPropLaunchLookbackDirection(
+            { 100.0f, 0.0f, 100.0f },
+            { 20.0f, 0.0f, 20.0f },
+            { 0.0f, 0.0f, 0.0f },
+            propLaunchLookback)) {
+        return ReportFailure("prop launch lookback should resolve from the initial projectile velocity");
+    }
+    if (propLaunchLookback.x > -0.99f || std::fabs(propLaunchLookback.z) > 0.001f || std::fabs(propLaunchLookback.y) > 0.001f) {
+        return ReportFailure("prop launch lookback should preserve release yaw while keeping a level cinematic horizon");
+    }
+
+    if (!TryBuildPropLaunchLookbackDirection(
+            { 0.0f, 0.0f, 0.0f },
+            { 20.0f, 0.0f, 0.0f },
+            { 0.0f, 0.0f, 0.0f },
+            propLaunchLookback)
+        || propLaunchLookback.x > -0.99f
+        || std::fabs(propLaunchLookback.y) > 0.001f
+        || std::fabs(propLaunchLookback.z) > 0.001f) {
+        return ReportFailure("prop launch lookback should fall back to the release-to-thrower axis");
     }
 
     if (!ShouldUseObserverPawnAsFollowTarget(ClientEntityKind::PlayerPawn, false, true, true)) {
@@ -501,10 +576,10 @@ int main() {
 
     const CameraOffset originalCameraOffset{ 1.0f, 2.0f, 3.0f };
     const CameraOffset leftSelfieCameraOffset = ApplyLeftSelfieCameraOffsetAdjustment(originalCameraOffset, true);
-    if (leftSelfieCameraOffset.right != 16.0f
-        || leftSelfieCameraOffset.back != 12.0f
+    if (leftSelfieCameraOffset.right != 1.0f
+        || leftSelfieCameraOffset.back != 2.0f
         || leftSelfieCameraOffset.up != 3.0f) {
-        return ReportFailure("left selfie offset adjustment should add R +15 and B +10 while preserving U");
+        return ReportFailure("left selfie offset adjustment should preserve symmetric muzzle framing");
     }
 
     const CameraOffset unchangedCameraOffset = ApplyLeftSelfieCameraOffsetAdjustment(originalCameraOffset, false);
@@ -659,15 +734,27 @@ int main() {
         const char* fieldName;
         std::ptrdiff_t offset;
     };
-    constexpr std::array<ExpectedSchemaFallback, 9> currentPlayerAndPropFallbacks{ {
+    constexpr std::array<ExpectedSchemaFallback, 21> currentPlayerAndPropFallbacks{ {
+        { "CEntityInstance", "m_pEntity", 0x10 },
+        { "CBasePlayerController", "m_hPawn", 0x6BC },
         { "CCSPlayerController", "m_hPlayerPawn", 0x92C },
+        { "C_BasePlayerPawn", "m_pWeaponServices", 0x12F0 },
         { "C_BasePlayerPawn", "m_pObserverServices", 0x1308 },
         { "C_BasePlayerPawn", "m_pCameraServices", 0x1328 },
         { "C_BasePlayerPawn", "m_hController", 0x14BC },
         { "C_CSPlayerPawn", "m_angEyeAngles", 0x3600 },
+        { "CPlayer_ObserverServices", "m_iObserverMode", 0x48 },
+        { "CPlayer_ObserverServices", "m_hObserverTarget", 0x4C },
+        { "CPlayer_CameraServices", "m_hViewEntity", 0xA4 },
+        { "CPlayer_WeaponServices", "m_hActiveWeapon", 0x60 },
+        { "C_BaseEntity", "m_pGameSceneNode", 0x330 },
+        { "C_BaseEntity", "m_hOwnerEntity", 0x520 },
         { "C_BaseEntity", "m_vecVelocity", 0x430 },
+        { "C_BaseEntity", "m_bRenderWithViewModels", 0x56A },
+        { "CGameSceneNode", "m_vecAbsOrigin", 0xC8 },
         { "C_BaseGrenade", "m_hThrower", 0x1290 },
         { "C_BaseGrenade", "m_hOriginalThrower", 0x12AC },
+        { "C_BaseCSGrenadeProjectile", "m_vInitialVelocity", 0x12BC },
         { "C_BaseCSGrenadeProjectile", "m_nBounces", 0x12C8 }
     } };
     for (const auto& expected : currentPlayerAndPropFallbacks) {
@@ -780,16 +867,24 @@ int main() {
         return ReportFailure("startup should launch schema resolve when hook installation still requires schema");
     }
 
-    if (!ShouldUseSchemaInterfaceFallback(true, true, false)) {
-        return ReportFailure("schema interface fallback should run after raw schema payloads are found but incomplete");
+    if (ShouldUseSchemaInterfaceFallback(true, true, false)) {
+        return ReportFailure("schema interface fallback must stay disabled after incomplete raw payloads");
     }
 
-    if (!ShouldUseSchemaInterfaceFallback(false, false, false)) {
-        return ReportFailure("schema interface fallback should remain available when raw schema cannot be inspected");
+    if (ShouldUseSchemaInterfaceFallback(false, false, false)) {
+        return ReportFailure("schema interface fallback must stay disabled when raw schema cannot be inspected");
     }
 
     if (ShouldUseSchemaInterfaceFallback(true, true, true)) {
         return ReportFailure("schema interface fallback should remain disabled after a complete raw schema resolution");
+    }
+
+    if (DetermineRuntimeSchemaResolveStrategy(true) != RuntimeSchemaResolveStrategy::KnownClientOffsets) {
+        return ReportFailure("exact client builds should use only the build-gated schema offset table");
+    }
+
+    if (DetermineRuntimeSchemaResolveStrategy(false) != RuntimeSchemaResolveStrategy::Reject) {
+        return ReportFailure("unknown client builds should reject schema resolution instead of probing runtime vtables");
     }
 
     const auto rawScanLayout = GetSchemaRawScanLayout();

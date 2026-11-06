@@ -33,6 +33,11 @@ struct GenericRawFieldArrayLayoutCandidate {
     std::size_t fieldOffsetOffset{};
 };
 
+enum class RuntimeSchemaResolveStrategy {
+    Reject,
+    KnownClientOffsets
+};
+
 std::uint32_t DetermineDeclaredClassScanLimit(std::uint32_t rawCount) noexcept;
 std::size_t DetermineTypeScopeLookupProbeSlotLimit() noexcept;
 const char* DetermineExpectedProbeField(const char* className) noexcept;
@@ -47,6 +52,7 @@ bool ShouldStartBackgroundSchemaResolve(
 bool ShouldWaitForStartupSchemaResolve(bool setupViewHookCanInstallWithoutSchema) noexcept;
 bool ShouldStartSchemaResolveAtStartup(bool setupViewHookCanInstallWithoutSchema) noexcept;
 bool ShouldUseSchemaInterfaceFallback(bool rawScopeFound, bool rawPayloadsCollected, bool rawOffsetsComplete) noexcept;
+RuntimeSchemaResolveStrategy DetermineRuntimeSchemaResolveStrategy(bool exactClientBuild) noexcept;
 bool BuildQualifiedClassName(const char* moduleName, const char* className, std::string& qualifiedName);
 std::size_t BuildSchemaClassLookupCandidates(
     const char* moduleName,

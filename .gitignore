@@ -1,5 +1,7 @@
 bin/
 dist/
+_refs/
+__pycache__/
 
 bin_temp/
 *.zip
@@ -28,4 +30,5 @@ worktrees/
 
 native_dll/**/intermediate/
 release/**/selfiestick.ini
+!release/defaults/selfiestick.ini
 release/**/selfiestick_trace.log

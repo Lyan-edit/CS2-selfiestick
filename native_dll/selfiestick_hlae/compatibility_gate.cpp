@@ -5,8 +5,10 @@
 namespace selfiestick::compat {
 namespace {
 
-constexpr float kLeftSelfieAdditionalRightOffset = 15.0f;
-constexpr float kLeftSelfieAdditionalBackOffset = 10.0f;
+// Left and right selfie modes mirror around the muzzle anchor. Extra offsets on
+// only one side made the left view noticeably farther away than the right.
+constexpr float kLeftSelfieAdditionalRightOffset = 0.0f;
+constexpr float kLeftSelfieAdditionalBackOffset = 0.0f;
 
 int ProjectileSceneOriginOffsetPriority(std::ptrdiff_t offset) noexcept {
     switch (offset) {
@@ -225,6 +227,27 @@ bool ShouldUseSmokePostFlightHold(
         && secondsSinceLastLive <= holdSeconds;
 }
 
+bool ShouldUsePropPostFlightHold(
+    PropProjectileKind kind,
+    bool projectileEntityStillValid,
+    double secondsSinceLastLive,
+    double smokeHoldSeconds,
+    double shortPropHoldSeconds
+) noexcept {
+    if (kind == PropProjectileKind::Unknown || projectileEntityStillValid) {
+        return false;
+    }
+
+    const double holdSeconds = kind == PropProjectileKind::Smoke
+        ? smokeHoldSeconds
+        : shortPropHoldSeconds;
+    return std::isfinite(secondsSinceLastLive)
+        && std::isfinite(holdSeconds)
+        && secondsSinceLastLive >= 0.0
+        && holdSeconds > 0.0
+        && secondsSinceLastLive <= holdSeconds;
+}
+
 bool ShouldUseActualThrowerDirection(
     bool actualThrowerResolved,
     bool currentTargetResolved
@@ -259,8 +282,8 @@ bool DidProjectileBounce(
 
 PropCameraPreset GetImageStylePropCameraPreset() noexcept {
     return PropCameraPreset{
-        CameraVector{ -8.0f, -22.0f, 4.0f },
-        CameraVector{ 1.0f, 0.0f, 0.0f }
+        CameraVector{ 0.0f, -13.5f, 2.25f },
+        CameraVector{ 0.0f, 0.0f, 0.0f }
     };
 }
 
@@ -399,6 +422,47 @@ CameraVector ApplyPlayerSelfieAngleTrim(CameraVector baseAngles, CameraVector pl
     return ApplyAngleTrim(baseAngles, playerRotation);
 }
 
+bool TryBuildPlayerSelfiePose(
+    CameraVector anchor, CameraVector target,
+    CameraVector forward, CameraVector right, CameraVector up,
+    CameraOffset offset, CameraVector& position, CameraVector& direction
+) noexcept {
+    if (!std::isfinite(offset.right) || !std::isfinite(offset.back) || !std::isfinite(offset.up)
+        || !TryNormalizeCameraVector(forward, forward)
+        || !TryNormalizeCameraVector(right, right)
+        || !TryNormalizeCameraVector(up, up)) {
+        return false;
+    }
+
+    // Position and aim are independent: a local weapon-frame offset places the
+    // carrier, then the upper-body target defines the optical axis. Require a
+    // front-side margin relative to the agent as well as the weapon anchor;
+    // a stale/behind-body attachment must never turn selfie into a forward shot.
+    constexpr float minimumFrontDistance = 8.0f;
+    const float front = std::fmax(minimumFrontDistance, -offset.back);
+    CameraVector result{
+        anchor.x + right.x * offset.right + forward.x * front + up.x * offset.up,
+        anchor.y + right.y * offset.right + forward.y * front + up.y * offset.up,
+        anchor.z + right.z * offset.right + forward.z * front + up.z * offset.up
+    };
+    const float separation = (result.x - target.x) * forward.x
+        + (result.y - target.y) * forward.y + (result.z - target.z) * forward.z;
+    if (!std::isfinite(separation)) {
+        return false;
+    }
+    const float correction = std::fmax(0.0f, minimumFrontDistance - separation);
+    result.x += forward.x * correction;
+    result.y += forward.y * correction;
+    result.z += forward.z * correction;
+    CameraVector aim{};
+    if (!TryNormalizeCameraVector({target.x - result.x, target.y - result.y, target.z - result.z}, aim)) {
+        return false;
+    }
+    position = result;
+    direction = aim;
+    return true;
+}
+
 bool TryBuildPropCenteredViewDirection(
     CameraVector cameraPosition,
     CameraVector propOrigin,
@@ -415,6 +479,35 @@ bool TryBuildPropCenteredViewDirection(
     }
 
     return TryNormalizeCameraVector(fallbackDirection, direction);
+}
+
+bool TryBuildPropLaunchLookbackDirection(
+    CameraVector initialVelocity,
+    CameraVector propOrigin,
+    CameraVector throwerOrigin,
+    CameraVector& direction
+) noexcept {
+    // Keep the cinematic horizon level. The launch yaw defines which way the
+    // camera looks back, while explicit Z/Pitch controls framing. Using the
+    // full ballistic pitch put the carrier far above/below the grenade and
+    // produced a visibly wrong view on ordinary lob throws.
+    initialVelocity.z = 0.0f;
+    CameraVector launchDirection{};
+    if (TryNormalizeCameraVector(initialVelocity, launchDirection)) {
+        direction = CameraVector{
+            -launchDirection.x,
+            -launchDirection.y,
+            -launchDirection.z
+        };
+        return true;
+    }
+
+    const CameraVector toThrower{
+        throwerOrigin.x - propOrigin.x,
+        throwerOrigin.y - propOrigin.y,
+        0.0f
+    };
+    return TryNormalizeCameraVector(toThrower, direction);
 }
 
 bool TrySelectNearestPlausibleVector(

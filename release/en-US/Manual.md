@@ -17,7 +17,7 @@ The DLL is built with the MSVC runtime statically linked. You do not need to ins
 This package is marked for:
 
 - HLAE: `2.192.10` (AfxHookSource2 `0.41.9`)
-- Counter-Strike 2: Steam app `730`, buildid `26144732`
+- Counter-Strike 2: Steam app `730`, buildid `26445667`
 
 Use it for HLAE demo/cinematic workflows only.
 
@@ -37,7 +37,7 @@ Example:
 mirv_loadlibrary "D:\tools\selfiestick\en-US\Lyan's selfiestick.dll"
 ```
 
-If loading succeeds, the console prints a selfiestick ready message. Press `Ins` to open the Win32/GDI pseudo-ImGui panel. It creates no D3D11 device or DXGI swap chain and makes no Present call, so it can coexist with ReShade injection.
+If loading succeeds, the console prints a selfiestick ready message. Press `Ins` to open the genuine Dear ImGui panel. Its custom CPU/GDI software renderer creates no D3D11 device, DXGI swap chain, OpenGL context, or Present call, so it can coexist with ReShade injection. Every frame is composed off-screen before display, preventing slider trail/smear artifacts.
 
 If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`.
 
@@ -45,7 +45,7 @@ Current release DLLs also avoid heavy startup schema resolving and no longer ins
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 
-The current v0.4.4 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.4, then inspect the remaining graphics injectors independently.
+The current v0.4.5beta DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.5beta, then inspect the remaining graphics injectors independently.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
@@ -54,6 +54,8 @@ demo_timescale 0.1
 ```
 
 ## Hotkeys
+
+The panel uses upstream Dear ImGui Dark styling. All twelve position/rotation parameters have standard sliders and numeric inputs with 0.25-step buttons. Runtime uses a standard collapsing header. The default player selfie aims from the weapon front toward the agent's upper-body center; use CENTERED PLAYER SELFIE to clear trim. Fully restart HLAE/CS2 after replacing a DLL that was already loaded.
 
 - `Ins`: show / hide the panel by default
 - `F8`: enable / disable Selfiestick
@@ -70,14 +72,15 @@ Controls:
 
 - `Selfie Left`: selfie composition from the target's left side
 - `Selfie Right`: selfie composition from the target's right side
-- `Forward`: forward-facing camera mode
+- `Over Shoulder`: right-shoulder forward view with the agent in the left foreground
+- `Apply Over-Shoulder Preset`: selects Player Selfie, clears extra trim, and applies the shoulder framing
 - `Follow`: use the current spectator target
 - `Lock Current`: lock the current target agent
 - `Clear`: clear target lock
-- `Player R / B / U`: Right / Back / Up local camera trim through native numeric fields
-- `Player Pitch / Yaw / Roll`: local angle trim through native numeric fields
+- `Player R / B / U`: Right / Back / Up local camera trim through native numeric fields and 0.25-step sliders
+- `Player Pitch / Yaw / Roll`: local angle trim through native numeric fields and sliders
 
-Player angle trim is applied after the normal Selfie Left, Selfie Right, or Forward view is calculated.
+The normal selfie view is placed in front of the gun muzzle or knife and looks back at the agent's centered upper body. Left and right are symmetric, and the old cross-frame aim bias is removed. `CENTERED PLAYER SELFIE` restores this composition and clears old trim. `FramingVersion=5` also migrates pre-v5 Player trim once, and the selfie camera cannot cross behind the agent into a forward view. Player angle trim is applied after Selfie Left, Selfie Right, or Over Shoulder is calculated.
 
 ## Prop Selfie
 
@@ -100,16 +103,18 @@ Behavior:
 - If there is exactly one valid flying projectile and no prop lock, it auto-locks.
 - If multiple valid projectiles exist, choose one manually from Recent Props with `LOCK`.
 - `CLEAR PROP` clears the current prop lock.
-- The camera direction prefers the actual projectile thrower, so look-back direction stays correct even if the spectator target changes.
-- Smoke projectile shots keep a short post-flight hold after the flying smoke entity disappears. Other projectile types end normally when the flying entity ends.
+- The camera caches the inverse horizontal launch yaw, keeping the cinematic horizon level instead of following the grenade's steep ballistic pitch or drifting toward the thrower's later position.
+- Unlocked discovery checks the newest entity tail at roughly 30 Hz so short-lived projectiles can be captured before a full scan finishes.
+- Flash, HE, fire, and decoy shots keep the last valid pose for 0.45 seconds after the flying entity disappears. Smoke keeps a longer 1.2-second hold.
+- The camera carrier uses smoothed prediction, but its view direction always targets the projectile's current raw origin. This keeps the prop centered even when its predicted carrier leads the rendered entity.
 - Tracking combines the projectile's schema velocity direction with its observed movement rate, so slow motion and normal playback use the correct prediction speed. It stops extrapolating when playback pauses and resets prediction when the bounce counter changes; the guarded measured-motion fallback remains active if either field is unavailable.
 - Projectile discovery is split into bounded batches, while the locked projectile's position uses the direct scene-node origin path on the supported build to avoid a full dynamic-origin search on every camera callback.
 
 Prop controls:
 
-- `Prop X / Y / Z`: local prop camera offset through native numeric fields
-- `Pitch / Yaw / Roll`: angle trim through native numeric fields
-- `IMAGE STYLE`: writes the shared screenshot-style prop preset: `X=-8`, `Y=-22`, `Z=4`, `Pitch=1`, `Yaw=0`, `Roll=0`
+- `Prop X / Y / Z`: local prop camera offset through native numeric fields and 0.25-step sliders
+- `Pitch / Yaw / Roll`: angle trim through native numeric fields and sliders
+- `CENTERED LOOKBACK PRESET`: places the camera directly on the outgoing trajectory axis: `X=0`, `Y=-13.5`, `Z=2.25`, `Pitch=0`, `Yaw=0`, `Roll=0`
 - `Recent Props`: candidate list with validity, handle, thrower handle, age, type, and lock state
 
 ## Failure States

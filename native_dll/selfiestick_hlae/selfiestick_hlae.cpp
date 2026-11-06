@@ -27,8 +27,13 @@
 #include <vector>
 
 #include "compatibility_gate.h"
+#include "imgui_impl_gdi_software.h"
 #include "schema_probe.h"
 #include "setup_view_hook.h"
+#include "../third_party/imgui/imgui.h"
+#include "../third_party/imgui/backends/imgui_impl_win32.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
 #pragma comment(lib, "Comctl32.lib")
 
@@ -40,11 +45,11 @@ constexpr wchar_t kTier0ModuleName[] = L"tier0.dll";
 constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
-constexpr char kBuildTag[] = __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v27-cs2-26144732";
-constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6ADA7340u;
-constexpr std::uint32_t kSupportedClientSizeOfImage = 0x029A0000u;
-constexpr std::uint32_t kSupportedClientChecksum = 0x02572520u;
+constexpr char kBuildTag[] = "v0.4.5beta " __DATE__ " " __TIME__;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v35-cs2-26445667";
+constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AEBC4DAu;
+constexpr std::uint32_t kSupportedClientSizeOfImage = 0x029A3000u;
+constexpr std::uint32_t kSupportedClientChecksum = 0x0256CDA1u;
 
 constexpr char kAnchorAttachmentName[] = "weapon_hand_r";
 constexpr char kGunSideAttachmentName[] = "weapon_hand_l";
@@ -56,10 +61,10 @@ constexpr UINT_PTR kOverlayTimerId = 1;
 constexpr UINT kOverlayTimerIntervalMs = 33;
 constexpr UINT kOverlayShutdownMessage = WM_APP + 1;
 constexpr int kFollowRefreshFrameStage = 5;
-constexpr int kOverlayWidth = 560;
-constexpr int kOverlayExpandedHeight = 960;
-constexpr int kOverlayCollapsedHeight = 898;
-constexpr int kOverlayMinWidth = 500;
+constexpr int kOverlayWidth = 620;
+constexpr int kOverlayExpandedHeight = 930;
+constexpr int kOverlayCollapsedHeight = 760;
+constexpr int kOverlayMinWidth = 560;
 constexpr int kOverlayMinHeight = kOverlayCollapsedHeight;
 constexpr int kOverlayMargin = 24;
 constexpr int kOverlayHotkeyVirtualKey = VK_INSERT;
@@ -72,6 +77,8 @@ constexpr wchar_t kSettingsFileName[] = L"selfiestick.ini";
 constexpr wchar_t kSettingsSectionHotkeys[] = L"Hotkeys";
 constexpr wchar_t kSettingsKeyPanelToggleVirtualKey[] = L"PanelToggleVirtualKey";
 constexpr wchar_t kSettingsSectionCamera[] = L"Camera";
+constexpr wchar_t kSettingsKeyFramingVersion[] = L"FramingVersion";
+constexpr int kCurrentFramingVersion = 5;
 constexpr wchar_t kSettingsKeyCameraMode[] = L"Mode";
 constexpr wchar_t kSettingsKeyPropOffsetX[] = L"PropOffsetX";
 constexpr wchar_t kSettingsKeyPropOffsetY[] = L"PropOffsetY";
@@ -83,6 +90,9 @@ constexpr wchar_t kSettingsKeyPropFollowSpeed[] = L"PropFollowSpeed";
 constexpr wchar_t kSettingsKeyPlayerPitch[] = L"PlayerPitch";
 constexpr wchar_t kSettingsKeyPlayerYaw[] = L"PlayerYaw";
 constexpr wchar_t kSettingsKeyPlayerRoll[] = L"PlayerRoll";
+constexpr wchar_t kSettingsKeyPlayerRight[] = L"PlayerRight";
+constexpr wchar_t kSettingsKeyPlayerBack[] = L"PlayerBack";
+constexpr wchar_t kSettingsKeyPlayerUp[] = L"PlayerUp";
 constexpr wchar_t kSettingsSectionDebug[] = L"Debug";
 constexpr wchar_t kSettingsKeyTraceEnabled[] = L"TraceEnabled";
 constexpr wchar_t kSettingsKeyDisableScopedFovOverride[] = L"DisableScopedFovOverride";
@@ -96,27 +106,35 @@ constexpr std::size_t kMaxSchemaNameLength = 256u;
 constexpr std::size_t kSchemaDiagnosticStringSlotLimit = 0x80u;
 constexpr std::size_t kSchemaDiagnosticPayloadSampleLimit = 16u;
 // The broad payload walk is retained for offline compatibility diagnostics.
-// Production resolution uses exact class lookup first; the raw walk is both
-// ambiguous on inherited fields and unnecessarily expensive during demo load.
+// Production resolution uses only the exact PE-fingerprint-gated offset table;
+// the raw walk is both ambiguous and unnecessarily expensive during demo load.
 constexpr bool kEnableRawSchemaCompatibilityProbe = false;
 
-constexpr COLORREF kColorPanel = RGB(25, 25, 27);
-constexpr COLORREF kColorPanelStrong = RGB(34, 34, 37);
-constexpr COLORREF kColorPanelElevated = RGB(45, 45, 49);
-constexpr COLORREF kColorPanelInset = RGB(20, 20, 22);
-constexpr COLORREF kColorInput = RGB(29, 29, 32);
-constexpr COLORREF kColorLine = RGB(57, 57, 63);
-constexpr COLORREF kColorLineStrong = RGB(78, 78, 86);
-constexpr COLORREF kColorText = RGB(240, 240, 242);
-constexpr COLORREF kColorTextMuted = RGB(158, 158, 166);
-constexpr COLORREF kColorAccent = RGB(76, 143, 205);
-constexpr COLORREF kColorAccentStrong = RGB(112, 177, 236);
-constexpr COLORREF kColorAccentSoft = RGB(36, 55, 73);
-constexpr COLORREF kColorSuccess = RGB(98, 214, 145);
-constexpr COLORREF kColorSuccessSoft = RGB(24, 56, 43);
-constexpr COLORREF kColorDanger = RGB(255, 101, 124);
-constexpr COLORREF kColorDangerSoft = RGB(65, 27, 37);
-constexpr COLORREF kColorWarn = RGB(255, 159, 67);
+constexpr COLORREF kColorPanel = RGB(5, 9, 18);
+constexpr COLORREF kColorPanelShadow = RGB(1, 3, 8);
+constexpr COLORREF kColorPanelStrong = RGB(10, 18, 32);
+constexpr COLORREF kColorPanelElevated = RGB(17, 31, 51);
+constexpr COLORREF kColorPanelInset = RGB(6, 12, 23);
+constexpr COLORREF kColorInput = RGB(8, 17, 30);
+constexpr COLORREF kColorLine = RGB(27, 42, 63);
+constexpr COLORREF kColorLineStrong = RGB(48, 70, 99);
+constexpr COLORREF kColorText = RGB(241, 247, 255);
+constexpr COLORREF kColorTextMuted = RGB(137, 157, 184);
+constexpr COLORREF kColorAccent = RGB(32, 156, 238);
+constexpr COLORREF kColorAccentStrong = RGB(83, 203, 255);
+constexpr COLORREF kColorAccentSoft = RGB(19, 82, 127);
+constexpr COLORREF kColorAccentGlow = RGB(13, 54, 88);
+constexpr COLORREF kColorPropAccent = RGB(143, 91, 255);
+constexpr COLORREF kColorPropAccentStrong = RGB(190, 142, 255);
+constexpr COLORREF kColorPropAccentSoft = RGB(68, 40, 126);
+constexpr COLORREF kColorPropAccentGlow = RGB(40, 24, 74);
+constexpr COLORREF kColorSurfaceSheen = RGB(67, 94, 126);
+constexpr COLORREF kColorSuccess = RGB(89, 222, 162);
+constexpr COLORREF kColorSuccessSoft = RGB(18, 61, 49);
+constexpr COLORREF kColorDanger = RGB(255, 96, 132);
+constexpr COLORREF kColorDangerSoft = RGB(70, 25, 43);
+constexpr COLORREF kColorWarn = RGB(255, 173, 76);
+constexpr float kSliderUnitsPerValue = 4.0f; // 0.25 unit per keyboard/wheel step.
 
 constexpr char kPatternEntityList[] = "40 55 53 48 8d ac 24 ?? ?? ?? ?? 48 81 ec ?? ?? ?? ?? 48 8b 0d ?? ?? ?? ?? 33 d2 e8 ?? ?? ?? ??";
 constexpr char kPatternGetEntityFromIndex[] = "4c 8d 49 10 81 fa fe 7f 00 00";
@@ -141,14 +159,15 @@ constexpr float kFallbackUnscopedFov = 90.0f;
 constexpr std::size_t kMaxPropCandidates = 5u;
 constexpr int kPropCandidateScanBatchSize = 192;
 constexpr unsigned long long kPropCandidateScanBatchIntervalMs = 8ull;
-constexpr float kDefaultPropOffsetX = -8.0f;
-constexpr float kDefaultPropOffsetY = -22.0f;
-constexpr float kDefaultPropOffsetZ = 4.0f;
-constexpr float kDefaultPropPitch = 1.0f;
+constexpr float kDefaultPropOffsetX = 0.0f;
+constexpr float kDefaultPropOffsetY = -13.5f;
+constexpr float kDefaultPropOffsetZ = 2.25f;
+constexpr float kDefaultPropPitch = 0.0f;
 constexpr float kDefaultPropYaw = 0.0f;
 constexpr float kDefaultPropRoll = 0.0f;
 constexpr float kDefaultPropFollowSpeed = 640.0f;
 constexpr double kSmokePostFlightHoldSeconds = 1.2;
+constexpr double kShortPropPostFlightHoldSeconds = 0.45;
 constexpr float kOverlayTickSeconds = static_cast<float>(kOverlayTimerIntervalMs) / 1000.0f;
 
 struct Vec3 {
@@ -200,16 +219,28 @@ constexpr WeaponAttachmentSpec kSupportedWeaponSpecs[] = {
     { SupportedWeaponId::AWP, "C_WeaponAWP", "weapon_awp", kAnchorAttachmentName }
 };
 
-constexpr Vec3 kCombatBaseOffset{ 8.0f, 18.0f, 6.0f };
+// Selfie offsets use a negative Back value because camera composition subtracts
+// Back from the held-item forward axis. This places the camera in front of the
+// muzzle / knife and points it back at the agent instead of near the chest.
+constexpr Vec3 kCombatSelfieBaseOffset{ 5.0f, -18.0f, 3.5f };
+constexpr Vec3 kCombatForwardBaseOffset{ 7.0f, 16.0f, 1.0f };
 constexpr Vec3 kKnifeFallbackHandAnchorOffset{ 10.0f, 12.0f, -18.0f };
-constexpr Vec3 kSyntheticFallbackSelfieBaseOffset{ 6.0f, 12.0f, 10.0f };
-constexpr Vec3 kGunSelfieBaseOffset{ 10.5f, 12.5f, 6.75f };
-constexpr Vec3 kGunForwardBaseOffset{ 6.5f, 16.25f, -2.5f };
+constexpr Vec3 kSyntheticFallbackSelfieBaseOffset{ 5.0f, -18.0f, 3.5f };
+// Selfie starts at the muzzle side and looks back at the operator. The forward
+// mode is intentionally framed as a right-shoulder camera instead of a first-
+// person forward view.
+constexpr Vec3 kGunSelfieBaseOffset{ 5.0f, -19.0f, 3.25f };
+constexpr Vec3 kGunForwardBaseOffset{ 7.0f, 18.0f, -1.0f };
 constexpr Vec3 kWorldUp{ 0.0f, 0.0f, 1.0f };
 constexpr float kGunUpperBodyTargetBlendFactor = 0.34f;
-constexpr float kGunSelfieTargetCrossBias = 3.75f;
-constexpr float kGunSelfieTargetUpBias = 0.15f;
+constexpr float kGunSelfieTargetCrossBias = 0.0f;
+constexpr float kGunSelfieTargetUpBias = 0.0f;
+constexpr float kMinimumSelfieFrontDistance = 8.0f;
 constexpr float kFallbackEyeOriginHeight = 64.0f;
+static_assert(kCombatSelfieBaseOffset.y < 0.0f);
+static_assert(kSyntheticFallbackSelfieBaseOffset.y < 0.0f);
+static_assert(kGunSelfieBaseOffset.y < 0.0f);
+static_assert(kGunSelfieTargetCrossBias == 0.0f);
 
 struct EntityHandle {
     std::uint32_t raw{kInvalidHandleValue};
@@ -365,6 +396,7 @@ struct LocalizedText {
     const wchar_t* uiButtonLookSelfieLeft;
     const wchar_t* uiButtonLookSelfieRight;
     const wchar_t* uiButtonLookForward;
+    const wchar_t* uiButtonPlayerShoulderPreset;
     const wchar_t* uiButtonTargetFollow;
     const wchar_t* uiButtonTargetLockCurrent;
     const wchar_t* uiButtonTargetClear;
@@ -372,6 +404,7 @@ struct LocalizedText {
     const wchar_t* uiButtonPanelHotkeyCapture;
     const wchar_t* uiLifecycleBoot;
     const wchar_t* uiLifecycleIdle;
+    const wchar_t* uiLifecycleWaiting;
     const wchar_t* uiLifecycleLive;
     const wchar_t* uiLifecycleBlocked;
     const wchar_t* uiTitle;
@@ -387,6 +420,7 @@ struct LocalizedText {
     const wchar_t* uiDirectionChipSelfieLeft;
     const wchar_t* uiDirectionChipSelfieRight;
     const wchar_t* uiDirectionChipForward;
+    const wchar_t* uiDirectionChipProp;
     const wchar_t* uiTargetSection;
     const wchar_t* uiTargetChipLocked;
     const wchar_t* uiTargetChipFollow;
@@ -434,7 +468,7 @@ struct LocalizedText {
 constexpr LocalizedText kLocalizedTextEnUs{
     .lookSelfieLeft = "selfie left",
     .lookSelfieRight = "selfie right",
-    .lookForward = "forward",
+    .lookForward = "over shoulder",
     .targetFollow = "follow",
     .targetLocked = "locked",
     .valueNone = "none",
@@ -530,7 +564,8 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiButtonEnableOff = L"SELFIESTICK OFF",
     .uiButtonLookSelfieLeft = L"SELFIE LEFT",
     .uiButtonLookSelfieRight = L"SELFIE RIGHT",
-    .uiButtonLookForward = L"FORWARD",
+    .uiButtonLookForward = L"OVER SHOULDER",
+    .uiButtonPlayerShoulderPreset = L"APPLY OVER-SHOULDER PRESET",
     .uiButtonTargetFollow = L"FOLLOW",
     .uiButtonTargetLockCurrent = L"LOCK CURRENT",
     .uiButtonTargetClear = L"CLEAR",
@@ -538,22 +573,24 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiButtonPanelHotkeyCapture = L"PRESS A KEY...",
     .uiLifecycleBoot = L"BOOT",
     .uiLifecycleIdle = L"IDLE",
+    .uiLifecycleWaiting = L"WAITING PROP",
     .uiLifecycleLive = L"LIVE",
     .uiLifecycleBlocked = L"BLOCKED",
     .uiTitle = L"SELFIESTICK",
-    .uiSubtitle = L"HAND FRAME / LOCAL TRIM",
+    .uiSubtitle = L"CINEMATIC CAMERA / DEMO TOOL",
     .uiHotkeyChip = L"PANEL",
     .uiPanelHotkeyLabel = L"Panel key: ",
     .uiEnableSection = L"ENABLE",
     .uiEnableChipOn = L"ON",
     .uiEnableChipOff = L"OFF",
-    .uiOffsetSection = L"LOCAL TRIM",
-    .uiOffsetHint = L"ANCHOR + BASE FRAME + R / B / U",
-    .uiDirectionSection = L"DIRECTION",
+    .uiOffsetSection = L"PLAYER CAMERA",
+    .uiOffsetHint = L"MUZZLE ANCHOR  /  POSITION + ROTATION",
+    .uiDirectionSection = L"PLAYER COMPOSITION",
     .uiDirectionChipSelfieLeft = L"LEFT",
     .uiDirectionChipSelfieRight = L"RIGHT",
-    .uiDirectionChipForward = L"FORWARD",
-    .uiTargetSection = L"TARGET",
+    .uiDirectionChipForward = L"SHOULDER",
+    .uiDirectionChipProp = L"LOOKBACK",
+    .uiTargetSection = L"FOLLOW TARGET",
     .uiTargetChipLocked = L"LOCKED",
     .uiTargetChipFollow = L"FOLLOW",
     .uiRuntimeSection = L"RUNTIME STATUS",
@@ -570,7 +607,7 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiPlayerPitchLabel = L"PITCH",
     .uiPlayerYawLabel = L"YAW",
     .uiPlayerRollLabel = L"ROLL",
-    .uiPropLabel = L"Prop",
+    .uiPropLabel = L"PROP CAMERA  /  LAUNCH LOOKBACK",
     .uiPropOffsetLabel = L"Prop X / Y / Z",
     .uiPropRotationLabel = L"Pitch / Yaw / Roll",
     .uiPropRecentSection = L"Recent Props",
@@ -579,7 +616,7 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiButtonPropLock = L"LOCK",
     .uiButtonPropLocked = L"LOCKED",
     .uiButtonPropClear = L"CLEAR PROP",
-    .uiButtonPropImageStyle = L"IMAGE STYLE",
+    .uiButtonPropImageStyle = L"CENTERED LOOKBACK PRESET",
     .uiPropLockLabel = L"Prop lock: ",
     .uiPropXyzLabel = L"Prop XYZ: ",
     .uiPropPyrLabel = L"Prop P/Y/R: ",
@@ -600,7 +637,7 @@ constexpr LocalizedText kLocalizedTextEnUs{
 constexpr LocalizedText kLocalizedTextZhCn{
     .lookSelfieLeft = "左侧自拍",
     .lookSelfieRight = "右侧自拍",
-    .lookForward = "前视",
+    .lookForward = "越肩视角",
     .targetFollow = "跟随",
     .targetLocked = "锁定",
     .valueNone = "无",
@@ -696,7 +733,8 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiButtonEnableOff = L"自拍杆 已关闭",
     .uiButtonLookSelfieLeft = L"左侧自拍",
     .uiButtonLookSelfieRight = L"右侧自拍",
-    .uiButtonLookForward = L"向前看",
+    .uiButtonLookForward = L"越肩视角",
+    .uiButtonPlayerShoulderPreset = L"应用越肩视角预设",
     .uiButtonTargetFollow = L"跟随",
     .uiButtonTargetLockCurrent = L"锁定当前",
     .uiButtonTargetClear = L"清除锁定",
@@ -704,22 +742,24 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiButtonPanelHotkeyCapture = L"请按一个键...",
     .uiLifecycleBoot = L"启动中",
     .uiLifecycleIdle = L"待命",
+    .uiLifecycleWaiting = L"等待道具",
     .uiLifecycleLive = L"生效",
     .uiLifecycleBlocked = L"阻塞",
     .uiTitle = L"自拍杆",
-    .uiSubtitle = L"右手锚点 / 局部微调",
+    .uiSubtitle = L"影视镜头 / DEMO 工具",
     .uiHotkeyChip = L"面板",
     .uiPanelHotkeyLabel = L"面板按键: ",
     .uiEnableSection = L"启用",
     .uiEnableChipOn = L"开",
     .uiEnableChipOff = L"关",
-    .uiOffsetSection = L"局部微调",
-    .uiOffsetHint = L"锚点 + 基准构图 + R / B / U",
-    .uiDirectionSection = L"朝向",
+    .uiOffsetSection = L"人物镜头",
+    .uiOffsetHint = L"枪口锚点  /  位置与角度微调",
+    .uiDirectionSection = L"人物构图",
     .uiDirectionChipSelfieLeft = L"左侧",
     .uiDirectionChipSelfieRight = L"右侧",
-    .uiDirectionChipForward = L"前视",
-    .uiTargetSection = L"目标",
+    .uiDirectionChipForward = L"越肩",
+    .uiDirectionChipProp = L"出手回看",
+    .uiTargetSection = L"跟随目标",
     .uiTargetChipLocked = L"锁定",
     .uiTargetChipFollow = L"跟随",
     .uiRuntimeSection = L"运行状态",
@@ -736,7 +776,7 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiPlayerPitchLabel = L"俯仰",
     .uiPlayerYawLabel = L"偏航",
     .uiPlayerRollLabel = L"翻滚",
-    .uiPropLabel = L"道具",
+    .uiPropLabel = L"道具镜头  /  出手回看",
     .uiPropOffsetLabel = L"道具 X / Y / Z",
     .uiPropRotationLabel = L"俯仰 / 偏航 / 翻滚",
     .uiPropRecentSection = L"最近道具",
@@ -745,7 +785,7 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiButtonPropLock = L"锁定",
     .uiButtonPropLocked = L"已锁定",
     .uiButtonPropClear = L"清除道具",
-    .uiButtonPropImageStyle = L"截图风格",
+    .uiButtonPropImageStyle = L"居中回看预设",
     .uiPropLockLabel = L"道具锁定: ",
     .uiPropXyzLabel = L"道具 XYZ: ",
     .uiPropPyrLabel = L"道具 P/Y/R: ",
@@ -791,6 +831,7 @@ struct ClientOffsets {
     std::ptrdiff_t projectileOriginalThrower{};
     std::ptrdiff_t projectileOwnerEntity{};
     std::ptrdiff_t projectileBounceCount{};
+    std::ptrdiff_t projectileInitialVelocity{};
 };
 
 struct SchemaField {
@@ -922,8 +963,10 @@ struct PropSmoothingState {
 
 struct ProjectileKinematicSample {
     Vec3 velocity{};
+    Vec3 initialVelocity{};
     int bounceCount{};
     bool velocityValid{false};
+    bool initialVelocityValid{false};
     bool bounceCountValid{false};
 };
 
@@ -1001,7 +1044,20 @@ enum OverlayControlId : int {
     kControlButtonPropLock2 = 1032,
     kControlButtonPropLock3 = 1033,
     kControlButtonPropLock4 = 1034,
-    kControlButtonPropLock5 = 1035
+    kControlButtonPropLock5 = 1035,
+    kControlButtonPlayerShoulderPreset = 1036,
+    kControlSliderOffsetX = 1041,
+    kControlSliderOffsetY = 1042,
+    kControlSliderOffsetZ = 1043,
+    kControlSliderPlayerPitch = 1044,
+    kControlSliderPlayerYaw = 1045,
+    kControlSliderPlayerRoll = 1046,
+    kControlSliderPropOffsetX = 1051,
+    kControlSliderPropOffsetY = 1052,
+    kControlSliderPropOffsetZ = 1053,
+    kControlSliderPropPitch = 1054,
+    kControlSliderPropYaw = 1055,
+    kControlSliderPropRoll = 1056
 };
 
 struct OverlayUiState {
@@ -1012,9 +1068,16 @@ struct OverlayUiState {
     HWND offsetXEdit{};
     HWND offsetYEdit{};
     HWND offsetZEdit{};
+    HWND offsetXSlider{};
+    HWND offsetYSlider{};
+    HWND offsetZSlider{};
     HWND playerPitchEdit{};
     HWND playerYawEdit{};
     HWND playerRollEdit{};
+    HWND playerPitchSlider{};
+    HWND playerYawSlider{};
+    HWND playerRollSlider{};
+    HWND playerShoulderPresetButton{};
     HWND lookSelfieLeftButton{};
     HWND lookSelfieRightButton{};
     HWND lookForwardButton{};
@@ -1029,21 +1092,30 @@ struct OverlayUiState {
     HWND propOffsetXEdit{};
     HWND propOffsetYEdit{};
     HWND propOffsetZEdit{};
+    HWND propOffsetXSlider{};
+    HWND propOffsetYSlider{};
+    HWND propOffsetZSlider{};
     HWND propPitchEdit{};
     HWND propYawEdit{};
     HWND propRollEdit{};
+    HWND propPitchSlider{};
+    HWND propYawSlider{};
+    HWND propRollSlider{};
     HWND propClearButton{};
     HWND propImageStyleButton{};
     std::array<HWND, kMaxPropCandidates> propLockButtons{};
     HFONT titleFont{};
+    HFONT sectionFont{};
     HFONT bodyFont{};
     HFONT monoFont{};
     HBRUSH panelBrush{};
     HBRUSH editBrush{};
     bool overlayCreated{false};
     bool overlayVisible{false};
+    bool imguiInitialized{false};
     bool suppressOffsetSync{false};
     bool suppressPropEditSync{false};
+    bool suppressSliderSync{false};
     bool captureOverlayHotkey{false};
     bool runtimeExpanded{false};
     bool overlayHotkeyWasDown{false};
@@ -1114,6 +1186,7 @@ std::mutex g_propLookTargetMutex;
 std::mutex g_propPostFlightHoldMutex;
 std::mutex g_propCandidateScanMutex;
 std::mutex g_solidBrushCacheMutex;
+std::mutex g_penCacheMutex;
 std::mutex g_setupViewHookInstallMutex;
 RuntimeState g_state;
 OverlayUiState g_ui;
@@ -1140,6 +1213,7 @@ std::atomic<unsigned long long> g_controllerPawnFallbackTraceCounter{0};
 std::atomic<unsigned long long> g_knifeFallbackAnchorTraceCounter{0};
 std::atomic<unsigned long long> g_lastPropCandidateRefreshTickMs{0};
 std::atomic<unsigned long long> g_lastPropCandidateScanBatchTickMs{0};
+std::atomic<unsigned long long> g_lastPropHotTailScanTickMs{0};
 std::atomic<bool> g_propCandidateScanInProgress{false};
 std::atomic<int> g_initStage{0};
 std::atomic<bool> g_schemaOffsetsResolved{false};
@@ -1147,12 +1221,14 @@ std::atomic<bool> g_schemaResolveInProgress{false};
 std::atomic<bool> g_knownClientSchemaFallbackAllowed{false};
 std::atomic<unsigned long long> g_lastSchemaResolveAttemptTickMs{0};
 std::unordered_map<COLORREF, HBRUSH> g_solidBrushCache;
+std::unordered_map<COLORREF, HPEN> g_penCache;
 std::mutex g_traceMutex;
 std::mutex g_schemaResolveMutex;
 std::string g_schemaResolveFailureReason{};
 
 void RefreshStatusTextLocked();
 RuntimeState SnapshotState();
+EntityHandle GetLockedPropHandle();
 void ConsolePrintf(const char* format, ...);
 void TracePrintf(const char* format, ...);
 void MarkOverlayDirty();
@@ -1634,8 +1710,12 @@ bool UsesLookTarget(LookMode mode) {
     return IsSelfieLookMode(mode);
 }
 
-const wchar_t* GetOverlayDirectionChipText(LookMode mode) {
-    switch (mode) {
+const wchar_t* GetOverlayDirectionChipText(const RuntimeState& state) {
+    if (state.cameraMode == CameraMode::PropSelfie) {
+        return Texts().uiDirectionChipProp;
+    }
+
+    switch (state.lookMode) {
     case LookMode::SelfieLeft:
         return Texts().uiDirectionChipSelfieLeft;
     case LookMode::SelfieRight:
@@ -1867,6 +1947,12 @@ void SetCameraMode(CameraMode cameraMode) {
         std::lock_guard lock(g_stateMutex);
         changed = g_state.cameraMode != cameraMode;
         g_state.cameraMode = cameraMode;
+        if (cameraMode == CameraMode::PlayerSelfie && g_state.lookMode == LookMode::Forward) {
+            // Clicking the Player Selfie tab is an explicit request for a
+            // selfie. Over-shoulder remains available through its dedicated
+            // preset, but it must not silently become the Player default.
+            g_state.lookMode = LookMode::SelfieRight;
+        }
         RefreshStatusTextLocked();
         snapshot = g_state;
     }
@@ -1877,14 +1963,21 @@ void SetCameraMode(CameraMode cameraMode) {
     }
 }
 
-void SetOffset(const Vec3& offset) {
-    std::lock_guard lock(g_stateMutex);
-    g_state.offset = offset;
-    RefreshStatusTextLocked();
+void SetOffset(const Vec3& offset, bool persist = true) {
+    RuntimeState snapshot{};
+    {
+        std::lock_guard lock(g_stateMutex);
+        g_state.offset = offset;
+        RefreshStatusTextLocked();
+        snapshot = g_state;
+    }
+    if (persist) {
+        PersistCameraSettingsSnapshot(snapshot);
+    }
     MarkOverlayDirty();
 }
 
-void SetPlayerRotation(const Vec3& rotation) {
+void SetPlayerRotation(const Vec3& rotation, bool persist = true) {
     RuntimeState snapshot{};
     {
         std::lock_guard lock(g_stateMutex);
@@ -1892,7 +1985,9 @@ void SetPlayerRotation(const Vec3& rotation) {
         RefreshStatusTextLocked();
         snapshot = g_state;
     }
-    PersistCameraSettingsSnapshot(snapshot);
+    if (persist) {
+        PersistCameraSettingsSnapshot(snapshot);
+    }
     MarkOverlayDirty();
 }
 
@@ -1919,7 +2014,7 @@ void ResetPropTrackingState() {
     }
 }
 
-void SetPropOffset(const Vec3& offset) {
+void SetPropOffset(const Vec3& offset, bool persist = true) {
     RuntimeState snapshot{};
     {
         std::lock_guard lock(g_stateMutex);
@@ -1927,11 +2022,13 @@ void SetPropOffset(const Vec3& offset) {
         RefreshStatusTextLocked();
         snapshot = g_state;
     }
-    PersistCameraSettingsSnapshot(snapshot);
+    if (persist) {
+        PersistCameraSettingsSnapshot(snapshot);
+    }
     MarkOverlayDirty();
 }
 
-void SetPropRotation(const Vec3& rotation) {
+void SetPropRotation(const Vec3& rotation, bool persist = true) {
     RuntimeState snapshot{};
     {
         std::lock_guard lock(g_stateMutex);
@@ -1939,7 +2036,9 @@ void SetPropRotation(const Vec3& rotation) {
         RefreshStatusTextLocked();
         snapshot = g_state;
     }
-    PersistCameraSettingsSnapshot(snapshot);
+    if (persist) {
+        PersistCameraSettingsSnapshot(snapshot);
+    }
     MarkOverlayDirty();
 }
 
@@ -1964,6 +2063,38 @@ void ApplyPropImageStylePreset() {
         snapshot.propRotation.y,
         snapshot.propRotation.z
     );
+}
+
+void ApplyPlayerShoulderPreset() {
+    RuntimeState snapshot{};
+    {
+        std::lock_guard lock(g_stateMutex);
+        g_state.cameraMode = CameraMode::PlayerSelfie;
+        g_state.lookMode = LookMode::Forward;
+        g_state.offset = Vec3{};
+        g_state.playerRotation = Vec3{};
+        RefreshStatusTextLocked();
+        snapshot = g_state;
+    }
+    PersistCameraSettingsSnapshot(snapshot);
+    MarkOverlayDirty();
+    TracePrintf("player-over-shoulder preset applied");
+}
+
+void ApplyCenteredPlayerSelfiePreset() {
+    RuntimeState snapshot{};
+    {
+        std::lock_guard lock(g_stateMutex);
+        g_state.cameraMode = CameraMode::PlayerSelfie;
+        g_state.lookMode = LookMode::SelfieRight;
+        g_state.offset = Vec3{};
+        g_state.playerRotation = Vec3{};
+        RefreshStatusTextLocked();
+        snapshot = g_state;
+    }
+    PersistCameraSettingsSnapshot(snapshot);
+    MarkOverlayDirty();
+    TracePrintf("player-centered-selfie preset applied");
 }
 
 void SetTargetMode(TargetMode targetMode) {
@@ -4152,8 +4283,61 @@ bool TryReadOffsetHandle(const void* base, std::ptrdiff_t offset, EntityHandle& 
     return true;
 }
 
+bool TryBuildKnownClientOffsets(ClientOffsets& offsets) {
+    offsets = {};
+    auto getKnown = [](const char* className, const char* fieldName, std::ptrdiff_t& target) {
+        return schema::TryGetKnownClientSchemaFieldOffsetFallback(className, fieldName, target);
+    };
+
+    bool ok = true;
+    ok = getKnown("CEntityInstance", "m_pEntity", offsets.entityInstanceToIdentity) && ok;
+    ok = getKnown("CBasePlayerController", "m_hPawn", offsets.controllerPawnHandle) && ok;
+    ok = getKnown("C_BasePlayerPawn", "m_pObserverServices", offsets.pawnObserverServices) && ok;
+    ok = getKnown("C_BasePlayerPawn", "m_pCameraServices", offsets.pawnCameraServices) && ok;
+    ok = getKnown("C_BasePlayerPawn", "m_pWeaponServices", offsets.pawnWeaponServices) && ok;
+    ok = getKnown("C_BasePlayerPawn", "m_hController", offsets.pawnControllerHandle) && ok;
+    ok = getKnown("C_CSPlayerPawn", "m_angEyeAngles", offsets.pawnEyeAngles) && ok;
+    ok = getKnown("CPlayer_ObserverServices", "m_iObserverMode", offsets.observerMode) && ok;
+    ok = getKnown("CPlayer_ObserverServices", "m_hObserverTarget", offsets.observerTarget) && ok;
+    ok = getKnown("CPlayer_CameraServices", "m_hViewEntity", offsets.cameraViewEntity) && ok;
+    ok = getKnown("CPlayer_WeaponServices", "m_hActiveWeapon", offsets.activeWeapon) && ok;
+    ok = getKnown("C_BaseEntity", "m_pGameSceneNode", offsets.sceneNode) && ok;
+    ok = getKnown("CGameSceneNode", "m_vecAbsOrigin", offsets.sceneAbsOrigin) && ok;
+    ok = getKnown("C_BaseEntity", "m_bRenderWithViewModels", offsets.renderWithViewModels) && ok;
+    ok = getKnown("C_BaseEntity", "m_vecVelocity", offsets.projectileVelocity) && ok;
+    ok = getKnown("C_BaseGrenade", "m_hThrower", offsets.projectileThrower) && ok;
+    ok = getKnown("C_BaseGrenade", "m_hOriginalThrower", offsets.projectileOriginalThrower) && ok;
+    ok = getKnown("C_BaseEntity", "m_hOwnerEntity", offsets.projectileOwnerEntity) && ok;
+    ok = getKnown("C_BaseCSGrenadeProjectile", "m_nBounces", offsets.projectileBounceCount) && ok;
+    ok = getKnown("C_BaseCSGrenadeProjectile", "m_vInitialVelocity", offsets.projectileInitialVelocity) && ok;
+    return ok;
+}
+
 bool ResolveSchemaOffsetsNow(std::string& failure) {
     failure.clear();
+    const bool exactClientBuild = g_knownClientSchemaFallbackAllowed.load(std::memory_order_acquire);
+    const auto runtimeStrategy = schema::DetermineRuntimeSchemaResolveStrategy(exactClientBuild);
+    if (runtimeStrategy != schema::RuntimeSchemaResolveStrategy::KnownClientOffsets) {
+        failure = FormatIncompatibleBuildReason("no schema table for this exact client fingerprint");
+        TracePrintf("schema-resolve strategy=reject exactClientBuild=0");
+        return false;
+    }
+
+    ClientOffsets knownOffsets{};
+    if (!TryBuildKnownClientOffsets(knownOffsets)) {
+        failure = Texts().reasonRequiredSchemaOffsetsMissing;
+        TracePrintf("schema-resolve strategy=known-client-offsets result=incomplete");
+        return false;
+    }
+
+    g_offsets = knownOffsets;
+    TracePrintf("schema-resolve strategy=known-client-offsets result=ok");
+    return true;
+
+#if 0
+    // Retained temporarily as offline compatibility research only. Never enable
+    // this block in a production DLL: TypeScope vtable probing can reach engine
+    // registration methods that terminate the process with a Fatal error.
     TracePrintf(
         "schema-resolve strategy=exact-class rawCompatibilityProbe=%d",
         kEnableRawSchemaCompatibilityProbe ? 1 : 0
@@ -4579,6 +4763,7 @@ bool ResolveSchemaOffsetsNow(std::string& failure) {
 
     g_offsets = resolvedOffsets;
     return true;
+#endif
 }
 
 DWORD WINAPI SchemaResolveWorkerThreadMain(LPVOID) {
@@ -5510,7 +5695,9 @@ Vec3 GetBaseOffsetForHeldItem(HeldItemKind kind, LookMode lookMode) {
         return kGunSelfieBaseOffset;
     }
 
-    return kCombatBaseOffset;
+    return lookMode == LookMode::Forward
+        ? kCombatForwardBaseOffset
+        : kCombatSelfieBaseOffset;
 }
 
 Vec3 GetBaseOffsetForBasis(const WeaponFrameBasis& basis, LookMode lookMode) {
@@ -5835,7 +6022,16 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
     return true;
 }
 
-bool TryBuildHumanFrameBasis(void* targetPawn, HeldItemKind heldItemKind, const Vec3* viewSetupEyeOrigin, WeaponFrameBasis& basis, std::string& failure) {
+Vec3 AnglesToForward(const Vec3& angles);
+
+bool TryBuildHumanFrameBasis(
+    void* targetPawn,
+    HeldItemKind heldItemKind,
+    const Vec3* viewSetupEyeOrigin,
+    const Vec3* viewSetupEyeAngles,
+    WeaponFrameBasis& basis,
+    std::string& failure
+) {
     Vec3 handOrigin{};
     if (!TryGetAttachmentOrigin(targetPawn, kAnchorAttachmentName, handOrigin, failure)) {
         failure = FormatText(Texts().reasonAttachmentMissingFormat, kAnchorAttachmentName);
@@ -5861,13 +6057,44 @@ bool TryBuildHumanFrameBasis(void* targetPawn, HeldItemKind heldItemKind, const 
         return false;
     }
 
-    Vec3 forward = Cross(right, kWorldUp);
-    if (!TryNormalize(forward)) {
-        failure = Texts().reasonCombatForwardAxisDegenerate;
-        return false;
+    Vec3 forward{};
+    Vec3 facingAngles{};
+    std::string facingFailure;
+    bool facingAvailable = TryGetPawnEyeAngles(targetPawn, facingAngles, facingFailure);
+    if (!facingAvailable && viewSetupEyeAngles != nullptr && IsFiniteVec3(*viewSetupEyeAngles)) {
+        facingAngles = *viewSetupEyeAngles;
+        facingAvailable = true;
     }
 
-    Vec3 up = Cross(forward, right);
+    if (facingAvailable) {
+        forward = ProjectOntoPlane(AnglesToForward(facingAngles), kWorldUp);
+        if (!TryNormalize(forward)) {
+            facingAvailable = false;
+        }
+    }
+
+    if (facingAvailable) {
+        // Knife / utility entities do not expose a reliable muzzle transform.
+        // Use the agent's facing direction for the front axis and the right-hand
+        // attachment only as the anchor, avoiding a model-dependent 180-degree
+        // flip from deriving forward with a cross product alone.
+        right = Cross(forward, kWorldUp);
+        if (!TryNormalize(right)) {
+            failure = Texts().reasonCombatRightAxisDegenerate;
+            return false;
+        }
+    }
+    else {
+        forward = Cross(right, kWorldUp);
+        if (!TryNormalize(forward)) {
+            failure = Texts().reasonCombatForwardAxisDegenerate;
+            return false;
+        }
+    }
+
+    Vec3 up = facingAvailable
+        ? Cross(right, forward)
+        : Cross(forward, right);
     if (!TryNormalize(up)) {
         failure = Texts().reasonCombatUpAxisDegenerate;
         return false;
@@ -6133,7 +6360,7 @@ bool TryBuildWeaponFrameBasis(void* targetPawn, const Vec3* viewSetupEyeOrigin, 
         return TryBuildGunFrameBasis(targetPawn, viewSetupEyeOrigin, basis, failure);
     }
 
-    return TryBuildHumanFrameBasis(targetPawn, heldItemKind, viewSetupEyeOrigin, basis, failure);
+    return TryBuildHumanFrameBasis(targetPawn, heldItemKind, viewSetupEyeOrigin, viewSetupEyeAngles, basis, failure);
 }
 
 void VectorToAngles(const Vec3& direction, float& pitch, float& yaw) {
@@ -6142,7 +6369,27 @@ void VectorToAngles(const Vec3& direction, float& pitch, float& yaw) {
     yaw = std::atan2(direction.y, direction.x) * 180.0f / 3.14159265358979323846f;
 }
 
-bool TryReadProjectileOwnerHandle(void* projectile, EntityHandle& ownerHandle) {
+bool IsProjectileMovingForDiscovery(void* projectile) {
+    constexpr float kMinimumFlyingSpeed = 4.0f;
+    constexpr float kMaximumProjectileSpeed = 100000.0f;
+    if (projectile == nullptr || g_offsets.projectileVelocity == 0) {
+        return false;
+    }
+
+    Vec3 velocity{};
+    return TryReadOffsetValue(projectile, g_offsets.projectileVelocity, velocity)
+        && compat::IsUsableProjectileVelocity(
+            compat::CameraVector{ velocity.x, velocity.y, velocity.z },
+            kMaximumProjectileSpeed)
+        && Length(velocity) >= kMinimumFlyingSpeed;
+}
+
+bool TryReadProjectileOwnerHandle(
+    void* projectile,
+    EntityHandle acceptedPawnHandle,
+    EntityHandle acceptedControllerHandle,
+    EntityHandle& ownerHandle
+) {
     ownerHandle = {};
     if (projectile == nullptr) {
         return false;
@@ -6160,7 +6407,12 @@ bool TryReadProjectileOwnerHandle(void* projectile, EntityHandle& ownerHandle) {
         }
 
         EntityHandle candidate{};
-        if (TryReadOffsetHandle(projectile, offset, candidate) && candidate.IsValid()) {
+        if (TryReadOffsetHandle(projectile, offset, candidate)
+            && candidate.IsValid()
+            && compat::ShouldAcceptPropOwnerCandidate(
+                acceptedPawnHandle.raw,
+                acceptedControllerHandle.raw,
+                candidate.raw)) {
             ownerHandle = candidate;
             return true;
         }
@@ -6181,12 +6433,15 @@ bool IsPropProjectileForTarget(void* entity, EntityHandle targetHandle, EntityHa
         return false;
     }
 
-    EntityHandle ownerHandle{};
-    if (!TryReadProjectileOwnerHandle(entity, ownerHandle)) {
+    // Landed smoke projectiles can remain in the entity list for a long time.
+    // Excluding stationary entities prevents them from filling the five slots
+    // and blocking auto-lock for the newly thrown projectile.
+    if (!IsProjectileMovingForDiscovery(entity)) {
         return false;
     }
 
-    if (!compat::ShouldAcceptPropOwnerCandidate(targetHandle.raw, targetControllerHandle.raw, ownerHandle.raw)) {
+    EntityHandle ownerHandle{};
+    if (!TryReadProjectileOwnerHandle(entity, targetHandle, targetControllerHandle, ownerHandle)) {
         return false;
     }
 
@@ -6220,7 +6475,7 @@ bool IsLockedPropProjectileStillOwnedByThrower(
     }
 
     EntityHandle ownerHandle{};
-    if (!TryReadProjectileOwnerHandle(entity, ownerHandle) || ownerHandle.raw != lockedThrowerHandle.raw) {
+    if (!TryReadProjectileOwnerHandle(entity, lockedThrowerHandle, {}, ownerHandle)) {
         return false;
     }
 
@@ -6237,6 +6492,53 @@ bool IsLockedPropProjectileStillOwnedByThrower(
     return true;
 }
 
+bool TryFindNewestMovingPropCandidate(
+    void* entityList,
+    int highestEntityIndex,
+    void* targetPawn,
+    EntityHandle targetHandle,
+    PropCandidate& candidate
+) {
+    constexpr int kHotEntityTailCount = 128;
+    candidate = {};
+    if (entityList == nullptr || highestEntityIndex < 0 || targetPawn == nullptr || !targetHandle.IsValid()) {
+        return false;
+    }
+
+    const EntityHandle controllerHandle = PawnGetControllerHandle(targetPawn);
+    const int lowestHotIndex = std::max(0, highestEntityIndex - kHotEntityTailCount + 1);
+    for (int entityIndex = highestEntityIndex; entityIndex >= lowestHotIndex; --entityIndex) {
+        void* entity = nullptr;
+        if (!TryInvokeGetEntityFromIndex(entityList, entityIndex, entity) || entity == nullptr) {
+            continue;
+        }
+
+        if (IsPropProjectileForTarget(entity, targetHandle, controllerHandle, candidate)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ShouldScanPropHotTail() {
+    constexpr unsigned long long kHotTailIntervalMs = 32u;
+    const unsigned long long nowTickMs = GetTickCount64();
+    unsigned long long previousTickMs = g_lastPropHotTailScanTickMs.load(std::memory_order_relaxed);
+    while (previousTickMs == 0u
+        || nowTickMs < previousTickMs
+        || nowTickMs - previousTickMs >= kHotTailIntervalMs) {
+        if (g_lastPropHotTailScanTickMs.compare_exchange_weak(
+                previousTickMs,
+                nowTickMs,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) {
     if (targetPawn == nullptr || !targetHandle.IsValid() || g_entityListStorage == nullptr || *g_entityListStorage == nullptr) {
         std::lock_guard scanLock(g_propCandidateScanMutex);
@@ -6247,6 +6549,34 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
 
     void* entityList = *g_entityListStorage;
     const EntityHandle controllerHandle = PawnGetControllerHandle(targetPawn);
+    int currentHighestIndex = -1;
+    if (!TryInvokeGetHighestEntityIndex(entityList, currentHighestIndex)) {
+        return;
+    }
+
+    // Short-lived flash / HE projectiles can disappear before a complete
+    // batched pass. Revisit the newest entity tail on every active batch and
+    // lock a moving owner-matched projectile immediately.
+    if (!GetLockedPropHandle().IsValid() && ShouldScanPropHotTail()) {
+        PropCandidate hotCandidate{};
+        if (TryFindNewestMovingPropCandidate(
+                entityList,
+                currentHighestIndex,
+                targetPawn,
+                targetHandle,
+                hotCandidate)) {
+            SetLockedProp(hotCandidate);
+            TracePrintf(
+                "prop-hot-lock handle=%u kind=%s thrower=%u highest=%d",
+                hotCandidate.handle.raw,
+                PropProjectileKindToString(hotCandidate.kind),
+                hotCandidate.throwerHandle.raw,
+                currentHighestIndex
+            );
+            return;
+        }
+    }
+
     std::unique_lock scanLock(g_propCandidateScanMutex, std::try_to_lock);
     if (!scanLock.owns_lock()) {
         return;
@@ -6258,28 +6588,29 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
         || g_propCandidateScan.targetHandle.raw != targetHandle.raw
         || g_propCandidateScan.controllerHandle.raw != controllerHandle.raw;
     if (targetChanged) {
-        int highestIndex = -1;
-        if (!TryInvokeGetHighestEntityIndex(entityList, highestIndex)) {
-            g_propCandidateScan = {};
-            g_propCandidateScanInProgress.store(false, std::memory_order_release);
-            return;
-        }
-
         g_propCandidateScan = {};
         g_propCandidateScan.entityList = entityList;
         g_propCandidateScan.targetHandle = targetHandle;
         g_propCandidateScan.controllerHandle = controllerHandle;
-        g_propCandidateScan.nextEntityIndex = 0;
-        g_propCandidateScan.highestEntityIndex = highestIndex;
+        // Projectiles are normally among the newest/highest entity indices.
+        // Scanning backwards finds the just-thrown prop before old world and
+        // player entities without increasing the per-callback work budget.
+        g_propCandidateScan.nextEntityIndex = currentHighestIndex;
+        g_propCandidateScan.highestEntityIndex = currentHighestIndex;
         g_propCandidateScan.active = true;
         g_propCandidateScanInProgress.store(true, std::memory_order_release);
     }
+    else if (currentHighestIndex > g_propCandidateScan.highestEntityIndex) {
+        // Include entities created after this full pass began.
+        g_propCandidateScan.highestEntityIndex = currentHighestIndex;
+        g_propCandidateScan.nextEntityIndex = currentHighestIndex;
+    }
 
-    const int batchEnd = std::min(
-        g_propCandidateScan.highestEntityIndex,
-        g_propCandidateScan.nextEntityIndex + kPropCandidateScanBatchSize - 1
+    const int batchEnd = std::max(
+        0,
+        g_propCandidateScan.nextEntityIndex - kPropCandidateScanBatchSize + 1
     );
-    for (int entityIndex = g_propCandidateScan.nextEntityIndex; entityIndex <= batchEnd; ++entityIndex) {
+    for (int entityIndex = g_propCandidateScan.nextEntityIndex; entityIndex >= batchEnd; --entityIndex) {
         void* entity = nullptr;
         if (!TryInvokeGetEntityFromIndex(entityList, entityIndex, entity) || entity == nullptr) {
             continue;
@@ -6302,15 +6633,31 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
             g_propCandidateScan.discovered[g_propCandidateScan.discoveredCount++] = candidate;
         }
         else {
-            g_propCandidateScan.nextEntityIndex = g_propCandidateScan.highestEntityIndex + 1;
+            g_propCandidateScan.nextEntityIndex = -1;
             break;
         }
     }
 
-    if (g_propCandidateScan.nextEntityIndex <= batchEnd) {
-        g_propCandidateScan.nextEntityIndex = batchEnd + 1;
+    if (g_propCandidateScan.nextEntityIndex >= batchEnd) {
+        g_propCandidateScan.nextEntityIndex = batchEnd - 1;
     }
-    if (g_propCandidateScan.nextEntityIndex <= g_propCandidateScan.highestEntityIndex) {
+    if (g_propCandidateScan.nextEntityIndex >= 0) {
+        // Do not wait for a full entity-list pass before following a clearly
+        // flying, owner-matched projectile. Because the scan is descending,
+        // this provisional candidate is also the newest matching entity.
+        const PropCandidate earlyCandidate = g_propCandidateScan.discoveredCount > 0u
+            ? g_propCandidateScan.discovered[0]
+            : PropCandidate{};
+        scanLock.unlock();
+        if (earlyCandidate.valid && !GetLockedPropHandle().IsValid()) {
+            SetLockedProp(earlyCandidate);
+            TracePrintf(
+                "prop-early-lock handle=%u kind=%s thrower=%u",
+                earlyCandidate.handle.raw,
+                PropProjectileKindToString(earlyCandidate.kind),
+                earlyCandidate.throwerHandle.raw
+            );
+        }
         return;
     }
 
@@ -6360,7 +6707,7 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
                 break;
             }
         }
-        if (!lockedStillValid && lockedKind == PropProjectileKind::Smoke) {
+        if (!lockedStillValid && lockedKind != PropProjectileKind::Unknown) {
             PropPostFlightHoldState hold{};
             {
                 std::lock_guard holdLock(g_propPostFlightHoldMutex);
@@ -6371,7 +6718,12 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
                 : std::numeric_limits<double>::infinity();
             if (hold.valid
                 && hold.propHandle.raw == g_state.lockedPropHandle.raw
-                && compat::ShouldUseSmokePostFlightHold(hold.kind, false, secondsSinceLastLive, kSmokePostFlightHoldSeconds)) {
+                && compat::ShouldUsePropPostFlightHold(
+                    hold.kind,
+                    false,
+                    secondsSinceLastLive,
+                    kSmokePostFlightHoldSeconds,
+                    kShortPropPostFlightHoldSeconds)) {
                 lockedStillValid = true;
                 lockedThrowerHandle = hold.throwerHandle;
             }
@@ -6417,7 +6769,10 @@ void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) 
 }
 
 bool ShouldRefreshPropCandidates(bool hasLockedProp) {
-    constexpr unsigned long long kUnlockedRefreshIntervalMs = 100u;
+    // Poll the newest entity tail at roughly 30 Hz until a prop is acquired.
+    // This closes the gap for flash / HE demo frames without keeping the more
+    // expensive full entity scan active after a lock has been established.
+    constexpr unsigned long long kUnlockedRefreshIntervalMs = 32u;
     constexpr unsigned long long kLockedRefreshIntervalMs = 250u;
 
     const unsigned long long nowTickMs = GetTickCount64();
@@ -6478,6 +6833,17 @@ ProjectileKinematicSample ReadProjectileKinematics(void* projectile) {
             kMaxProjectileVelocity)) {
         sample.velocity = velocity;
         sample.velocityValid = true;
+    }
+
+    Vec3 initialVelocity{};
+    if (g_offsets.projectileInitialVelocity != 0
+        && TryReadOffsetValue(projectile, g_offsets.projectileInitialVelocity, initialVelocity)
+        && compat::IsUsableProjectileVelocity(
+            compat::CameraVector{ initialVelocity.x, initialVelocity.y, initialVelocity.z },
+            kMaxProjectileVelocity)
+        && Length(initialVelocity) > 0.001f) {
+        sample.initialVelocity = initialVelocity;
+        sample.initialVelocityValid = true;
     }
 
     int bounceCount = 0;
@@ -7032,15 +7398,16 @@ bool TryBuildPropCameraPose(
             : std::numeric_limits<double>::infinity();
         if (hold.valid
             && hold.propHandle.raw == propHandle.raw
-            && compat::ShouldUseSmokePostFlightHold(hold.kind, false, secondsSinceLastLive, kSmokePostFlightHoldSeconds)) {
+            && compat::ShouldUsePropPostFlightHold(
+                hold.kind,
+                false,
+                secondsSinceLastLive,
+                kSmokePostFlightHoldSeconds,
+                kShortPropPostFlightHoldSeconds)) {
             Vec3 basisForward = hold.forward;
-            basisForward.z = 0.0f;
             if (!TryNormalize(basisForward)) {
-                basisForward = hold.forward;
-                if (!TryNormalize(basisForward)) {
-                    failure = Texts().reasonCombatForwardAxisDegenerate;
-                    return false;
-                }
+                failure = Texts().reasonCombatForwardAxisDegenerate;
+                return false;
             }
 
             Vec3 right = Cross(basisForward, kWorldUp);
@@ -7048,7 +7415,10 @@ bool TryBuildPropCameraPose(
                 right = Vec3{ 1.0f, 0.0f, 0.0f };
             }
 
-            const Vec3 up = kWorldUp;
+            Vec3 up = Cross(right, basisForward);
+            if (!TryNormalize(up)) {
+                up = kWorldUp;
+            }
             cameraPosition = Add(
                 Add(
                     Add(hold.anchor, Scale(right, propOffset.x)),
@@ -7076,9 +7446,9 @@ bool TryBuildPropCameraPose(
             );
             cameraAngles = Vec3{ trimmedAngles.x, trimmedAngles.y, trimmedAngles.z };
 #if defined(SELFIESTICK_LANG_ZH_CN)
-            failure = "烟雾弹飞行结束，短暂保留镜头";
+            failure = "道具飞行结束，短暂保留镜头";
 #else
-            failure = "smoke post-flight hold";
+            failure = "prop post-flight hold";
 #endif
             return IsFiniteVec3(cameraPosition) && IsFiniteVec3(cameraAngles);
         }
@@ -7155,21 +7525,33 @@ bool TryBuildPropCameraPose(
     const ProjectileKinematicSample kinematics = ReadProjectileKinematics(propEntity);
     const Vec3 anchor = SmoothPropAnchor(propHandle, propOrigin, kinematics, propFollowSpeed);
 
+    // Keep a fixed launch-frame lookback direction for the lifetime of this
+    // projectile. The old path rebuilt the basis from the moving projectile to
+    // the thrower's current eye position, so the framing drifted away from the
+    // actual release angle as the trajectory advanced.
     Vec3 forward{};
     bool forwardAvailable = false;
-    if (compat::ShouldUseActualThrowerDirection(throwerEyeAvailable, targetEyeAvailable)) {
-        forward = Subtract(throwerEye, anchor);
-        forwardAvailable = TryNormalize(forward);
-        if (forwardAvailable) {
-            UpdateCachedPropForward(propHandle, forward);
-        }
-    }
+    const Vec3 throwerReference = throwerEyeAvailable
+        ? throwerEye
+        : (targetEyeAvailable ? targetEye : referenceOrigin);
 
-    if (!forwardAvailable && targetEyeAvailable) {
-        forward = Subtract(targetEye, anchor);
-        forwardAvailable = TryNormalize(forward);
-        if (forwardAvailable) {
-            UpdateCachedPropForward(propHandle, forward);
+    // Prefer and continuously re-check the real launch vector. A projectile can
+    // be discovered one network frame before m_vInitialVelocity becomes valid;
+    // caching the temporary thrower fallback first made the wrong direction
+    // permanent for the rest of that throw.
+    if (kinematics.initialVelocityValid) {
+        compat::CameraVector launchLookback{};
+        if (compat::TryBuildPropLaunchLookbackDirection(
+                compat::CameraVector{
+                    kinematics.initialVelocity.x,
+                    kinematics.initialVelocity.y,
+                    kinematics.initialVelocity.z
+                },
+                compat::CameraVector{ propOrigin.x, propOrigin.y, propOrigin.z },
+                compat::CameraVector{ throwerReference.x, throwerReference.y, throwerReference.z },
+                launchLookback)) {
+            forward = Vec3{ launchLookback.x, launchLookback.y, launchLookback.z };
+            forwardAvailable = TryNormalize(forward);
         }
     }
 
@@ -7178,11 +7560,29 @@ bool TryBuildPropCameraPose(
     }
 
     if (!forwardAvailable) {
-        forward = Subtract(referenceOrigin, anchor);
-        forwardAvailable = TryNormalize(forward);
-        if (forwardAvailable) {
-            UpdateCachedPropForward(propHandle, forward);
+        compat::CameraVector launchLookback{};
+        if (compat::TryBuildPropLaunchLookbackDirection(
+                compat::CameraVector{},
+                compat::CameraVector{ propOrigin.x, propOrigin.y, propOrigin.z },
+                compat::CameraVector{ throwerReference.x, throwerReference.y, throwerReference.z },
+                launchLookback)) {
+            forward = Vec3{ launchLookback.x, launchLookback.y, launchLookback.z };
+            forwardAvailable = TryNormalize(forward);
         }
+    }
+
+    if (!forwardAvailable && kinematics.velocityValid) {
+        forward = Scale(kinematics.velocity, -1.0f);
+        forwardAvailable = TryNormalize(forward);
+    }
+
+    if (!forwardAvailable) {
+        forward = Subtract(referenceOrigin, propOrigin);
+        forwardAvailable = TryNormalize(forward);
+    }
+
+    if (forwardAvailable) {
+        UpdateCachedPropForward(propHandle, forward);
     }
 
     if (!forwardAvailable) {
@@ -7202,9 +7602,9 @@ bool TryBuildPropCameraPose(
     }
 
     Vec3 basisForward = forward;
-    basisForward.z = 0.0f;
     if (!TryNormalize(basisForward)) {
-        basisForward = forward;
+        failure = Texts().reasonCombatForwardAxisDegenerate;
+        return false;
     }
 
     Vec3 right = Cross(basisForward, kWorldUp);
@@ -7212,7 +7612,10 @@ bool TryBuildPropCameraPose(
         right = Vec3{ 1.0f, 0.0f, 0.0f };
     }
 
-    const Vec3 up = kWorldUp;
+    Vec3 up = Cross(right, basisForward);
+    if (!TryNormalize(up)) {
+        up = kWorldUp;
+    }
 
     cameraPosition = Add(
         Add(
@@ -7225,7 +7628,7 @@ bool TryBuildPropCameraPose(
     compat::CameraVector centeredDirection{};
     if (!compat::TryBuildPropCenteredViewDirection(
             compat::CameraVector{ cameraPosition.x, cameraPosition.y, cameraPosition.z },
-            compat::CameraVector{ anchor.x, anchor.y, anchor.z },
+            compat::CameraVector{ propOrigin.x, propOrigin.y, propOrigin.z },
             compat::CameraVector{ basisForward.x, basisForward.y, basisForward.z },
             centeredDirection)) {
         failure = Texts().reasonCameraDirectionDegenerate;
@@ -7599,13 +8002,19 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         config.lookMode == LookMode::SelfieLeft
     );
 
-    const Vec3 composedTrim{
+    Vec3 composedTrim{
         adjustedTrim.right,
         adjustedTrim.back,
         adjustedTrim.up
     };
+    if (IsSelfieLookMode(config.lookMode)) {
+        // A selfie must stay on the held-item front side. Clamp old or extreme
+        // positive Back trims before composition so they cannot move the
+        // camera behind the agent and turn the shot into another forward view.
+        composedTrim.y = std::min(composedTrim.y, -kMinimumSelfieFrontDistance);
+    }
 
-    const Vec3 cameraPosition = Add(
+    Vec3 cameraPosition = Add(
         Add(
             Add(basis.anchorOrigin, Scale(basis.right, composedTrim.x)),
             Scale(basis.forward, -composedTrim.y)
@@ -7614,8 +8023,22 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     );
 
     Vec3 direction{};
-    if (UsesLookTarget(config.lookMode)) {
-        direction = Subtract(GetLookTargetForBasis(basis, config.lookMode), cameraPosition);
+    if (IsSelfieLookMode(config.lookMode)) {
+        const Vec3 target = GetLookTargetForBasis(basis, config.lookMode);
+        compat::CameraVector position{}, aim{};
+        if (!compat::TryBuildPlayerSelfiePose(
+                {basis.anchorOrigin.x, basis.anchorOrigin.y, basis.anchorOrigin.z},
+                {target.x, target.y, target.z},
+                {basis.forward.x, basis.forward.y, basis.forward.z},
+                {basis.right.x, basis.right.y, basis.right.z},
+                {basis.up.x, basis.up.y, basis.up.z},
+                {composedTrim.x, composedTrim.y, composedTrim.z}, position, aim)) {
+            RestoreSuppressedRenderWithViewModels();
+            UpdateFailureReason(Texts().reasonCameraDirectionDegenerate, true);
+            return;
+        }
+        cameraPosition = {position.x, position.y, position.z};
+        direction = {aim.x, aim.y, aim.z};
     }
     else {
         direction = basis.forward;
@@ -7625,6 +8048,19 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         RestoreSuppressedRenderWithViewModels();
         UpdateFailureReason(Texts().reasonCameraDirectionDegenerate, true);
         return;
+    }
+    if (IsSelfieLookMode(config.lookMode) && Dot(direction, basis.forward) >= 0.0f) {
+        TracePrintf(
+            "selfie-lookback-axis-warning look=%s dot=%.4f camera=(%.3f,%.3f,%.3f) target=(%.3f,%.3f,%.3f)",
+            LookModeToString(config.lookMode),
+            Dot(direction, basis.forward),
+            cameraPosition.x,
+            cameraPosition.y,
+            cameraPosition.z,
+            basis.upperBodyTarget.x,
+            basis.upperBodyTarget.y,
+            basis.upperBodyTarget.z
+        );
     }
 
     float pitch{};
@@ -7995,6 +8431,8 @@ float ReadProfileFloat(const wchar_t* section, const wchar_t* key, float fallbac
 
 void PersistCameraSettingsSnapshot(const RuntimeState& state) {
     const std::wstring settingsPath = GetSettingsFilePath();
+    const std::wstring framingVersion = std::to_wstring(kCurrentFramingVersion);
+    WritePrivateProfileStringW(kSettingsSectionCamera, kSettingsKeyFramingVersion, framingVersion.c_str(), settingsPath.c_str());
     WritePrivateProfileStringW(
         kSettingsSectionCamera,
         kSettingsKeyCameraMode,
@@ -8011,6 +8449,9 @@ void PersistCameraSettingsSnapshot(const RuntimeState& state) {
     WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerPitch, state.playerRotation.x);
     WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerYaw, state.playerRotation.y);
     WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerRoll, state.playerRotation.z);
+    WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerRight, state.offset.x);
+    WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerBack, state.offset.y);
+    WriteProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerUp, state.offset.z);
 }
 
 void TracePrintf(const char* format, ...) {
@@ -8085,6 +8526,12 @@ void LoadPersistedOverlayHotkeySetting() {
 
 void LoadPersistedCameraSettings() {
     const std::wstring settingsPath = GetSettingsFilePath();
+    const int framingVersion = static_cast<int>(GetPrivateProfileIntW(
+        kSettingsSectionCamera,
+        kSettingsKeyFramingVersion,
+        1,
+        settingsPath.c_str()
+    ));
     wchar_t modeBuffer[64]{};
     GetPrivateProfileStringW(
         kSettingsSectionCamera,
@@ -8115,11 +8562,50 @@ void LoadPersistedCameraSettings() {
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropYaw, kDefaultPropYaw),
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropRoll, kDefaultPropRoll)
         };
+        const bool legacyZhPreset = std::fabs(g_state.propOffset.x + 8.0f) < 0.001f
+            && std::fabs(g_state.propOffset.y + 22.0f) < 0.001f
+            && std::fabs(g_state.propOffset.z - 4.0f) < 0.001f
+            && std::fabs(g_state.propRotation.x - 1.0f) < 0.001f;
+        const bool legacyEnPreset = std::fabs(g_state.propOffset.x) < 0.001f
+            && std::fabs(g_state.propOffset.y + 18.0f) < 0.001f
+            && std::fabs(g_state.propOffset.z - 6.0f) < 0.001f
+            && std::fabs(g_state.propRotation.x) < 0.001f;
+        const bool version2FollowPreset = std::fabs(g_state.propOffset.x + 5.5f) < 0.001f
+            && std::fabs(g_state.propOffset.y + 11.5f) < 0.001f
+            && std::fabs(g_state.propOffset.z - 3.0f) < 0.001f
+            && std::fabs(g_state.propRotation.x - 1.5f) < 0.001f
+            && std::fabs(g_state.propRotation.y) < 0.001f
+            && std::fabs(g_state.propRotation.z) < 0.001f;
+        const bool version3CenteredPreset = std::fabs(g_state.propOffset.x + 5.5f) < 0.001f
+            && std::fabs(g_state.propOffset.y + 11.5f) < 0.001f
+            && std::fabs(g_state.propOffset.z - 3.0f) < 0.001f
+            && std::fabs(g_state.propRotation.x) < 0.001f
+            && std::fabs(g_state.propRotation.y) < 0.001f
+            && std::fabs(g_state.propRotation.z) < 0.001f;
+        if (framingVersion < kCurrentFramingVersion
+            && (legacyZhPreset || legacyEnPreset || version2FollowPreset || version3CenteredPreset)) {
+            g_state.propOffset = Vec3{ kDefaultPropOffsetX, kDefaultPropOffsetY, kDefaultPropOffsetZ };
+            g_state.propRotation = Vec3{ kDefaultPropPitch, kDefaultPropYaw, kDefaultPropRoll };
+        }
         g_state.playerRotation = Vec3{
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerPitch, 0.0f),
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerYaw, 0.0f),
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerRoll, 0.0f)
         };
+        g_state.offset = Vec3{
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerRight, 0.0f),
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerBack, 0.0f),
+            ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerUp, 0.0f)
+        };
+        if (framingVersion < 5) {
+            // v5 changes the selfie base from a forward-looking shoulder
+            // interpretation to a muzzle/knife-front lookback. Old trims can
+            // place the camera behind the agent and make the new default look
+            // forward again, so migrate once to the centered zero-trim preset.
+            g_state.lookMode = LookMode::SelfieRight;
+            g_state.offset = Vec3{};
+            g_state.playerRotation = Vec3{};
+        }
         g_state.propFollowSpeed = ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPropFollowSpeed, kDefaultPropFollowSpeed);
         if (g_state.propFollowSpeed <= 0.0f || !std::isfinite(g_state.propFollowSpeed)) {
             g_state.propFollowSpeed = kDefaultPropFollowSpeed;
@@ -8256,6 +8742,20 @@ HBRUSH GetCachedSolidBrush(COLORREF color) {
     return brush;
 }
 
+HPEN GetCachedPen(COLORREF color) {
+    std::lock_guard lock(g_penCacheMutex);
+    const auto existing = g_penCache.find(color);
+    if (existing != g_penCache.end()) {
+        return existing->second;
+    }
+
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    if (pen != nullptr) {
+        g_penCache.emplace(color, pen);
+    }
+    return pen;
+}
+
 void SetOverlayHotkeyVirtualKey(int virtualKey) {
     {
         std::lock_guard lock(g_stateMutex);
@@ -8331,6 +8831,8 @@ std::wstring GetOverlayButtonText(int controlId, HWND controlWindow, const Runti
         return Texts().uiButtonLookSelfieRight;
     case kControlButtonLookForward:
         return Texts().uiButtonLookForward;
+    case kControlButtonPlayerShoulderPreset:
+        return Texts().uiButtonPlayerShoulderPreset;
     case kControlButtonTargetFollow:
         return Texts().uiButtonTargetFollow;
     case kControlButtonTargetLock:
@@ -8373,6 +8875,49 @@ void SetEditFloatText(HWND edit, float value) {
     wchar_t buffer[64]{};
     swprintf_s(buffer, L"%.3f", value);
     SetControlText(edit, buffer);
+}
+
+int SliderPositionFromValue(float value) {
+    return static_cast<int>(std::lround(value * kSliderUnitsPerValue));
+}
+
+float SliderValueFromPosition(HWND slider) {
+    if (slider == nullptr) {
+        return 0.0f;
+    }
+    return static_cast<float>(SendMessageW(slider, TBM_GETPOS, 0, 0)) / kSliderUnitsPerValue;
+}
+
+void SetSliderFloatValue(HWND slider, float value) {
+    if (slider == nullptr) {
+        return;
+    }
+    const int minimum = static_cast<int>(SendMessageW(slider, TBM_GETRANGEMIN, 0, 0));
+    const int maximum = static_cast<int>(SendMessageW(slider, TBM_GETRANGEMAX, 0, 0));
+    const int position = std::clamp(SliderPositionFromValue(value), minimum, maximum);
+    SendMessageW(slider, TBM_SETPOS, TRUE, position);
+}
+
+void SyncPlayerSliders(const RuntimeState& state) {
+    g_ui.suppressSliderSync = true;
+    SetSliderFloatValue(g_ui.offsetXSlider, state.offset.x);
+    SetSliderFloatValue(g_ui.offsetYSlider, state.offset.y);
+    SetSliderFloatValue(g_ui.offsetZSlider, state.offset.z);
+    SetSliderFloatValue(g_ui.playerPitchSlider, state.playerRotation.x);
+    SetSliderFloatValue(g_ui.playerYawSlider, state.playerRotation.y);
+    SetSliderFloatValue(g_ui.playerRollSlider, state.playerRotation.z);
+    g_ui.suppressSliderSync = false;
+}
+
+void SyncPropSliders(const RuntimeState& state) {
+    g_ui.suppressSliderSync = true;
+    SetSliderFloatValue(g_ui.propOffsetXSlider, state.propOffset.x);
+    SetSliderFloatValue(g_ui.propOffsetYSlider, state.propOffset.y);
+    SetSliderFloatValue(g_ui.propOffsetZSlider, state.propOffset.z);
+    SetSliderFloatValue(g_ui.propPitchSlider, state.propRotation.x);
+    SetSliderFloatValue(g_ui.propYawSlider, state.propRotation.y);
+    SetSliderFloatValue(g_ui.propRollSlider, state.propRotation.z);
+    g_ui.suppressSliderSync = false;
 }
 
 std::wstring HandleToWide(EntityHandle handle) {
@@ -8604,6 +9149,15 @@ void SyncOverlayFromState(bool force = false) {
     }
 
     const RuntimeState state = SnapshotState();
+    if (g_ui.imguiInitialized) {
+        g_ui.lastRenderedState = state;
+        g_ui.hasLastRenderedState = true;
+        g_ui.lastRenderedStatusText = BuildOverlayStatusText(state);
+        g_ui.lastRenderedHotkeyChipText = BuildOverlayHotkeyChipText(state.overlayHotkeyVirtualKey);
+        InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
+        return;
+    }
+
     const bool hasLastRenderedState = g_ui.hasLastRenderedState;
     const bool stateChanged = !hasLastRenderedState || !OverlayStateAffectsView(g_ui.lastRenderedState, state);
     if (!force && !stateChanged) {
@@ -8611,6 +9165,7 @@ void SyncOverlayFromState(bool force = false) {
     }
 
     const bool enabledChanged = force || !hasLastRenderedState || g_ui.lastRenderedState.enabled != state.enabled;
+    const bool cameraModeChanged = force || !hasLastRenderedState || g_ui.lastRenderedState.cameraMode != state.cameraMode;
     const bool overlayHotkeyChanged = force || !hasLastRenderedState || g_ui.lastRenderedState.overlayHotkeyVirtualKey != state.overlayHotkeyVirtualKey;
     const bool offsetChanged = force || !hasLastRenderedState
         || g_ui.lastRenderedState.offset.x != state.offset.x
@@ -8632,6 +9187,7 @@ void SyncOverlayFromState(bool force = false) {
         SetControlText(g_ui.lookSelfieLeftButton, Texts().uiButtonLookSelfieLeft);
         SetControlText(g_ui.lookSelfieRightButton, Texts().uiButtonLookSelfieRight);
         SetControlText(g_ui.lookForwardButton, Texts().uiButtonLookForward);
+        SetControlText(g_ui.playerShoulderPresetButton, Texts().uiButtonPlayerShoulderPreset);
         SetControlText(g_ui.targetFollowButton, Texts().uiButtonTargetFollow);
         SetControlText(g_ui.targetLockButton, Texts().uiButtonTargetLockCurrent);
         SetControlText(g_ui.targetClearButton, Texts().uiButtonTargetClear);
@@ -8650,6 +9206,36 @@ void SyncOverlayFromState(bool force = false) {
 
     if (enabledChanged) {
         SetControlText(g_ui.enableButton, state.enabled ? Texts().uiButtonEnableOn : Texts().uiButtonEnableOff);
+    }
+
+    if (cameraModeChanged) {
+        const BOOL playerControlsEnabled = state.cameraMode == CameraMode::PlayerSelfie ? TRUE : FALSE;
+        const BOOL propControlsEnabled = state.cameraMode == CameraMode::PropSelfie ? TRUE : FALSE;
+        const std::array<HWND, 16> playerControls{
+            g_ui.offsetXEdit, g_ui.offsetYEdit, g_ui.offsetZEdit,
+            g_ui.offsetXSlider, g_ui.offsetYSlider, g_ui.offsetZSlider,
+            g_ui.playerPitchEdit, g_ui.playerYawEdit, g_ui.playerRollEdit,
+            g_ui.playerPitchSlider, g_ui.playerYawSlider, g_ui.playerRollSlider,
+            g_ui.playerShoulderPresetButton,
+            g_ui.lookSelfieLeftButton, g_ui.lookSelfieRightButton, g_ui.lookForwardButton
+        };
+        for (HWND control : playerControls) {
+            if (control != nullptr) EnableWindow(control, playerControlsEnabled);
+        }
+
+        const std::array<HWND, 14> propControls{
+            g_ui.propOffsetXEdit, g_ui.propOffsetYEdit, g_ui.propOffsetZEdit,
+            g_ui.propOffsetXSlider, g_ui.propOffsetYSlider, g_ui.propOffsetZSlider,
+            g_ui.propPitchEdit, g_ui.propYawEdit, g_ui.propRollEdit,
+            g_ui.propPitchSlider, g_ui.propYawSlider, g_ui.propRollSlider,
+            g_ui.propClearButton, g_ui.propImageStyleButton
+        };
+        for (HWND control : propControls) {
+            if (control != nullptr) EnableWindow(control, propControlsEnabled);
+        }
+        for (HWND control : g_ui.propLockButtons) {
+            if (control != nullptr) EnableWindow(control, propControlsEnabled);
+        }
     }
 
     if (overlayHotkeyChanged) {
@@ -8673,6 +9259,9 @@ void SyncOverlayFromState(bool force = false) {
         SetEditFloatText(g_ui.playerRollEdit, state.playerRotation.z);
         g_ui.suppressOffsetSync = false;
     }
+    if (offsetChanged) {
+        SyncPlayerSliders(state);
+    }
 
     if (propEditsChanged && !OverlayPropEditHasFocus()) {
         g_ui.suppressPropEditSync = true;
@@ -8684,54 +9273,31 @@ void SyncOverlayFromState(bool force = false) {
         SetEditFloatText(g_ui.propRollEdit, state.propRotation.z);
         g_ui.suppressPropEditSync = false;
     }
+    if (propEditsChanged) {
+        SyncPropSliders(state);
+    }
 
     g_ui.lastRenderedState = state;
     g_ui.hasLastRenderedState = true;
     InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
 }
 
-#if 0
-// Retained only as implementation history. The production panel intentionally
-// uses Win32/GDI controls so opening it never creates a DXGI swap chain inside
-// the ReShade-injected CS2 process.
-template <typename T>
-void SafeRelease(T*& value) {
-    if (value != nullptr) {
-        value->Release();
-        value = nullptr;
-    }
-}
+COLORREF BlendColor(COLORREF from, COLORREF to, float amount);
+void SetRuntimeStatusExpanded(bool expanded);
 
-void CleanupImGuiRenderTarget() {
-    SafeRelease(g_ui.renderTargetView);
-}
-
-void CreateImGuiRenderTarget() {
-    if (g_ui.swapChain == nullptr || g_ui.d3dDevice == nullptr) {
-        return;
-    }
-
-    ID3D11Texture2D* backBuffer = nullptr;
-    if (FAILED(g_ui.swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) || backBuffer == nullptr) {
-        return;
-    }
-
-    g_ui.d3dDevice->CreateRenderTargetView(backBuffer, nullptr, &g_ui.renderTargetView);
-    backBuffer->Release();
-}
-
+#if 1
 void CleanupImGuiOverlay() {
-    if (g_ui.imguiInitialized) {
-        ImGui_ImplDX11_Shutdown();
-        ImGui_ImplWin32_Shutdown();
+    if (ImGui::GetCurrentContext() != nullptr) {
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.BackendRendererUserData != nullptr) {
+            ImGui_ImplGdiSoftware_Shutdown();
+        }
+        if (io.BackendPlatformUserData != nullptr) {
+            ImGui_ImplWin32_Shutdown();
+        }
         ImGui::DestroyContext();
-        g_ui.imguiInitialized = false;
     }
-
-    CleanupImGuiRenderTarget();
-    SafeRelease(g_ui.swapChain);
-    SafeRelease(g_ui.d3dDeviceContext);
-    SafeRelease(g_ui.d3dDevice);
+    g_ui.imguiInitialized = false;
 }
 
 ImVec4 ColorToImVec4(COLORREF color, float alpha = 1.0f) {
@@ -8744,41 +9310,19 @@ ImVec4 ColorToImVec4(COLORREF color, float alpha = 1.0f) {
 }
 
 void ApplyImGuiStyle() {
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 0.0f;
-    style.ChildRounding = 4.0f;
-    style.FrameRounding = 3.0f;
-    style.PopupRounding = 3.0f;
-    style.ScrollbarRounding = 3.0f;
-    style.GrabRounding = 3.0f;
-    style.WindowPadding = ImVec2(14.0f, 14.0f);
-    style.FramePadding = ImVec2(9.0f, 5.0f);
-    style.ItemSpacing = ImVec2(8.0f, 7.0f);
-
-    ImVec4* colors = style.Colors;
-    colors[ImGuiCol_Text] = ColorToImVec4(kColorText);
-    colors[ImGuiCol_TextDisabled] = ColorToImVec4(kColorTextMuted);
-    colors[ImGuiCol_WindowBg] = ColorToImVec4(kColorPanel);
-    colors[ImGuiCol_ChildBg] = ColorToImVec4(kColorPanelStrong);
-    colors[ImGuiCol_Border] = ColorToImVec4(kColorLineStrong);
-    colors[ImGuiCol_FrameBg] = ColorToImVec4(kColorInput);
-    colors[ImGuiCol_FrameBgHovered] = ColorToImVec4(kColorPanelElevated);
-    colors[ImGuiCol_FrameBgActive] = ColorToImVec4(kColorAccentSoft);
-    colors[ImGuiCol_TitleBg] = ColorToImVec4(kColorPanelStrong);
-    colors[ImGuiCol_TitleBgActive] = ColorToImVec4(kColorPanelStrong);
-    colors[ImGuiCol_CheckMark] = ColorToImVec4(kColorAccentStrong);
-    colors[ImGuiCol_SliderGrab] = ColorToImVec4(kColorAccent);
-    colors[ImGuiCol_SliderGrabActive] = ColorToImVec4(kColorAccentStrong);
-    colors[ImGuiCol_Button] = ColorToImVec4(kColorPanelElevated);
-    colors[ImGuiCol_ButtonHovered] = ColorToImVec4(kColorAccentSoft);
-    colors[ImGuiCol_ButtonActive] = ColorToImVec4(kColorAccent);
-    colors[ImGuiCol_Header] = ColorToImVec4(kColorAccentSoft);
-    colors[ImGuiCol_HeaderHovered] = ColorToImVec4(kColorAccent);
-    colors[ImGuiCol_HeaderActive] = ColorToImVec4(kColorAccentStrong);
+    // Keep the upstream geometry and palette, including standard square frames,
+    // blue slider grabs, title bar, separators and collapsing headers.
+    ImGui::GetStyle() = ImGuiStyle{};
+    ImGui::StyleColorsDark();
 }
 
 void LoadImGuiFonts() {
     ImGuiIO& io = ImGui::GetIO();
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+#else
+    const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesDefault();
+#endif
     wchar_t windowsDirectory[MAX_PATH]{};
     if (GetWindowsDirectoryW(windowsDirectory, static_cast<UINT>(std::size(windowsDirectory))) > 0) {
         const std::array<std::wstring, 3> fontCandidates{
@@ -8791,7 +9335,7 @@ void LoadImGuiFonts() {
                 continue;
             }
             const std::string fontPathUtf8 = ToUtf8(fontPath);
-            if (io.Fonts->AddFontFromFileTTF(fontPathUtf8.c_str(), 16.0f, nullptr, io.Fonts->GetGlyphRangesChineseFull()) != nullptr) {
+            if (io.Fonts->AddFontFromFileTTF(fontPathUtf8.c_str(), 16.0f, nullptr, glyphRanges) != nullptr) {
                 return;
             }
         }
@@ -8805,49 +9349,6 @@ bool InitializeImGuiOverlay(HWND window) {
         return true;
     }
 
-    DXGI_SWAP_CHAIN_DESC swapChainDesc{};
-    swapChainDesc.BufferCount = 2;
-    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
-    swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
-    swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.OutputWindow = window;
-    swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.SampleDesc.Quality = 0;
-    swapChainDesc.Windowed = TRUE;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    constexpr D3D_FEATURE_LEVEL featureLevels[] = {
-        D3D_FEATURE_LEVEL_11_0,
-        D3D_FEATURE_LEVEL_10_0
-    };
-    D3D_FEATURE_LEVEL createdFeatureLevel{};
-    const HRESULT createResult = D3D11CreateDeviceAndSwapChain(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
-        nullptr,
-        0,
-        featureLevels,
-        static_cast<UINT>(std::size(featureLevels)),
-        D3D11_SDK_VERSION,
-        &swapChainDesc,
-        &g_ui.swapChain,
-        &g_ui.d3dDevice,
-        &createdFeatureLevel,
-        &g_ui.d3dDeviceContext
-    );
-    if (FAILED(createResult)) {
-        CleanupImGuiOverlay();
-        return false;
-    }
-
-    CreateImGuiRenderTarget();
-    if (g_ui.renderTargetView == nullptr) {
-        CleanupImGuiOverlay();
-        return false;
-    }
-
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -8857,7 +9358,7 @@ bool InitializeImGuiOverlay(HWND window) {
     LoadImGuiFonts();
     ApplyImGuiStyle();
 
-    if (!ImGui_ImplWin32_Init(window) || !ImGui_ImplDX11_Init(g_ui.d3dDevice, g_ui.d3dDeviceContext)) {
+    if (!ImGui_ImplWin32_Init(window) || !ImGui_ImplGdiSoftware_Init(window)) {
         CleanupImGuiOverlay();
         return false;
     }
@@ -8867,13 +9368,10 @@ bool InitializeImGuiOverlay(HWND window) {
 }
 
 void ResizeImGuiOverlay(UINT width, UINT height) {
-    if (g_ui.swapChain == nullptr || width == 0 || height == 0) {
+    if (!g_ui.imguiInitialized || width == 0 || height == 0) {
         return;
     }
-
-    CleanupImGuiRenderTarget();
-    g_ui.swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
-    CreateImGuiRenderTarget();
+    ImGui_ImplGdiSoftware_NewFrame();
 }
 
 std::string WideToUtf8(const wchar_t* text) {
@@ -8887,17 +9385,65 @@ std::string WideToUtf8(const std::wstring& text) {
     return ToUtf8(text);
 }
 
-bool ImGuiModeButton(const char* label, bool active, const ImVec2& size = ImVec2(0.0f, 0.0f)) {
+bool ImGuiModeButton(
+    const char* label,
+    bool active,
+    const ImVec2& size = ImVec2(0.0f, 0.0f),
+    COLORREF /*accent*/ = kColorAccent,
+    COLORREF /*accentStrong*/ = kColorAccentStrong
+) {
     if (active) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ColorToImVec4(kColorAccentSoft));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ColorToImVec4(kColorAccent));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ColorToImVec4(kColorAccentStrong));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     }
     const bool clicked = ImGui::Button(label, size);
     if (active) {
-        ImGui::PopStyleColor(3);
+        ImGui::PopStyleColor();
     }
     return clicked;
+}
+
+void BeginImGuiCard(const char* id, COLORREF /*accent*/, bool /*active*/) {
+    ImGui::PushID(id);
+    ImGui::BeginGroup();
+}
+
+void EndImGuiCard() {
+    ImGui::EndGroup();
+    ImGui::PopID();
+}
+
+void ImGuiSectionHeading(const wchar_t* title, const wchar_t* subtitle = nullptr) {
+    ImGui::SeparatorText(WideToUtf8(title).c_str());
+    if (subtitle != nullptr) {
+        ImGui::TextDisabled("%s", WideToUtf8(subtitle).c_str());
+    }
+    ImGui::Spacing();
+}
+
+struct ImGuiFloatControlResult {
+    bool changed{false};
+    bool commit{false};
+};
+
+ImGuiFloatControlResult ImGuiParameterControl(
+    const wchar_t* label,
+    const char* id,
+    float& value,
+    float minimum,
+    float maximum,
+    COLORREF /*accent*/
+) {
+    ImGuiFloatControlResult result{};
+    ImGui::PushID(id);
+    ImGui::TextDisabled("%s", WideToUtf8(label).c_str());
+    ImGui::SetNextItemWidth(-1.0f);
+    result.changed = ImGui::InputFloat("##value", &value, 0.25f, 1.0f, "%.2f");
+    result.commit = ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::SetNextItemWidth(-1.0f);
+    result.changed = ImGui::SliderFloat("##slider", &value, minimum, maximum, "%.2f", ImGuiSliderFlags_AlwaysClamp) || result.changed;
+    result.commit = ImGui::IsItemDeactivatedAfterEdit() || result.commit;
+    ImGui::PopID();
+    return result;
 }
 
 bool ImGuiFullWidthSliderFloat(const wchar_t* label, const char* id, float* value, float minValue, float maxValue) {
@@ -8913,115 +9459,183 @@ bool ImGuiFullWidthSliderFloat(const wchar_t* label, const char* id, float* valu
 }
 
 void RenderImGuiHeader(const RuntimeState& state) {
-    ImGui::TextUnformatted(WideToUtf8(Texts().uiTitle).c_str());
-    ImGui::SameLine();
-    ImGui::TextColored(
-        state.lastOverrideSucceeded ? ColorToImVec4(kColorSuccess) : (state.enabled ? ColorToImVec4(kColorDanger) : ColorToImVec4(kColorTextMuted)),
-        "%s",
-        WideToUtf8(GetOverlayLifecycleText(state)).c_str()
-    );
     ImGui::TextDisabled("%s", WideToUtf8(Texts().uiSubtitle).c_str());
-    ImGui::Separator();
-    ImGui::Text("%s", WideToUtf8(BuildOverlayHotkeyChipText(state.overlayHotkeyVirtualKey)).c_str());
     ImGui::SameLine();
-    if (ImGuiModeButton(WideToUtf8(BuildOverlayHotkeyButtonText()).c_str(), g_ui.captureOverlayHotkey, ImVec2(150.0f, 0.0f))) {
+    ImGui::TextDisabled("| %s", WideToUtf8(GetOverlayLifecycleText(state)).c_str());
+    ImGui::TextDisabled("%s", WideToUtf8(BuildOverlayHotkeyChipText(state.overlayHotkeyVirtualKey)).c_str());
+    ImGui::SameLine();
+    if (ImGuiModeButton(WideToUtf8(BuildOverlayHotkeyButtonText()).c_str(), g_ui.captureOverlayHotkey)) {
         StartOverlayHotkeyCapture();
     }
 }
 
 void RenderImGuiCameraMode(const RuntimeState& state) {
-    ImGui::TextUnformatted(WideToUtf8(Texts().uiCameraModeSection).c_str());
+    BeginImGuiCard("##camera-mode", state.cameraMode == CameraMode::PropSelfie ? kColorPropAccent : kColorAccent, true);
+    ImGuiSectionHeading(Texts().uiCameraModeSection);
     const float width = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-    if (ImGuiModeButton(WideToUtf8(Texts().uiCameraPlayer).c_str(), state.cameraMode == CameraMode::PlayerSelfie, ImVec2(width, 0.0f))) {
+    if (ImGuiModeButton(WideToUtf8(Texts().uiCameraPlayer).c_str(), state.cameraMode == CameraMode::PlayerSelfie, ImVec2(width, 0.0f), kColorAccent, kColorAccentStrong)) {
         SetCameraMode(CameraMode::PlayerSelfie);
     }
     ImGui::SameLine();
-    if (ImGuiModeButton(WideToUtf8(Texts().uiCameraProp).c_str(), state.cameraMode == CameraMode::PropSelfie, ImVec2(width, 0.0f))) {
+    if (ImGuiModeButton(WideToUtf8(Texts().uiCameraProp).c_str(), state.cameraMode == CameraMode::PropSelfie, ImVec2(width, 0.0f), kColorPropAccent, kColorPropAccentStrong)) {
         SetCameraMode(CameraMode::PropSelfie);
     }
+    EndImGuiCard();
 }
 
 void RenderImGuiPlayerOffset(const RuntimeState& state) {
-    constexpr float kPlayerOffsetSliderMin = -80.0f;
-    constexpr float kPlayerOffsetSliderMax = 80.0f;
-    constexpr float kPlayerRotationSliderMin = -45.0f;
-    constexpr float kPlayerRotationSliderMax = 45.0f;
+    BeginImGuiCard("##player-camera", kColorAccent, true);
+    ImGuiSectionHeading(Texts().uiPlayerOffsetSection, Texts().uiOffsetHint);
 
-    float offset[3]{ state.offset.x, state.offset.y, state.offset.z };
-    ImGui::TextUnformatted(WideToUtf8(Texts().uiPlayerOffsetSection).c_str());
-    ImGui::SetNextItemWidth(-1.0f);
-    bool playerOffsetChanged = ImGui::InputFloat3(WideToUtf8(Texts().uiPlayerOffsetLabel).c_str(), offset, "%.3f");
-    playerOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerRightLabel, "##PlayerRightSlider", &offset[0], kPlayerOffsetSliderMin, kPlayerOffsetSliderMax) || playerOffsetChanged;
-    playerOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerBackLabel, "##PlayerBackSlider", &offset[1], kPlayerOffsetSliderMin, kPlayerOffsetSliderMax) || playerOffsetChanged;
-    playerOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerUpLabel, "##PlayerUpSlider", &offset[2], kPlayerOffsetSliderMin, kPlayerOffsetSliderMax) || playerOffsetChanged;
-    if (playerOffsetChanged) {
-        SetOffset(Vec3{ offset[0], offset[1], offset[2] });
+    Vec3 offset = state.offset;
+    bool offsetChanged = false;
+    bool offsetCommit = false;
+    if (ImGui::BeginTable("##player-position", 3, ImGuiTableFlags_SizingStretchSame)) {
+        const std::array<const wchar_t*, 3> labels{ Texts().uiPlayerRightLabel, Texts().uiPlayerBackLabel, Texts().uiPlayerUpLabel };
+        const std::array<const char*, 3> ids{ "player-right", "player-back", "player-up" };
+        const std::array<float, 3> minimums{ -32.0f, -48.0f, -32.0f };
+        const std::array<float, 3> maximums{ 32.0f, 48.0f, 32.0f };
+        float* values[3]{ &offset.x, &offset.y, &offset.z };
+        for (int column = 0; column < 3; ++column) {
+            ImGui::TableNextColumn();
+            const ImGuiFloatControlResult result = ImGuiParameterControl(labels[column], ids[column], *values[column], minimums[column], maximums[column], kColorAccentStrong);
+            offsetChanged = offsetChanged || result.changed;
+            offsetCommit = offsetCommit || result.commit;
+        }
+        ImGui::EndTable();
+    }
+    if (offsetChanged) {
+        SetOffset(offset, false);
+    }
+    if (offsetCommit) {
+        SetOffset(offset, true);
     }
 
-    float playerRotation[3]{ state.playerRotation.x, state.playerRotation.y, state.playerRotation.z };
-    ImGui::SetNextItemWidth(-1.0f);
-    bool playerRotationChanged = ImGui::InputFloat3(WideToUtf8(Texts().uiPlayerRotationLabel).c_str(), playerRotation, "%.3f");
-    playerRotationChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerPitchLabel, "##PlayerPitchSlider", &playerRotation[0], kPlayerRotationSliderMin, kPlayerRotationSliderMax) || playerRotationChanged;
-    playerRotationChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerYawLabel, "##PlayerYawSlider", &playerRotation[1], kPlayerRotationSliderMin, kPlayerRotationSliderMax) || playerRotationChanged;
-    playerRotationChanged = ImGuiFullWidthSliderFloat(Texts().uiPlayerRollLabel, "##PlayerRollSlider", &playerRotation[2], kPlayerRotationSliderMin, kPlayerRotationSliderMax) || playerRotationChanged;
-    if (playerRotationChanged) {
-        SetPlayerRotation(Vec3{ playerRotation[0], playerRotation[1], playerRotation[2] });
+    ImGui::Spacing();
+    ImGui::SeparatorText(WideToUtf8(Texts().uiPlayerRotationLabel).c_str());
+    Vec3 rotation = state.playerRotation;
+    bool rotationChanged = false;
+    bool rotationCommit = false;
+    if (ImGui::BeginTable("##player-rotation", 3, ImGuiTableFlags_SizingStretchSame)) {
+        const std::array<const wchar_t*, 3> labels{ Texts().uiPlayerPitchLabel, Texts().uiPlayerYawLabel, Texts().uiPlayerRollLabel };
+        const std::array<const char*, 3> ids{ "player-pitch", "player-yaw", "player-roll" };
+        const std::array<float, 3> minimums{ -30.0f, -60.0f, -30.0f };
+        const std::array<float, 3> maximums{ 30.0f, 60.0f, 30.0f };
+        float* values[3]{ &rotation.x, &rotation.y, &rotation.z };
+        for (int column = 0; column < 3; ++column) {
+            ImGui::TableNextColumn();
+            const ImGuiFloatControlResult result = ImGuiParameterControl(labels[column], ids[column], *values[column], minimums[column], maximums[column], kColorAccentStrong);
+            rotationChanged = rotationChanged || result.changed;
+            rotationCommit = rotationCommit || result.commit;
+        }
+        ImGui::EndTable();
+    }
+    if (rotationChanged) {
+        SetPlayerRotation(rotation, false);
+    }
+    if (rotationCommit) {
+        SetPlayerRotation(rotation, true);
     }
 
-    ImGui::TextDisabled("%s", WideToUtf8(Texts().uiOffsetHint).c_str());
+    ImGui::Spacing();
+    const float presetWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    constexpr const char* kCenteredSelfieLabel = "居中人物自拍";
+#else
+    constexpr const char* kCenteredSelfieLabel = "CENTERED PLAYER SELFIE";
+#endif
+    if (ImGuiModeButton(kCenteredSelfieLabel, IsSelfieLookMode(state.lookMode), ImVec2(presetWidth, 0.0f), kColorAccent, kColorAccentStrong)) {
+        ApplyCenteredPlayerSelfiePreset();
+    }
+    ImGui::SameLine();
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPlayerShoulderPreset).c_str(), state.lookMode == LookMode::Forward, ImVec2(presetWidth, 0.0f), kColorWarn, BlendColor(kColorWarn, kColorText, 0.25f))) {
+        ApplyPlayerShoulderPreset();
+    }
+    EndImGuiCard();
 }
 
 void RenderImGuiPropSelfie(const RuntimeState& state) {
-    constexpr float kPropOffsetSliderMin = -64.0f;
-    constexpr float kPropOffsetSliderMax = 64.0f;
-    constexpr float kPropRotationSliderMin = -45.0f;
-    constexpr float kPropRotationSliderMax = 45.0f;
-
+    BeginImGuiCard("##prop-camera", kColorPropAccent, true);
+    ImGuiSectionHeading(Texts().uiPropLabel);
     ImGui::Text(
-        "%s: %s / %s",
-        WideToUtf8(Texts().uiPropLabel).c_str(),
+        "%s  /  %s",
         WideToUtf8(HandleToWide(state.lockedPropHandle)).c_str(),
         WideToUtf8(PropProjectileKindToWide(state.lockedPropKind)).c_str()
     );
 
-    float propOffset[3]{ state.propOffset.x, state.propOffset.y, state.propOffset.z };
-    ImGui::SetNextItemWidth(-1.0f);
-    bool propOffsetChanged = ImGui::InputFloat3(WideToUtf8(Texts().uiPropOffsetLabel).c_str(), propOffset, "%.3f");
-    propOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPropXLabel, "##PropXSlider", &propOffset[0], kPropOffsetSliderMin, kPropOffsetSliderMax) || propOffsetChanged;
-    propOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPropYLabel, "##PropYSlider", &propOffset[1], kPropOffsetSliderMin, kPropOffsetSliderMax) || propOffsetChanged;
-    propOffsetChanged = ImGuiFullWidthSliderFloat(Texts().uiPropZLabel, "##PropZSlider", &propOffset[2], kPropOffsetSliderMin, kPropOffsetSliderMax) || propOffsetChanged;
-    if (propOffsetChanged) {
-        SetPropOffset(Vec3{ propOffset[0], propOffset[1], propOffset[2] });
+    Vec3 offset = state.propOffset;
+    bool offsetChanged = false;
+    bool offsetCommit = false;
+    if (ImGui::BeginTable("##prop-position", 3, ImGuiTableFlags_SizingStretchSame)) {
+        const std::array<const wchar_t*, 3> labels{ Texts().uiPropXLabel, Texts().uiPropYLabel, Texts().uiPropZLabel };
+        const std::array<const char*, 3> ids{ "prop-x", "prop-y", "prop-z" };
+        const std::array<float, 3> minimums{ -24.0f, -32.0f, -12.0f };
+        const std::array<float, 3> maximums{ 24.0f, 4.0f, 20.0f };
+        float* values[3]{ &offset.x, &offset.y, &offset.z };
+        for (int column = 0; column < 3; ++column) {
+            ImGui::TableNextColumn();
+            const ImGuiFloatControlResult result = ImGuiParameterControl(labels[column], ids[column], *values[column], minimums[column], maximums[column], kColorPropAccentStrong);
+            offsetChanged = offsetChanged || result.changed;
+            offsetCommit = offsetCommit || result.commit;
+        }
+        ImGui::EndTable();
+    }
+    if (offsetChanged) {
+        SetPropOffset(offset, false);
+    }
+    if (offsetCommit) {
+        SetPropOffset(offset, true);
     }
 
-    float propRotation[3]{ state.propRotation.x, state.propRotation.y, state.propRotation.z };
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::InputFloat3(WideToUtf8(Texts().uiPropRotationLabel).c_str(), propRotation, "%.3f")) {
-        SetPropRotation(Vec3{ propRotation[0], propRotation[1], propRotation[2] });
+    ImGui::Spacing();
+    ImGui::SeparatorText(WideToUtf8(Texts().uiPropRotationLabel).c_str());
+    Vec3 rotation = state.propRotation;
+    bool rotationChanged = false;
+    bool rotationCommit = false;
+    if (ImGui::BeginTable("##prop-rotation", 3, ImGuiTableFlags_SizingStretchSame)) {
+        const std::array<const wchar_t*, 3> labels{ Texts().uiPropPitchLabel, Texts().uiPropYawLabel, Texts().uiPropRollLabel };
+        const std::array<const char*, 3> ids{ "prop-pitch", "prop-yaw", "prop-roll" };
+        const std::array<float, 3> minimums{ -30.0f, -60.0f, -30.0f };
+        const std::array<float, 3> maximums{ 30.0f, 60.0f, 30.0f };
+        float* values[3]{ &rotation.x, &rotation.y, &rotation.z };
+        for (int column = 0; column < 3; ++column) {
+            ImGui::TableNextColumn();
+            const ImGuiFloatControlResult result = ImGuiParameterControl(labels[column], ids[column], *values[column], minimums[column], maximums[column], kColorPropAccentStrong);
+            rotationChanged = rotationChanged || result.changed;
+            rotationCommit = rotationCommit || result.commit;
+        }
+        ImGui::EndTable();
+    }
+    if (rotationChanged) {
+        SetPropRotation(rotation, false);
+    }
+    if (rotationCommit) {
+        SetPropRotation(rotation, true);
     }
 
-    bool propRotationSliderChanged = false;
-    propRotationSliderChanged = ImGuiFullWidthSliderFloat(Texts().uiPropPitchLabel, "##PropPitchSlider", &propRotation[0], kPropRotationSliderMin, kPropRotationSliderMax) || propRotationSliderChanged;
-    propRotationSliderChanged = ImGuiFullWidthSliderFloat(Texts().uiPropYawLabel, "##PropYawSlider", &propRotation[1], kPropRotationSliderMin, kPropRotationSliderMax) || propRotationSliderChanged;
-    propRotationSliderChanged = ImGuiFullWidthSliderFloat(Texts().uiPropRollLabel, "##PropRollSlider", &propRotation[2], kPropRotationSliderMin, kPropRotationSliderMax) || propRotationSliderChanged;
-    if (propRotationSliderChanged) {
-        SetPropRotation(Vec3{ propRotation[0], propRotation[1], propRotation[2] });
-    }
-
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPropImageStyle).c_str(), false, ImVec2(-1.0f, 0.0f))) {
+    ImGui::Spacing();
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPropImageStyle).c_str(), false, ImVec2(-1.0f, 0.0f), kColorPropAccent, kColorPropAccentStrong)) {
         ApplyPropImageStylePreset();
     }
 
     ImGui::SeparatorText(WideToUtf8(Texts().uiPropRecentSection).c_str());
+    if (ImGui::BeginTable("##prop-list", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 20.0f);
+    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Lock", ImGuiTableColumnFlags_WidthFixed, 78.0f);
     for (std::size_t index = 0u; index < state.propCandidates.size(); ++index) {
         const PropCandidate& candidate = state.propCandidates[index];
         ImGui::PushID(static_cast<int>(index));
         const bool active = state.lockedPropHandle.IsValid() && candidate.handle.raw == state.lockedPropHandle.raw;
         const std::string kind = WideToUtf8(PropProjectileKindToWide(candidate.kind));
-        ImGui::Text(
-            "%u: %s  %s=%u  %s=%u  %s=%u",
-            static_cast<unsigned int>(index + 1u),
-            WideToUtf8(candidate.valid ? Texts().uiPropLive : Texts().uiPropEnded).c_str(),
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", static_cast<unsigned int>(index + 1u));
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(WideToUtf8(candidate.valid ? Texts().uiPropLive : Texts().uiPropEnded).c_str());
+        ImGui::SetItemTooltip(
+            "%s=%u\n%s=%u\n%s=%u",
             WideToUtf8(Texts().uiPropHandleLabel).c_str(),
             candidate.handle.raw,
             WideToUtf8(Texts().uiPropThrowerLabel).c_str(),
@@ -9029,13 +9643,13 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
             WideToUtf8(Texts().uiPropAgeLabel).c_str(),
             candidate.ageFrames
         );
-        ImGui::SameLine();
-        ImGui::TextColored(candidate.valid ? ColorToImVec4(kColorWarn) : ColorToImVec4(kColorTextMuted), "%s", kind.c_str());
-        ImGui::SameLine();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(kind.c_str());
+        ImGui::TableNextColumn();
         if (!candidate.valid || !candidate.handle.IsValid()) {
             ImGui::BeginDisabled();
         }
-        if (ImGuiModeButton(WideToUtf8(active ? Texts().uiButtonPropLocked : Texts().uiButtonPropLock).c_str(), active, ImVec2(78.0f, 0.0f))) {
+        if (ImGuiModeButton(WideToUtf8(active ? Texts().uiButtonPropLocked : Texts().uiButtonPropLock).c_str(), active, ImVec2(78.0f, 0.0f), kColorPropAccent, kColorPropAccentStrong)) {
             SetLockedProp(candidate);
         }
         if (!candidate.valid || !candidate.handle.IsValid()) {
@@ -9043,57 +9657,74 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
         }
         ImGui::PopID();
     }
+    ImGui::EndTable();
+    }
 
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPropClear).c_str(), state.lockedPropHandle.IsValid(), ImVec2(-1.0f, 0.0f))) {
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPropClear).c_str(), state.lockedPropHandle.IsValid(), ImVec2(-1.0f, 0.0f), kColorWarn, BlendColor(kColorWarn, kColorText, 0.24f))) {
         ClearLockedProp();
     }
+    EndImGuiCard();
 }
 
 void RenderImGuiLookAndTarget(const RuntimeState& state) {
-    ImGui::TextUnformatted(WideToUtf8(Texts().uiDirectionSection).c_str());
-    const float lookWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f;
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonLookSelfieLeft).c_str(), state.lookMode == LookMode::SelfieLeft, ImVec2(lookWidth, 0.0f))) {
-        SetLookMode(LookMode::SelfieLeft);
-    }
-    ImGui::SameLine();
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonLookSelfieRight).c_str(), state.lookMode == LookMode::SelfieRight, ImVec2(lookWidth, 0.0f))) {
-        SetLookMode(LookMode::SelfieRight);
-    }
-    ImGui::SameLine();
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonLookForward).c_str(), state.lookMode == LookMode::Forward, ImVec2(lookWidth, 0.0f))) {
-        SetLookMode(LookMode::Forward);
+    const COLORREF accent = state.cameraMode == CameraMode::PropSelfie ? kColorPropAccent : kColorAccent;
+    const COLORREF accentStrong = state.cameraMode == CameraMode::PropSelfie ? kColorPropAccentStrong : kColorAccentStrong;
+    BeginImGuiCard("##look-target", accent, true);
+    if (state.cameraMode == CameraMode::PlayerSelfie) {
+        ImGuiSectionHeading(Texts().uiDirectionSection);
+        const float lookWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f;
+        if (ImGuiModeButton(WideToUtf8(Texts().uiButtonLookSelfieLeft).c_str(), state.lookMode == LookMode::SelfieLeft, ImVec2(lookWidth, 0.0f), kColorAccent, kColorAccentStrong)) {
+            SetLookMode(LookMode::SelfieLeft);
+        }
+        ImGui::SameLine();
+        if (ImGuiModeButton(WideToUtf8(Texts().uiButtonLookSelfieRight).c_str(), state.lookMode == LookMode::SelfieRight, ImVec2(lookWidth, 0.0f), kColorAccent, kColorAccentStrong)) {
+            SetLookMode(LookMode::SelfieRight);
+        }
+        ImGui::SameLine();
+        if (ImGuiModeButton(WideToUtf8(Texts().uiButtonLookForward).c_str(), state.lookMode == LookMode::Forward, ImVec2(lookWidth, 0.0f), kColorWarn, BlendColor(kColorWarn, kColorText, 0.25f))) {
+            SetLookMode(LookMode::Forward);
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
     }
 
-    ImGui::Spacing();
-    ImGui::TextUnformatted(WideToUtf8(Texts().uiTargetSection).c_str());
+    ImGuiSectionHeading(Texts().uiTargetSection);
     const float targetWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f;
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonTargetFollow).c_str(), state.targetMode == TargetMode::Follow, ImVec2(targetWidth, 0.0f))) {
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonTargetFollow).c_str(), state.targetMode == TargetMode::Follow, ImVec2(targetWidth, 0.0f), accent, accentStrong)) {
         SetTargetMode(TargetMode::Follow);
     }
     ImGui::SameLine();
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonTargetLockCurrent).c_str(), state.targetMode == TargetMode::Locked && state.lockedHandle.IsValid(), ImVec2(targetWidth, 0.0f))) {
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonTargetLockCurrent).c_str(), state.targetMode == TargetMode::Locked && state.lockedHandle.IsValid(), ImVec2(targetWidth, 0.0f), accent, accentStrong)) {
         HandleLockCurrent();
     }
     ImGui::SameLine();
-    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonTargetClear).c_str(), state.lockedHandle.IsValid(), ImVec2(targetWidth, 0.0f))) {
+    if (ImGuiModeButton(WideToUtf8(Texts().uiButtonTargetClear).c_str(), state.lockedHandle.IsValid(), ImVec2(targetWidth, 0.0f), kColorWarn, BlendColor(kColorWarn, kColorText, 0.25f))) {
         ClearLockedTarget();
     }
+    EndImGuiCard();
 }
 
 void RenderImGuiStatus(const RuntimeState& state) {
-    const std::string status = WideToUtf8(BuildOverlayStatusText(state));
-    ImGui::SeparatorText(WideToUtf8(Texts().uiRuntimeSection).c_str());
-    ImGui::BeginChild("RuntimeStatus", ImVec2(0.0f, 0.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
-    ImGui::TextUnformatted(status.c_str());
-    ImGui::EndChild();
+    ImGui::SetNextItemOpen(g_ui.runtimeExpanded, ImGuiCond_Always);
+    const bool expanded = ImGui::CollapsingHeader(WideToUtf8(Texts().uiRuntimeSection).c_str());
+    if (expanded != g_ui.runtimeExpanded) {
+        SetRuntimeStatusExpanded(expanded);
+    }
+    if (expanded) {
+        const std::string status = WideToUtf8(BuildOverlayStatusText(state));
+        ImGui::BeginChild("RuntimeStatusText", ImVec2(0.0f, 150.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+        ImGui::TextUnformatted(status.c_str());
+        ImGui::EndChild();
+    }
 }
 
 void RenderImGuiOverlayFrame() {
-    if (!g_ui.imguiInitialized || g_ui.renderTargetView == nullptr) {
+    if (!g_ui.imguiInitialized) {
         return;
     }
 
-    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplGdiSoftware_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
@@ -9102,40 +9733,43 @@ void RenderImGuiOverlayFrame() {
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(io.DisplaySize);
     ImGui::Begin(
-        "SelfiestickPanel",
+        WideToUtf8(Texts().uiTitle).c_str(),
         nullptr,
-        ImGuiWindowFlags_NoTitleBar
-            | ImGuiWindowFlags_NoResize
+        ImGuiWindowFlags_NoResize
             | ImGuiWindowFlags_NoMove
             | ImGuiWindowFlags_NoCollapse
             | ImGuiWindowFlags_NoBringToFrontOnFocus
     );
 
     RenderImGuiHeader(state);
+    ImGui::Spacing();
+    BeginImGuiCard("##enable", kColorAccent, state.enabled);
     if (ImGuiModeButton(
             state.enabled ? WideToUtf8(Texts().uiButtonEnableOn).c_str() : WideToUtf8(Texts().uiButtonEnableOff).c_str(),
             state.enabled,
-            ImVec2(-1.0f, 0.0f))) {
+            ImVec2(-1.0f, 0.0f),
+            kColorAccent,
+            kColorAccentStrong)) {
         ToggleEnabled();
     }
+    EndImGuiCard();
+    ImGui::Spacing();
     RenderImGuiCameraMode(state);
+    ImGui::Spacing();
     if (state.cameraMode == CameraMode::PlayerSelfie) {
         RenderImGuiPlayerOffset(state);
     }
     else {
         RenderImGuiPropSelfie(state);
     }
+    ImGui::Spacing();
     RenderImGuiLookAndTarget(state);
+    ImGui::Spacing();
     RenderImGuiStatus(state);
 
     ImGui::End();
     ImGui::Render();
-
-    constexpr float clearColor[4]{ 13.0f / 255.0f, 17.0f / 255.0f, 23.0f / 255.0f, 1.0f };
-    g_ui.d3dDeviceContext->OMSetRenderTargets(1, &g_ui.renderTargetView, nullptr);
-    g_ui.d3dDeviceContext->ClearRenderTargetView(g_ui.renderTargetView, clearColor);
-    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-    g_ui.swapChain->Present(1, 0);
+    ImGui_ImplGdiSoftware_RenderDrawData(ImGui::GetDrawData());
 }
 #endif
 
@@ -9153,6 +9787,11 @@ void DestroyOverlayResources() {
     if (g_ui.titleFont != nullptr) {
         DeleteObject(g_ui.titleFont);
         g_ui.titleFont = nullptr;
+    }
+
+    if (g_ui.sectionFont != nullptr) {
+        DeleteObject(g_ui.sectionFont);
+        g_ui.sectionFont = nullptr;
     }
 
     if (g_ui.bodyFont != nullptr) {
@@ -9174,10 +9813,19 @@ void DestroyOverlayResources() {
         }
         g_solidBrushCache.clear();
     }
+    {
+        std::lock_guard lock(g_penCacheMutex);
+        for (auto& entry : g_penCache) {
+            if (entry.second != nullptr) {
+                DeleteObject(entry.second);
+            }
+        }
+        g_penCache.clear();
+    }
 }
 
 bool EnsureOverlayResources() {
-    if (g_ui.panelBrush != nullptr && g_ui.editBrush != nullptr && g_ui.titleFont != nullptr && g_ui.bodyFont != nullptr && g_ui.monoFont != nullptr) {
+    if (g_ui.panelBrush != nullptr && g_ui.editBrush != nullptr && g_ui.titleFont != nullptr && g_ui.sectionFont != nullptr && g_ui.bodyFont != nullptr && g_ui.monoFont != nullptr) {
         return true;
     }
 
@@ -9186,10 +9834,11 @@ bool EnsureOverlayResources() {
     g_ui.panelBrush = CreateSolidBrush(kColorPanel);
     g_ui.editBrush = CreateSolidBrush(kColorInput);
     g_ui.titleFont = CreateFontW(-24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, Texts().uiFontName);
+    g_ui.sectionFont = CreateFontW(-14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, Texts().uiFontName);
     g_ui.bodyFont = CreateFontW(-15, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, Texts().uiFontName);
     g_ui.monoFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, Texts().uiMonoFontName);
 
-    if (g_ui.panelBrush == nullptr || g_ui.editBrush == nullptr || g_ui.titleFont == nullptr || g_ui.bodyFont == nullptr || g_ui.monoFont == nullptr) {
+    if (g_ui.panelBrush == nullptr || g_ui.editBrush == nullptr || g_ui.titleFont == nullptr || g_ui.sectionFont == nullptr || g_ui.bodyFont == nullptr || g_ui.monoFont == nullptr) {
         DestroyOverlayResources();
         return false;
     }
@@ -9424,12 +10073,19 @@ struct OverlayLayout {
     RECT offsetXEditRect{};
     RECT offsetYEditRect{};
     RECT offsetZEditRect{};
+    RECT offsetXSliderRect{};
+    RECT offsetYSliderRect{};
+    RECT offsetZSliderRect{};
     RECT playerPitchLabelRect{};
     RECT playerYawLabelRect{};
     RECT playerRollLabelRect{};
     RECT playerPitchEditRect{};
     RECT playerYawEditRect{};
     RECT playerRollEditRect{};
+    RECT playerPitchSliderRect{};
+    RECT playerYawSliderRect{};
+    RECT playerRollSliderRect{};
+    RECT playerShoulderPresetButtonRect{};
 
     RECT propLabelRect{};
     RECT propChipRect{};
@@ -9439,12 +10095,18 @@ struct OverlayLayout {
     RECT propOffsetXEditRect{};
     RECT propOffsetYEditRect{};
     RECT propOffsetZEditRect{};
+    RECT propOffsetXSliderRect{};
+    RECT propOffsetYSliderRect{};
+    RECT propOffsetZSliderRect{};
     RECT propPitchLabelRect{};
     RECT propYawLabelRect{};
     RECT propRollLabelRect{};
     RECT propPitchEditRect{};
     RECT propYawEditRect{};
     RECT propRollEditRect{};
+    RECT propPitchSliderRect{};
+    RECT propYawSliderRect{};
+    RECT propRollSliderRect{};
     RECT propLockButtonRects[kMaxPropCandidates]{};
     RECT propClearButtonRect{};
     RECT propImageStyleButtonRect{};
@@ -9486,19 +10148,19 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
     OverlayLayout layout{};
     layout.clientRect = clientRect;
 
-    const int sideMargin = 16;
+    const int sideMargin = 12;
     const int topMargin = 10;
-    const int cardGap = 8;
-    const int sectionPadding = 12;
-    const int buttonGap = 12;
+    const int cardGap = 7;
+    const int sectionPadding = 10;
+    const int buttonGap = 8;
     const int cardWidth = RectWidth(layout.clientRect) - sideMargin * 2;
-    const int headerHeight = 110;
-    const int enableHeight = 66;
-    const int cameraHeight = 64;
-    const int offsetHeight = 148;
-    const int propHeight = 218;
-    const int lookHeight = 86;
-    const int targetHeight = 72;
+    const int headerHeight = 76;
+    const int enableHeight = 54;
+    const int cameraHeight = 60;
+    const int offsetHeight = 202;
+    const int propHeight = 220;
+    const int lookHeight = 70;
+    const int targetHeight = 62;
 
     int currentTop = topMargin;
     layout.headerRect = MakeRect(sideMargin, currentTop, cardWidth, headerHeight);
@@ -9526,78 +10188,91 @@ const OverlayLayout& GetOverlayLayout(HWND window) {
         g_ui.runtimeExpanded ? statusAvailableHeight : 52
     );
 
-    layout.titleRect = MakeRect(layout.headerRect.left + sectionPadding, layout.headerRect.top + 10, cardWidth - 220, 24);
-    layout.subtitleRect = MakeRect(layout.headerRect.left + sectionPadding, layout.headerRect.top + 36, cardWidth - 220, 18);
+    layout.titleRect = MakeRect(layout.headerRect.left + 64, layout.headerRect.top + 8, cardWidth - 274, 24);
+    layout.subtitleRect = MakeRect(layout.headerRect.left + 64, layout.headerRect.top + 33, cardWidth - 274, 18);
     layout.statusChipRect = MakeRect(layout.headerRect.right - 124, layout.headerRect.top + 12, 112, 22);
-    layout.hotkeyChipRect = MakeRect(layout.headerRect.right - 172, layout.headerRect.top + 42, 160, 22);
-    layout.hotkeyButtonRect = MakeRect(layout.headerRect.left + sectionPadding, layout.headerRect.top + 72, cardWidth - sectionPadding * 2, 28);
+    layout.hotkeyChipRect = MakeRect(layout.headerRect.right - 172, layout.headerRect.top + 40, 160, 20);
+    layout.hotkeyButtonRect = MakeRect(layout.headerRect.left + sectionPadding, layout.headerRect.top + 54, cardWidth - sectionPadding * 2, 16);
 
-    layout.enableLabelRect = MakeRect(layout.enableCardRect.left + sectionPadding, layout.enableCardRect.top + 12, 160, 16);
-    layout.enableChipRect = MakeRect(layout.enableCardRect.right - 92, layout.enableCardRect.top + 12, 80, 18);
-    layout.enableButtonRect = MakeRect(layout.enableCardRect.left + sectionPadding, layout.enableCardRect.top + 28, cardWidth - sectionPadding * 2, 28);
+    layout.enableLabelRect = MakeRect(layout.enableCardRect.left + sectionPadding, layout.enableCardRect.top + 5, 160, 16);
+    layout.enableChipRect = MakeRect(layout.enableCardRect.right - 90, layout.enableCardRect.top + 5, 80, 18);
+    layout.enableButtonRect = MakeRect(layout.enableCardRect.left + sectionPadding, layout.enableCardRect.top + 24, cardWidth - sectionPadding * 2, 24);
 
-    layout.cameraLabelRect = MakeRect(layout.cameraCardRect.left + sectionPadding, layout.cameraCardRect.top + 12, 180, 16);
-    layout.cameraChipRect = MakeRect(layout.cameraCardRect.right - 116, layout.cameraCardRect.top + 12, 104, 18);
+    layout.cameraLabelRect = MakeRect(layout.cameraCardRect.left + sectionPadding, layout.cameraCardRect.top + 8, 180, 16);
+    layout.cameraChipRect = MakeRect(layout.cameraCardRect.right - 114, layout.cameraCardRect.top + 8, 104, 18);
     const int cameraButtonWidth = (cardWidth - sectionPadding * 2 - buttonGap) / 2;
-    layout.cameraPlayerButtonRect = MakeRect(layout.cameraCardRect.left + sectionPadding, layout.cameraCardRect.top + 30, cameraButtonWidth, 28);
-    layout.cameraPropButtonRect = MakeRect(layout.cameraPlayerButtonRect.right + buttonGap, layout.cameraCardRect.top + 30, cameraButtonWidth, 28);
+    layout.cameraPlayerButtonRect = MakeRect(layout.cameraCardRect.left + sectionPadding, layout.cameraCardRect.top + 29, cameraButtonWidth, 24);
+    layout.cameraPropButtonRect = MakeRect(layout.cameraPlayerButtonRect.right + buttonGap, layout.cameraCardRect.top + 29, cameraButtonWidth, 24);
 
-    layout.offsetLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 12, 180, 16);
-    layout.offsetXLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 34, 80, 14);
-    layout.offsetYLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + (cardWidth - sectionPadding * 2 - buttonGap * 2) / 3 + buttonGap, layout.offsetCardRect.top + 34, 80, 14);
-    layout.offsetZLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + ((cardWidth - sectionPadding * 2 - buttonGap * 2) / 3 + buttonGap) * 2, layout.offsetCardRect.top + 34, 80, 14);
+    layout.offsetLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 8, 220, 16);
+    layout.offsetXLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 27, 80, 14);
+    layout.offsetYLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + (cardWidth - sectionPadding * 2 - buttonGap * 2) / 3 + buttonGap, layout.offsetCardRect.top + 27, 80, 14);
+    layout.offsetZLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + ((cardWidth - sectionPadding * 2 - buttonGap * 2) / 3 + buttonGap) * 2, layout.offsetCardRect.top + 27, 80, 14);
     const int offsetEditWidth = (cardWidth - sectionPadding * 2 - buttonGap * 2) / 3;
-    layout.offsetXEditRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 50, offsetEditWidth, 30);
-    layout.offsetYEditRect = MakeRect(layout.offsetXEditRect.right + buttonGap, layout.offsetCardRect.top + 50, offsetEditWidth, 30);
-    layout.offsetZEditRect = MakeRect(layout.offsetYEditRect.right + buttonGap, layout.offsetCardRect.top + 50, offsetEditWidth, 30);
-    layout.playerPitchLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 82, 80, 14);
-    layout.playerYawLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + offsetEditWidth + buttonGap, layout.offsetCardRect.top + 82, 80, 14);
-    layout.playerRollLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + (offsetEditWidth + buttonGap) * 2, layout.offsetCardRect.top + 82, 80, 14);
-    layout.playerPitchEditRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 98, offsetEditWidth, 28);
-    layout.playerYawEditRect = MakeRect(layout.playerPitchEditRect.right + buttonGap, layout.offsetCardRect.top + 98, offsetEditWidth, 28);
-    layout.playerRollEditRect = MakeRect(layout.playerYawEditRect.right + buttonGap, layout.offsetCardRect.top + 98, offsetEditWidth, 28);
-    layout.offsetHintRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.bottom - 20, cardWidth - sectionPadding * 2, 14);
+    layout.offsetXEditRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 42, offsetEditWidth, 24);
+    layout.offsetYEditRect = MakeRect(layout.offsetXEditRect.right + buttonGap, layout.offsetCardRect.top + 42, offsetEditWidth, 24);
+    layout.offsetZEditRect = MakeRect(layout.offsetYEditRect.right + buttonGap, layout.offsetCardRect.top + 42, offsetEditWidth, 24);
+    layout.offsetXSliderRect = MakeRect(layout.offsetXEditRect.left, layout.offsetCardRect.top + 68, offsetEditWidth, 16);
+    layout.offsetYSliderRect = MakeRect(layout.offsetYEditRect.left, layout.offsetCardRect.top + 68, offsetEditWidth, 16);
+    layout.offsetZSliderRect = MakeRect(layout.offsetZEditRect.left, layout.offsetCardRect.top + 68, offsetEditWidth, 16);
+    layout.playerPitchLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 88, 80, 14);
+    layout.playerYawLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + offsetEditWidth + buttonGap, layout.offsetCardRect.top + 88, 80, 14);
+    layout.playerRollLabelRect = MakeRect(layout.offsetCardRect.left + sectionPadding + (offsetEditWidth + buttonGap) * 2, layout.offsetCardRect.top + 88, 80, 14);
+    layout.playerPitchEditRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 103, offsetEditWidth, 24);
+    layout.playerYawEditRect = MakeRect(layout.playerPitchEditRect.right + buttonGap, layout.offsetCardRect.top + 103, offsetEditWidth, 24);
+    layout.playerRollEditRect = MakeRect(layout.playerYawEditRect.right + buttonGap, layout.offsetCardRect.top + 103, offsetEditWidth, 24);
+    layout.playerPitchSliderRect = MakeRect(layout.playerPitchEditRect.left, layout.offsetCardRect.top + 129, offsetEditWidth, 16);
+    layout.playerYawSliderRect = MakeRect(layout.playerYawEditRect.left, layout.offsetCardRect.top + 129, offsetEditWidth, 16);
+    layout.playerRollSliderRect = MakeRect(layout.playerRollEditRect.left, layout.offsetCardRect.top + 129, offsetEditWidth, 16);
+    layout.offsetHintRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 149, cardWidth - sectionPadding * 2, 14);
+    layout.playerShoulderPresetButtonRect = MakeRect(layout.offsetCardRect.left + sectionPadding, layout.offsetCardRect.top + 169, cardWidth - sectionPadding * 2, 25);
 
-    layout.propLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 12, 180, 16);
-    layout.propChipRect = MakeRect(layout.propCardRect.right - 132, layout.propCardRect.top + 12, 120, 18);
+    layout.propLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 8, 180, 16);
+    layout.propChipRect = MakeRect(layout.propCardRect.right - 130, layout.propCardRect.top + 8, 120, 18);
     const int propEditWidth = (cardWidth - sectionPadding * 2 - buttonGap * 2) / 3;
-    layout.propOffsetXLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 34, 80, 14);
-    layout.propOffsetYLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + propEditWidth + buttonGap, layout.propCardRect.top + 34, 80, 14);
-    layout.propOffsetZLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + (propEditWidth + buttonGap) * 2, layout.propCardRect.top + 34, 80, 14);
-    layout.propOffsetXEditRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 50, propEditWidth, 28);
-    layout.propOffsetYEditRect = MakeRect(layout.propOffsetXEditRect.right + buttonGap, layout.propCardRect.top + 50, propEditWidth, 28);
-    layout.propOffsetZEditRect = MakeRect(layout.propOffsetYEditRect.right + buttonGap, layout.propCardRect.top + 50, propEditWidth, 28);
-    layout.propPitchLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 82, 80, 14);
-    layout.propYawLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + propEditWidth + buttonGap, layout.propCardRect.top + 82, 80, 14);
-    layout.propRollLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + (propEditWidth + buttonGap) * 2, layout.propCardRect.top + 82, 80, 14);
-    layout.propPitchEditRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 98, propEditWidth, 28);
-    layout.propYawEditRect = MakeRect(layout.propPitchEditRect.right + buttonGap, layout.propCardRect.top + 98, propEditWidth, 28);
-    layout.propRollEditRect = MakeRect(layout.propYawEditRect.right + buttonGap, layout.propCardRect.top + 98, propEditWidth, 28);
+    layout.propOffsetXLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 27, 80, 14);
+    layout.propOffsetYLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + propEditWidth + buttonGap, layout.propCardRect.top + 27, 80, 14);
+    layout.propOffsetZLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + (propEditWidth + buttonGap) * 2, layout.propCardRect.top + 27, 80, 14);
+    layout.propOffsetXEditRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 42, propEditWidth, 24);
+    layout.propOffsetYEditRect = MakeRect(layout.propOffsetXEditRect.right + buttonGap, layout.propCardRect.top + 42, propEditWidth, 24);
+    layout.propOffsetZEditRect = MakeRect(layout.propOffsetYEditRect.right + buttonGap, layout.propCardRect.top + 42, propEditWidth, 24);
+    layout.propOffsetXSliderRect = MakeRect(layout.propOffsetXEditRect.left, layout.propCardRect.top + 68, propEditWidth, 16);
+    layout.propOffsetYSliderRect = MakeRect(layout.propOffsetYEditRect.left, layout.propCardRect.top + 68, propEditWidth, 16);
+    layout.propOffsetZSliderRect = MakeRect(layout.propOffsetZEditRect.left, layout.propCardRect.top + 68, propEditWidth, 16);
+    layout.propPitchLabelRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 88, 80, 14);
+    layout.propYawLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + propEditWidth + buttonGap, layout.propCardRect.top + 88, 80, 14);
+    layout.propRollLabelRect = MakeRect(layout.propCardRect.left + sectionPadding + (propEditWidth + buttonGap) * 2, layout.propCardRect.top + 88, 80, 14);
+    layout.propPitchEditRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 103, propEditWidth, 24);
+    layout.propYawEditRect = MakeRect(layout.propPitchEditRect.right + buttonGap, layout.propCardRect.top + 103, propEditWidth, 24);
+    layout.propRollEditRect = MakeRect(layout.propYawEditRect.right + buttonGap, layout.propCardRect.top + 103, propEditWidth, 24);
+    layout.propPitchSliderRect = MakeRect(layout.propPitchEditRect.left, layout.propCardRect.top + 129, propEditWidth, 16);
+    layout.propYawSliderRect = MakeRect(layout.propYawEditRect.left, layout.propCardRect.top + 129, propEditWidth, 16);
+    layout.propRollSliderRect = MakeRect(layout.propRollEditRect.left, layout.propCardRect.top + 129, propEditWidth, 16);
     const int propButtonWidth = (cardWidth - sectionPadding * 2 - buttonGap * 5) / 6;
     for (std::size_t index = 0u; index < kMaxPropCandidates; ++index) {
         layout.propLockButtonRects[index] = MakeRect(
             layout.propCardRect.left + sectionPadding + static_cast<int>(index) * (propButtonWidth + buttonGap),
-            layout.propCardRect.top + 140,
+            layout.propCardRect.top + 155,
             propButtonWidth,
-            28
+            24
         );
     }
-    layout.propClearButtonRect = MakeRect(layout.propLockButtonRects[kMaxPropCandidates - 1u].right + buttonGap, layout.propCardRect.top + 140, propButtonWidth, 28);
-    layout.propImageStyleButtonRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 176, cardWidth - sectionPadding * 2, 28);
+    layout.propClearButtonRect = MakeRect(layout.propLockButtonRects[kMaxPropCandidates - 1u].right + buttonGap, layout.propCardRect.top + 155, propButtonWidth, 24);
+    layout.propImageStyleButtonRect = MakeRect(layout.propCardRect.left + sectionPadding, layout.propCardRect.top + 187, cardWidth - sectionPadding * 2, 25);
 
-    layout.lookLabelRect = MakeRect(layout.lookCardRect.left + sectionPadding, layout.lookCardRect.top + 12, 180, 16);
-    layout.lookChipRect = MakeRect(layout.lookCardRect.right - 116, layout.lookCardRect.top + 12, 104, 18);
+    layout.lookLabelRect = MakeRect(layout.lookCardRect.left + sectionPadding, layout.lookCardRect.top + 8, 180, 16);
+    layout.lookChipRect = MakeRect(layout.lookCardRect.right - 114, layout.lookCardRect.top + 8, 104, 18);
     const int lookButtonWidth = (cardWidth - sectionPadding * 2 - buttonGap * 2) / 3;
-    layout.lookSelfieLeftButtonRect = MakeRect(layout.lookCardRect.left + sectionPadding, layout.lookCardRect.top + 40, lookButtonWidth, 30);
-    layout.lookSelfieRightButtonRect = MakeRect(layout.lookSelfieLeftButtonRect.right + buttonGap, layout.lookCardRect.top + 40, lookButtonWidth, 30);
-    layout.lookForwardButtonRect = MakeRect(layout.lookSelfieRightButtonRect.right + buttonGap, layout.lookCardRect.top + 40, lookButtonWidth, 30);
+    layout.lookSelfieLeftButtonRect = MakeRect(layout.lookCardRect.left + sectionPadding, layout.lookCardRect.top + 34, lookButtonWidth, 26);
+    layout.lookSelfieRightButtonRect = MakeRect(layout.lookSelfieLeftButtonRect.right + buttonGap, layout.lookCardRect.top + 34, lookButtonWidth, 26);
+    layout.lookForwardButtonRect = MakeRect(layout.lookSelfieRightButtonRect.right + buttonGap, layout.lookCardRect.top + 34, lookButtonWidth, 26);
 
-    layout.targetLabelRect = MakeRect(layout.targetCardRect.left + sectionPadding, layout.targetCardRect.top + 12, 180, 16);
-    layout.targetChipRect = MakeRect(layout.targetCardRect.right - 116, layout.targetCardRect.top + 12, 104, 18);
+    layout.targetLabelRect = MakeRect(layout.targetCardRect.left + sectionPadding, layout.targetCardRect.top + 7, 180, 16);
+    layout.targetChipRect = MakeRect(layout.targetCardRect.right - 114, layout.targetCardRect.top + 7, 104, 18);
     const int targetButtonWidth = (cardWidth - sectionPadding * 2 - buttonGap * 2) / 3;
-    layout.targetFollowButtonRect = MakeRect(layout.targetCardRect.left + sectionPadding, layout.targetCardRect.top + 30, targetButtonWidth, 30);
-    layout.targetLockButtonRect = MakeRect(layout.targetFollowButtonRect.right + buttonGap, layout.targetCardRect.top + 30, targetButtonWidth, 30);
-    layout.targetClearButtonRect = MakeRect(layout.targetLockButtonRect.right + buttonGap, layout.targetCardRect.top + 30, targetButtonWidth, 30);
+    layout.targetFollowButtonRect = MakeRect(layout.targetCardRect.left + sectionPadding, layout.targetCardRect.top + 29, targetButtonWidth, 25);
+    layout.targetLockButtonRect = MakeRect(layout.targetFollowButtonRect.right + buttonGap, layout.targetCardRect.top + 29, targetButtonWidth, 25);
+    layout.targetClearButtonRect = MakeRect(layout.targetLockButtonRect.right + buttonGap, layout.targetCardRect.top + 29, targetButtonWidth, 25);
 
     layout.statusHeaderButtonRect = MakeRect(
         layout.statusCardRect.left + 8,
@@ -9641,15 +10316,28 @@ void LayoutOverlayControls(HWND overlayWindow) {
     MoveOverlayControl(g_ui.offsetXEdit, layout.offsetXEditRect);
     MoveOverlayControl(g_ui.offsetYEdit, layout.offsetYEditRect);
     MoveOverlayControl(g_ui.offsetZEdit, layout.offsetZEditRect);
+    MoveOverlayControl(g_ui.offsetXSlider, layout.offsetXSliderRect);
+    MoveOverlayControl(g_ui.offsetYSlider, layout.offsetYSliderRect);
+    MoveOverlayControl(g_ui.offsetZSlider, layout.offsetZSliderRect);
     MoveOverlayControl(g_ui.playerPitchEdit, layout.playerPitchEditRect);
     MoveOverlayControl(g_ui.playerYawEdit, layout.playerYawEditRect);
     MoveOverlayControl(g_ui.playerRollEdit, layout.playerRollEditRect);
+    MoveOverlayControl(g_ui.playerPitchSlider, layout.playerPitchSliderRect);
+    MoveOverlayControl(g_ui.playerYawSlider, layout.playerYawSliderRect);
+    MoveOverlayControl(g_ui.playerRollSlider, layout.playerRollSliderRect);
+    MoveOverlayControl(g_ui.playerShoulderPresetButton, layout.playerShoulderPresetButtonRect);
     MoveOverlayControl(g_ui.propOffsetXEdit, layout.propOffsetXEditRect);
     MoveOverlayControl(g_ui.propOffsetYEdit, layout.propOffsetYEditRect);
     MoveOverlayControl(g_ui.propOffsetZEdit, layout.propOffsetZEditRect);
+    MoveOverlayControl(g_ui.propOffsetXSlider, layout.propOffsetXSliderRect);
+    MoveOverlayControl(g_ui.propOffsetYSlider, layout.propOffsetYSliderRect);
+    MoveOverlayControl(g_ui.propOffsetZSlider, layout.propOffsetZSliderRect);
     MoveOverlayControl(g_ui.propPitchEdit, layout.propPitchEditRect);
     MoveOverlayControl(g_ui.propYawEdit, layout.propYawEditRect);
     MoveOverlayControl(g_ui.propRollEdit, layout.propRollEditRect);
+    MoveOverlayControl(g_ui.propPitchSlider, layout.propPitchSliderRect);
+    MoveOverlayControl(g_ui.propYawSlider, layout.propYawSliderRect);
+    MoveOverlayControl(g_ui.propRollSlider, layout.propRollSliderRect);
     for (std::size_t index = 0u; index < kMaxPropCandidates; ++index) {
         MoveOverlayControl(g_ui.propLockButtons[index], layout.propLockButtonRects[index]);
     }
@@ -9721,6 +10409,30 @@ HWND CreateOverlayEdit(HWND parent, int controlId, int x, int y, int width, int 
     return control;
 }
 
+HWND CreateOverlaySlider(HWND parent, int controlId, float minimum, float maximum) {
+    HWND control = CreateWindowExW(
+        0,
+        TRACKBAR_CLASSW,
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
+        0,
+        0,
+        1,
+        1,
+        parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+        g_module,
+        nullptr
+    );
+    if (control != nullptr) {
+        SendMessageW(control, TBM_SETRANGEMIN, FALSE, SliderPositionFromValue(minimum));
+        SendMessageW(control, TBM_SETRANGEMAX, FALSE, SliderPositionFromValue(maximum));
+        SendMessageW(control, TBM_SETLINESIZE, 0, 1);
+        SendMessageW(control, TBM_SETPAGESIZE, 0, 4);
+    }
+    return control;
+}
+
 bool CreateOverlayControls(HWND overlayWindow) {
     g_ui.enableButton = CreateOverlayButton(overlayWindow, kControlButtonEnable, Texts().uiButtonEnableOff, 0, 0, 1, 1);
     g_ui.cameraPlayerButton = CreateOverlayButton(overlayWindow, kControlButtonCameraPlayer, Texts().uiCameraPlayer, 0, 0, 1, 1);
@@ -9728,15 +10440,28 @@ bool CreateOverlayControls(HWND overlayWindow) {
     g_ui.offsetXEdit = CreateOverlayEdit(overlayWindow, kControlEditOffsetX, 0, 0, 1, 1, false);
     g_ui.offsetYEdit = CreateOverlayEdit(overlayWindow, kControlEditOffsetY, 0, 0, 1, 1, false);
     g_ui.offsetZEdit = CreateOverlayEdit(overlayWindow, kControlEditOffsetZ, 0, 0, 1, 1, false);
+    g_ui.offsetXSlider = CreateOverlaySlider(overlayWindow, kControlSliderOffsetX, -32.0f, 32.0f);
+    g_ui.offsetYSlider = CreateOverlaySlider(overlayWindow, kControlSliderOffsetY, -48.0f, 48.0f);
+    g_ui.offsetZSlider = CreateOverlaySlider(overlayWindow, kControlSliderOffsetZ, -32.0f, 32.0f);
     g_ui.playerPitchEdit = CreateOverlayEdit(overlayWindow, kControlEditPlayerPitch, 0, 0, 1, 1, false);
     g_ui.playerYawEdit = CreateOverlayEdit(overlayWindow, kControlEditPlayerYaw, 0, 0, 1, 1, false);
     g_ui.playerRollEdit = CreateOverlayEdit(overlayWindow, kControlEditPlayerRoll, 0, 0, 1, 1, false);
+    g_ui.playerPitchSlider = CreateOverlaySlider(overlayWindow, kControlSliderPlayerPitch, -30.0f, 30.0f);
+    g_ui.playerYawSlider = CreateOverlaySlider(overlayWindow, kControlSliderPlayerYaw, -60.0f, 60.0f);
+    g_ui.playerRollSlider = CreateOverlaySlider(overlayWindow, kControlSliderPlayerRoll, -30.0f, 30.0f);
+    g_ui.playerShoulderPresetButton = CreateOverlayButton(overlayWindow, kControlButtonPlayerShoulderPreset, Texts().uiButtonPlayerShoulderPreset, 0, 0, 1, 1);
     g_ui.propOffsetXEdit = CreateOverlayEdit(overlayWindow, kControlEditPropOffsetX, 0, 0, 1, 1, false);
     g_ui.propOffsetYEdit = CreateOverlayEdit(overlayWindow, kControlEditPropOffsetY, 0, 0, 1, 1, false);
     g_ui.propOffsetZEdit = CreateOverlayEdit(overlayWindow, kControlEditPropOffsetZ, 0, 0, 1, 1, false);
+    g_ui.propOffsetXSlider = CreateOverlaySlider(overlayWindow, kControlSliderPropOffsetX, -24.0f, 24.0f);
+    g_ui.propOffsetYSlider = CreateOverlaySlider(overlayWindow, kControlSliderPropOffsetY, -32.0f, 4.0f);
+    g_ui.propOffsetZSlider = CreateOverlaySlider(overlayWindow, kControlSliderPropOffsetZ, -12.0f, 20.0f);
     g_ui.propPitchEdit = CreateOverlayEdit(overlayWindow, kControlEditPropPitch, 0, 0, 1, 1, false);
     g_ui.propYawEdit = CreateOverlayEdit(overlayWindow, kControlEditPropYaw, 0, 0, 1, 1, false);
     g_ui.propRollEdit = CreateOverlayEdit(overlayWindow, kControlEditPropRoll, 0, 0, 1, 1, false);
+    g_ui.propPitchSlider = CreateOverlaySlider(overlayWindow, kControlSliderPropPitch, -30.0f, 30.0f);
+    g_ui.propYawSlider = CreateOverlaySlider(overlayWindow, kControlSliderPropYaw, -60.0f, 60.0f);
+    g_ui.propRollSlider = CreateOverlaySlider(overlayWindow, kControlSliderPropRoll, -30.0f, 30.0f);
     g_ui.lookSelfieLeftButton = CreateOverlayButton(overlayWindow, kControlButtonLookSelfieLeft, Texts().uiButtonLookSelfieLeft, 0, 0, 1, 1);
     g_ui.lookSelfieRightButton = CreateOverlayButton(overlayWindow, kControlButtonLookSelfieRight, Texts().uiButtonLookSelfieRight, 0, 0, 1, 1);
     g_ui.lookForwardButton = CreateOverlayButton(overlayWindow, kControlButtonLookForward, Texts().uiButtonLookForward, 0, 0, 1, 1);
@@ -9763,15 +10488,28 @@ bool CreateOverlayControls(HWND overlayWindow) {
         && g_ui.offsetXEdit != nullptr
         && g_ui.offsetYEdit != nullptr
         && g_ui.offsetZEdit != nullptr
+        && g_ui.offsetXSlider != nullptr
+        && g_ui.offsetYSlider != nullptr
+        && g_ui.offsetZSlider != nullptr
         && g_ui.playerPitchEdit != nullptr
         && g_ui.playerYawEdit != nullptr
         && g_ui.playerRollEdit != nullptr
+        && g_ui.playerPitchSlider != nullptr
+        && g_ui.playerYawSlider != nullptr
+        && g_ui.playerRollSlider != nullptr
+        && g_ui.playerShoulderPresetButton != nullptr
         && g_ui.propOffsetXEdit != nullptr
         && g_ui.propOffsetYEdit != nullptr
         && g_ui.propOffsetZEdit != nullptr
+        && g_ui.propOffsetXSlider != nullptr
+        && g_ui.propOffsetYSlider != nullptr
+        && g_ui.propOffsetZSlider != nullptr
         && g_ui.propPitchEdit != nullptr
         && g_ui.propYawEdit != nullptr
         && g_ui.propRollEdit != nullptr
+        && g_ui.propPitchSlider != nullptr
+        && g_ui.propYawSlider != nullptr
+        && g_ui.propRollSlider != nullptr
         && g_ui.lookSelfieLeftButton != nullptr
         && g_ui.lookSelfieRightButton != nullptr
         && g_ui.lookForwardButton != nullptr
@@ -9803,11 +10541,6 @@ bool EnsureOverlayWindow() {
 
     if (!IsWindow(g_ui.hostWindow)) {
         ConsolePrintf(Texts().logOverlayHostMissing);
-        return false;
-    }
-
-    if (!EnsureOverlayResources()) {
-        ConsolePrintf(Texts().logOverlayResourcesUnavailable);
         return false;
     }
 
@@ -9949,7 +10682,7 @@ void ApplyOffsetFromEdits() {
         return;
     }
 
-    SetOffset(Vec3{ x, y, z });
+    SetOffset(Vec3{ x, y, z }, false);
     SetPlayerRotation(Vec3{ pitch, yaw, roll });
 }
 
@@ -9973,7 +10706,7 @@ void ApplyPropEdits() {
         return;
     }
 
-    SetPropOffset(Vec3{ x, y, z });
+    SetPropOffset(Vec3{ x, y, z }, false);
     SetPropRotation(Vec3{ pitch, yaw, roll });
 }
 
@@ -9987,6 +10720,7 @@ void ResetOffsetEditsFromState() {
     SetEditFloatText(g_ui.playerYawEdit, state.playerRotation.y);
     SetEditFloatText(g_ui.playerRollEdit, state.playerRotation.z);
     g_ui.suppressOffsetSync = false;
+    SyncPlayerSliders(state);
 }
 
 void ResetPropEditsFromState() {
@@ -9999,6 +10733,62 @@ void ResetPropEditsFromState() {
     SetEditFloatText(g_ui.propYawEdit, state.propRotation.y);
     SetEditFloatText(g_ui.propRollEdit, state.propRotation.z);
     g_ui.suppressPropEditSync = false;
+    SyncPropSliders(state);
+}
+
+void HandleOverlaySliderScroll(HWND slider, int scrollCode) {
+    if (slider == nullptr || g_ui.suppressSliderSync) {
+        return;
+    }
+
+    const float value = SliderValueFromPosition(slider);
+    const bool persist = scrollCode != TB_THUMBTRACK;
+    RuntimeState state = SnapshotState();
+    if (slider == g_ui.offsetXSlider || slider == g_ui.offsetYSlider || slider == g_ui.offsetZSlider) {
+        if (slider == g_ui.offsetXSlider) state.offset.x = value;
+        if (slider == g_ui.offsetYSlider) state.offset.y = value;
+        if (slider == g_ui.offsetZSlider) state.offset.z = value;
+        SetOffset(state.offset, persist);
+        g_ui.suppressOffsetSync = true;
+        if (slider == g_ui.offsetXSlider) SetEditFloatText(g_ui.offsetXEdit, value);
+        if (slider == g_ui.offsetYSlider) SetEditFloatText(g_ui.offsetYEdit, value);
+        if (slider == g_ui.offsetZSlider) SetEditFloatText(g_ui.offsetZEdit, value);
+        g_ui.suppressOffsetSync = false;
+    }
+    else if (slider == g_ui.playerPitchSlider || slider == g_ui.playerYawSlider || slider == g_ui.playerRollSlider) {
+        if (slider == g_ui.playerPitchSlider) state.playerRotation.x = value;
+        if (slider == g_ui.playerYawSlider) state.playerRotation.y = value;
+        if (slider == g_ui.playerRollSlider) state.playerRotation.z = value;
+        SetPlayerRotation(state.playerRotation, persist);
+        g_ui.suppressOffsetSync = true;
+        if (slider == g_ui.playerPitchSlider) SetEditFloatText(g_ui.playerPitchEdit, value);
+        if (slider == g_ui.playerYawSlider) SetEditFloatText(g_ui.playerYawEdit, value);
+        if (slider == g_ui.playerRollSlider) SetEditFloatText(g_ui.playerRollEdit, value);
+        g_ui.suppressOffsetSync = false;
+    }
+    else if (slider == g_ui.propOffsetXSlider || slider == g_ui.propOffsetYSlider || slider == g_ui.propOffsetZSlider) {
+        if (slider == g_ui.propOffsetXSlider) state.propOffset.x = value;
+        if (slider == g_ui.propOffsetYSlider) state.propOffset.y = value;
+        if (slider == g_ui.propOffsetZSlider) state.propOffset.z = value;
+        SetPropOffset(state.propOffset, persist);
+        g_ui.suppressPropEditSync = true;
+        if (slider == g_ui.propOffsetXSlider) SetEditFloatText(g_ui.propOffsetXEdit, value);
+        if (slider == g_ui.propOffsetYSlider) SetEditFloatText(g_ui.propOffsetYEdit, value);
+        if (slider == g_ui.propOffsetZSlider) SetEditFloatText(g_ui.propOffsetZEdit, value);
+        g_ui.suppressPropEditSync = false;
+    }
+    else if (slider == g_ui.propPitchSlider || slider == g_ui.propYawSlider || slider == g_ui.propRollSlider) {
+        if (slider == g_ui.propPitchSlider) state.propRotation.x = value;
+        if (slider == g_ui.propYawSlider) state.propRotation.y = value;
+        if (slider == g_ui.propRollSlider) state.propRotation.z = value;
+        SetPropRotation(state.propRotation, persist);
+        g_ui.suppressPropEditSync = true;
+        if (slider == g_ui.propPitchSlider) SetEditFloatText(g_ui.propPitchEdit, value);
+        if (slider == g_ui.propYawSlider) SetEditFloatText(g_ui.propYawEdit, value);
+        if (slider == g_ui.propRollSlider) SetEditFloatText(g_ui.propRollEdit, value);
+        g_ui.suppressPropEditSync = false;
+    }
+    InvalidateRect(g_ui.overlayWindow, nullptr, FALSE);
 }
 
 void LockPropCandidateByIndex(std::size_t index) {
@@ -10070,6 +10860,9 @@ void HandleOverlayCommand(WPARAM wParam) {
             break;
         case kControlButtonLookForward:
             SetLookMode(LookMode::Forward);
+            break;
+        case kControlButtonPlayerShoulderPreset:
+            ApplyPlayerShoulderPreset();
             break;
         case kControlButtonTargetFollow:
             SetTargetMode(TargetMode::Follow);
@@ -10188,10 +10981,109 @@ struct OverlayButtonVisual {
     COLORREF background;
     COLORREF border;
     COLORREF text;
+    COLORREF accent;
+    bool active;
+    bool warning;
 };
 
+COLORREF BlendColor(COLORREF from, COLORREF to, float amount) {
+    const float ratio = std::clamp(amount, 0.0f, 1.0f);
+    const auto blendChannel = [ratio](BYTE fromChannel, BYTE toChannel) {
+        return static_cast<BYTE>(std::lround(
+            static_cast<float>(fromChannel)
+            + (static_cast<float>(toChannel) - static_cast<float>(fromChannel)) * ratio
+        ));
+    };
+    return RGB(
+        blendChannel(GetRValue(from), GetRValue(to)),
+        blendChannel(GetGValue(from), GetGValue(to)),
+        blendChannel(GetBValue(from), GetBValue(to))
+    );
+}
+
+void FillGradientRect(HDC dc, const RECT& rect, COLORREF startColor, COLORREF endColor, bool horizontal) {
+    const int extent = horizontal ? RectWidth(rect) : RectHeight(rect);
+    if (extent <= 0) {
+        return;
+    }
+
+    constexpr int kMaxGradientBands = 36;
+    const int bandCount = std::clamp(extent / 3, 1, kMaxGradientBands);
+    HBRUSH brush = static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
+    const COLORREF previousColor = SetDCBrushColor(dc, startColor);
+    for (int band = 0; band < bandCount; ++band) {
+        const int start = extent * band / bandCount;
+        const int end = extent * (band + 1) / bandCount;
+        RECT bandRect = rect;
+        if (horizontal) {
+            bandRect.left += start;
+            bandRect.right = rect.left + end;
+        }
+        else {
+            bandRect.top += start;
+            bandRect.bottom = rect.top + end;
+        }
+        const float ratio = bandCount > 1
+            ? static_cast<float>(band) / static_cast<float>(bandCount - 1)
+            : 0.0f;
+        SetDCBrushColor(dc, BlendColor(startColor, endColor, ratio));
+        FillRect(dc, &bandRect, brush);
+    }
+    SetDCBrushColor(dc, previousColor);
+}
+
+void DrawRoundedGradientSurface(
+    HDC dc,
+    const RECT& rect,
+    COLORREF startColor,
+    COLORREF endColor,
+    COLORREF borderColor,
+    int radius,
+    bool horizontal = false
+) {
+    const int savedDc = SaveDC(dc);
+    HRGN clipRegion = CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, radius, radius);
+    if (clipRegion != nullptr) {
+        SelectClipRgn(dc, clipRegion);
+        FillGradientRect(dc, rect, startColor, endColor, horizontal);
+        SelectClipRgn(dc, nullptr);
+        DeleteObject(clipRegion);
+    }
+    RestoreDC(dc, savedDc);
+
+    HPEN borderPen = GetCachedPen(borderColor);
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    HGDIOBJ oldPen = SelectObject(dc, borderPen != nullptr ? borderPen : GetStockObject(NULL_PEN));
+    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+}
+
+void DrawRoundedSurface(HDC dc, const RECT& rect, COLORREF fillColor, COLORREF borderColor, int radius) {
+    HBRUSH fillBrush = GetCachedSolidBrush(fillColor);
+    HPEN borderPen = GetCachedPen(borderColor);
+    HGDIOBJ oldBrush = SelectObject(dc, fillBrush != nullptr ? fillBrush : GetStockObject(NULL_BRUSH));
+    HGDIOBJ oldPen = SelectObject(dc, borderPen != nullptr ? borderPen : GetStockObject(NULL_PEN));
+    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+}
+
 OverlayButtonVisual GetOverlayButtonVisual(int controlId, const RuntimeState& state, UINT itemState) {
-    OverlayButtonVisual visual{ kColorPanelElevated, kColorLine, kColorTextMuted };
+    COLORREF accent = kColorAccent;
+    COLORREF accentStrong = kColorAccentStrong;
+    COLORREF accentSoft = kColorAccentSoft;
+    const bool propControl = controlId == kControlButtonCameraProp
+        || controlId == kControlButtonPropImageStyle
+        || controlId == kControlButtonPropClear
+        || (controlId >= kControlButtonPropLock1 && controlId <= kControlButtonPropLock5);
+    if (propControl) {
+        accent = kColorPropAccent;
+        accentStrong = kColorPropAccentStrong;
+        accentSoft = kColorPropAccentSoft;
+    }
+
+    OverlayButtonVisual visual{ kColorPanelElevated, kColorLine, kColorTextMuted, accent, false, false };
 
     bool active = false;
     bool warning = false;
@@ -10215,6 +11107,9 @@ OverlayButtonVisual GetOverlayButtonVisual(int controlId, const RuntimeState& st
     case kControlButtonLookForward:
         active = state.lookMode == LookMode::Forward;
         break;
+    case kControlButtonPlayerShoulderPreset:
+        active = state.cameraMode == CameraMode::PlayerSelfie && state.lookMode == LookMode::Forward;
+        break;
     case kControlButtonTargetFollow:
         active = state.targetMode == TargetMode::Follow;
         break;
@@ -10228,7 +11123,7 @@ OverlayButtonVisual GetOverlayButtonVisual(int controlId, const RuntimeState& st
         warning = state.lockedPropHandle.IsValid();
         break;
     case kControlButtonPropImageStyle:
-        warning = state.cameraMode == CameraMode::PropSelfie;
+        active = state.cameraMode == CameraMode::PropSelfie;
         break;
     case kControlButtonPropLock1:
     case kControlButtonPropLock2:
@@ -10260,25 +11155,30 @@ OverlayButtonVisual GetOverlayButtonVisual(int controlId, const RuntimeState& st
         visual.background = RGB(53, 32, 24);
         visual.border = kColorWarn;
         visual.text = kColorText;
+        visual.accent = kColorWarn;
+        visual.warning = true;
     }
 
     if (active) {
-        visual.background = kColorAccentSoft;
-        visual.border = kColorAccentStrong;
+        visual.background = accent;
+        visual.border = accentStrong;
         visual.text = kColorText;
+        visual.accent = accentStrong;
+        visual.active = true;
     }
 
     if ((itemState & ODS_SELECTED) != 0) {
         if (active) {
-            visual.background = kColorAccent;
+            visual.background = accentSoft;
         }
         else if (warning) {
             visual.background = RGB(80, 48, 33);
         }
         else {
             visual.background = RGB(28, 38, 53);
-            visual.border = kColorAccentStrong;
+            visual.border = accentStrong;
             visual.text = kColorText;
+            visual.accent = accentStrong;
         }
     }
 
@@ -10295,34 +11195,154 @@ LRESULT HandleOverlayDrawItem(const DRAWITEMSTRUCT* drawItem) {
 
     RECT frameRect = drawItem->rcItem;
     const bool focused = (drawItem->itemState & ODS_FOCUS) != 0;
-    const COLORREF borderColor = focused ? kColorAccentStrong : visual.border;
+    const COLORREF borderColor = focused ? visual.accent : visual.border;
 
-    if (HBRUSH backgroundBrush = GetCachedSolidBrush(visual.background)) {
-        FillRect(drawItem->hDC, &frameRect, backgroundBrush);
-    }
-
-    if (HBRUSH borderBrush = GetCachedSolidBrush(borderColor)) {
-        FrameRect(drawItem->hDC, &frameRect, borderBrush);
-    }
+    RECT shadowRect = frameRect;
+    OffsetRect(&shadowRect, 0, 2);
+    const COLORREF shadowColor = visual.active
+        ? BlendColor(kColorPanelShadow, visual.accent, 0.20f)
+        : kColorPanelShadow;
+    DrawRoundedSurface(drawItem->hDC, shadowRect, shadowColor, shadowColor, 9);
+    const COLORREF gradientStart = visual.active
+        ? BlendColor(visual.background, kColorText, 0.12f)
+        : BlendColor(visual.background, kColorText, 0.045f);
+    const COLORREF gradientEnd = visual.active
+        ? BlendColor(visual.background, kColorPanelShadow, 0.20f)
+        : BlendColor(visual.background, kColorPanelShadow, 0.12f);
+    DrawRoundedGradientSurface(drawItem->hDC, frameRect, gradientStart, gradientEnd, borderColor, 8);
 
     RECT innerRect = frameRect;
     InflateRect(&innerRect, -1, -1);
     if (focused && GetCachedSolidBrush(kColorAccent) != nullptr) {
-        HBRUSH innerBorderBrush = GetCachedSolidBrush(kColorAccent);
-        FrameRect(drawItem->hDC, &innerRect, innerBorderBrush);
+        DrawRoundedSurface(drawItem->hDC, innerRect, visual.background, kColorAccent, 6);
+    }
+
+    if (visual.active || visual.warning) {
+        RECT activeRail = frameRect;
+        activeRail.left += 12;
+        activeRail.right -= 12;
+        activeRail.top = activeRail.bottom - 3;
+        DrawRoundedSurface(drawItem->hDC, activeRail, visual.accent, visual.accent, 4);
     }
 
     RECT textRect = frameRect;
     InflateRect(&textRect, -12, -4);
     SetBkMode(drawItem->hDC, TRANSPARENT);
     SetTextColor(drawItem->hDC, visual.text);
-    SelectObject(drawItem->hDC, g_ui.bodyFont);
+    SelectObject(drawItem->hDC, visual.active ? g_ui.sectionFont : g_ui.bodyFont);
 
     const std::wstring text = GetOverlayButtonText(static_cast<int>(drawItem->CtlID), drawItem->hwndItem, state);
     const UINT alignment = drawItem->CtlID == kControlButtonRuntimeToggle ? DT_LEFT : DT_CENTER;
     DrawTextW(drawItem->hDC, text.c_str(), -1, &textRect, alignment | DT_VCENTER | DT_SINGLELINE);
 
     return TRUE;
+}
+
+bool IsOverlaySlider(HWND control) {
+    return control == g_ui.offsetXSlider
+        || control == g_ui.offsetYSlider
+        || control == g_ui.offsetZSlider
+        || control == g_ui.playerPitchSlider
+        || control == g_ui.playerYawSlider
+        || control == g_ui.playerRollSlider
+        || control == g_ui.propOffsetXSlider
+        || control == g_ui.propOffsetYSlider
+        || control == g_ui.propOffsetZSlider
+        || control == g_ui.propPitchSlider
+        || control == g_ui.propYawSlider
+        || control == g_ui.propRollSlider;
+}
+
+bool IsPropOverlaySlider(HWND control) {
+    return control == g_ui.propOffsetXSlider
+        || control == g_ui.propOffsetYSlider
+        || control == g_ui.propOffsetZSlider
+        || control == g_ui.propPitchSlider
+        || control == g_ui.propYawSlider
+        || control == g_ui.propRollSlider;
+}
+
+LRESULT HandleOverlaySliderCustomDraw(NMCUSTOMDRAW* customDraw) {
+    if (customDraw == nullptr || !IsOverlaySlider(customDraw->hdr.hwndFrom)) {
+        return CDRF_DODEFAULT;
+    }
+
+    if (customDraw->dwDrawStage == CDDS_PREPAINT) {
+        RECT clientRect{};
+        GetClientRect(customDraw->hdr.hwndFrom, &clientRect);
+        if (HBRUSH brush = GetCachedSolidBrush(kColorPanelInset)) {
+            FillRect(customDraw->hdc, &clientRect, brush);
+        }
+        return CDRF_NOTIFYITEMDRAW;
+    }
+
+    if (customDraw->dwDrawStage != CDDS_ITEMPREPAINT) {
+        return CDRF_DODEFAULT;
+    }
+
+    if (customDraw->dwItemSpec == TBCD_CHANNEL) {
+        const bool propSlider = IsPropOverlaySlider(customDraw->hdr.hwndFrom);
+        const COLORREF accent = propSlider ? kColorPropAccent : kColorAccent;
+        const COLORREF accentStrong = propSlider ? kColorPropAccentStrong : kColorAccentStrong;
+        RECT channel{};
+        SendMessageW(customDraw->hdr.hwndFrom, TBM_GETCHANNELRECT, 0, reinterpret_cast<LPARAM>(&channel));
+        const int centerY = (channel.top + channel.bottom) / 2;
+        channel.top = centerY - 3;
+        channel.bottom = centerY + 3;
+        const bool enabled = IsWindowEnabled(customDraw->hdr.hwndFrom) != FALSE;
+        DrawRoundedSurface(customDraw->hdc, channel, enabled ? kColorLine : kColorPanelInset, enabled ? kColorLineStrong : kColorLine, 6);
+
+        const int minimum = static_cast<int>(SendMessageW(customDraw->hdr.hwndFrom, TBM_GETRANGEMIN, 0, 0));
+        const int maximum = static_cast<int>(SendMessageW(customDraw->hdr.hwndFrom, TBM_GETRANGEMAX, 0, 0));
+        const int position = static_cast<int>(SendMessageW(customDraw->hdr.hwndFrom, TBM_GETPOS, 0, 0));
+        const float ratio = maximum > minimum
+            ? static_cast<float>(position - minimum) / static_cast<float>(maximum - minimum)
+            : 0.0f;
+        RECT active = channel;
+        active.right = active.left + static_cast<int>(std::lround(static_cast<float>(RectWidth(channel)) * std::clamp(ratio, 0.0f, 1.0f)));
+        if (active.right > active.left) {
+            DrawRoundedGradientSurface(
+                customDraw->hdc,
+                active,
+                enabled ? accentStrong : kColorLineStrong,
+                enabled ? accent : kColorLineStrong,
+                enabled ? accent : kColorLineStrong,
+                6,
+                true
+            );
+        }
+        return CDRF_SKIPDEFAULT;
+    }
+
+    if (customDraw->dwItemSpec == TBCD_THUMB) {
+        const bool propSlider = IsPropOverlaySlider(customDraw->hdr.hwndFrom);
+        const COLORREF accent = propSlider ? kColorPropAccent : kColorAccent;
+        const COLORREF accentStrong = propSlider ? kColorPropAccentStrong : kColorAccentStrong;
+        RECT thumb = customDraw->rc;
+        const bool enabled = IsWindowEnabled(customDraw->hdr.hwndFrom) != FALSE;
+        RECT halo = thumb;
+        InflateRect(&halo, 2, 2);
+        HBRUSH haloBrush = GetCachedSolidBrush(enabled ? BlendColor(kColorPanelInset, accent, 0.60f) : kColorLine);
+        HPEN haloPen = GetCachedPen(enabled ? accent : kColorLine);
+        HGDIOBJ oldHaloBrush = SelectObject(customDraw->hdc, haloBrush != nullptr ? haloBrush : GetStockObject(NULL_BRUSH));
+        HGDIOBJ oldHaloPen = SelectObject(customDraw->hdc, haloPen != nullptr ? haloPen : GetStockObject(NULL_PEN));
+        Ellipse(customDraw->hdc, halo.left, halo.top, halo.right, halo.bottom);
+        SelectObject(customDraw->hdc, oldHaloPen);
+        SelectObject(customDraw->hdc, oldHaloBrush);
+
+        InflateRect(&thumb, -1, -1);
+        const COLORREF fill = enabled ? accentStrong : kColorLineStrong;
+        HBRUSH brush = GetCachedSolidBrush(fill);
+        HPEN pen = GetCachedPen(enabled ? kColorText : kColorLine);
+        HGDIOBJ oldBrush = SelectObject(customDraw->hdc, brush != nullptr ? brush : GetStockObject(NULL_BRUSH));
+        HGDIOBJ oldPen = SelectObject(customDraw->hdc, pen != nullptr ? pen : GetStockObject(NULL_PEN));
+        Ellipse(customDraw->hdc, thumb.left, thumb.top, thumb.right, thumb.bottom);
+        SelectObject(customDraw->hdc, oldPen);
+        SelectObject(customDraw->hdc, oldBrush);
+        return CDRF_SKIPDEFAULT;
+    }
+
+    return CDRF_DODEFAULT;
 }
 
 void FillSolidRect(HDC dc, const RECT& rect, COLORREF color) {
@@ -10353,15 +11373,36 @@ bool ControlHasFocus(HWND control) {
 }
 
 void DrawSectionCard(HDC dc, const RECT& rect, COLORREF fillColor, COLORREF borderColor) {
-    FillSolidRect(dc, rect, fillColor);
-    DrawRectOutline(dc, rect, borderColor);
+    RECT shadowRect = rect;
+    OffsetRect(&shadowRect, 0, 4);
+    DrawRoundedSurface(dc, shadowRect, kColorPanelShadow, kColorPanelShadow, 13);
+    DrawRoundedGradientSurface(
+        dc,
+        rect,
+        BlendColor(fillColor, kColorText, 0.045f),
+        BlendColor(fillColor, kColorPanelShadow, 0.18f),
+        borderColor,
+        12
+    );
+
+    RECT topSheen = rect;
+    topSheen.left += 18;
+    topSheen.right -= 18;
+    topSheen.top += 2;
+    topSheen.bottom = topSheen.top + 1;
+    FillGradientRect(
+        dc,
+        topSheen,
+        BlendColor(borderColor, kColorText, 0.16f),
+        BlendColor(borderColor, fillColor, 0.72f),
+        true
+    );
 }
 
 void DrawOverlayText(HDC dc, const wchar_t* text, const RECT& rect, HFONT font, COLORREF color, UINT format);
 
 void DrawChip(HDC dc, const RECT& rect, const wchar_t* text, HFONT font, COLORREF fillColor, COLORREF borderColor, COLORREF textColor) {
-    FillSolidRect(dc, rect, fillColor);
-    DrawRectOutline(dc, rect, borderColor);
+    DrawRoundedSurface(dc, rect, fillColor, borderColor, 7);
     RECT textRect = rect;
     InflateRect(&textRect, -10, -2);
     DrawOverlayText(dc, text, textRect, font, textColor, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -10375,8 +11416,20 @@ void DrawInputChrome(HDC dc, HWND parent, HWND control, COLORREF borderColor) {
 
     RECT outerRect = rect;
     InflateRect(&outerRect, 2, 2);
-    FillSolidRect(dc, outerRect, kColorInput);
-    DrawRectOutline(dc, outerRect, borderColor);
+    DrawRoundedSurface(dc, outerRect, kColorInput, borderColor, 6);
+}
+
+bool IsOverlayWaitingForProp(const RuntimeState& state) {
+    if (!state.enabled
+        || state.cameraMode != CameraMode::PropSelfie
+        || state.lockedPropHandle.IsValid()) {
+        return false;
+    }
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    return state.lastFailureReason == "未锁定道具";
+#else
+    return state.lastFailureReason == "no prop locked";
+#endif
 }
 
 const wchar_t* GetOverlayLifecycleText(const RuntimeState& state) {
@@ -10386,6 +11439,10 @@ const wchar_t* GetOverlayLifecycleText(const RuntimeState& state) {
 
     if (!state.enabled) {
         return Texts().uiLifecycleIdle;
+    }
+
+    if (IsOverlayWaitingForProp(state)) {
+        return Texts().uiLifecycleWaiting;
     }
 
     if (state.lastOverrideSucceeded) {
@@ -10404,6 +11461,10 @@ COLORREF GetOverlayLifecycleFill(const RuntimeState& state) {
         return kColorAccentSoft;
     }
 
+    if (IsOverlayWaitingForProp(state)) {
+        return kColorPanelElevated;
+    }
+
     if (state.lastOverrideSucceeded) {
         return kColorSuccessSoft;
     }
@@ -10418,6 +11479,10 @@ COLORREF GetOverlayLifecycleBorder(const RuntimeState& state) {
 
     if (!state.enabled) {
         return kColorAccent;
+    }
+
+    if (IsOverlayWaitingForProp(state)) {
+        return kColorWarn;
     }
 
     if (state.lastOverrideSucceeded) {
@@ -10435,6 +11500,113 @@ void DrawOverlayText(HDC dc, const wchar_t* text, const RECT& rect, HFONT font, 
     DrawTextW(dc, text, -1, &drawRect, format);
 }
 
+void DrawSectionTitle(HDC dc, const wchar_t* text, const RECT& rect, bool active, COLORREF accent) {
+    RECT marker = rect;
+    marker.right = marker.left + 5;
+    marker.top += 4;
+    marker.bottom -= 4;
+    DrawRoundedSurface(
+        dc,
+        marker,
+        active ? accent : kColorLineStrong,
+        active ? accent : kColorLineStrong,
+        6
+    );
+
+    RECT textRect = rect;
+    textRect.left += 13;
+    DrawOverlayText(dc, text, textRect, g_ui.sectionFont, active ? kColorText : kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+}
+
+void DrawActiveCardRail(HDC dc, const RECT& cardRect, COLORREF color) {
+    RECT glow = cardRect;
+    glow.left += 1;
+    glow.right = glow.left + 7;
+    glow.top += 17;
+    glow.bottom -= 17;
+    DrawRoundedSurface(dc, glow, BlendColor(kColorPanelStrong, color, 0.35f), BlendColor(kColorPanelStrong, color, 0.35f), 8);
+
+    RECT rail = cardRect;
+    rail.left += 2;
+    rail.right = rail.left + 4;
+    rail.top += 19;
+    rail.bottom -= 19;
+    DrawRoundedGradientSurface(dc, rail, BlendColor(color, kColorText, 0.22f), color, color, 6);
+}
+
+void DrawParameterWell(HDC dc, const RECT& labelRect, const RECT& editRect, const RECT& sliderRect, COLORREF accent, bool active) {
+    RECT well{
+        editRect.left - 5,
+        labelRect.top - 3,
+        editRect.right + 5,
+        sliderRect.bottom + 3
+    };
+    const COLORREF wellTop = active
+        ? BlendColor(kColorPanelInset, accent, 0.075f)
+        : kColorPanelInset;
+    DrawRoundedGradientSurface(
+        dc,
+        well,
+        wellTop,
+        BlendColor(kColorPanelInset, kColorPanelShadow, 0.18f),
+        active ? BlendColor(kColorLine, accent, 0.22f) : kColorLine,
+        9
+    );
+}
+
+void DrawHeaderHero(HDC dc, const RECT& rect, CameraMode cameraMode) {
+    const COLORREF modeAccent = cameraMode == CameraMode::PropSelfie ? kColorPropAccent : kColorAccent;
+    const COLORREF modeAccentStrong = cameraMode == CameraMode::PropSelfie ? kColorPropAccentStrong : kColorAccentStrong;
+
+    RECT shadowRect = rect;
+    OffsetRect(&shadowRect, 0, 5);
+    DrawRoundedSurface(dc, shadowRect, kColorPanelShadow, kColorPanelShadow, 14);
+    DrawRoundedGradientSurface(
+        dc,
+        rect,
+        BlendColor(RGB(12, 30, 52), modeAccent, 0.10f),
+        RGB(7, 14, 27),
+        BlendColor(kColorLineStrong, modeAccent, 0.42f),
+        13
+    );
+
+    RECT brandRect = MakeRect(rect.left + 13, rect.top + 12, 40, 40);
+    RECT brandGlow = brandRect;
+    InflateRect(&brandGlow, 3, 3);
+    DrawRoundedSurface(
+        dc,
+        brandGlow,
+        BlendColor(kColorPanelStrong, modeAccent, 0.24f),
+        BlendColor(kColorPanelStrong, modeAccent, 0.24f),
+        14
+    );
+    DrawRoundedGradientSurface(
+        dc,
+        brandRect,
+        modeAccentStrong,
+        modeAccent,
+        BlendColor(modeAccentStrong, kColorText, 0.28f),
+        12
+    );
+    DrawOverlayText(dc, L"S", brandRect, g_ui.titleFont, kColorText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    RECT accentLine = rect;
+    accentLine.left += 64;
+    accentLine.right -= 14;
+    accentLine.top = accentLine.bottom - 3;
+    accentLine.bottom -= 2;
+    FillGradientRect(dc, accentLine, modeAccentStrong, BlendColor(modeAccent, kColorPanelStrong, 0.82f), true);
+}
+
+void DrawPanelBackdrop(HDC dc, const RECT& rect, COLORREF modeAccent) {
+    FillGradientRect(dc, rect, RGB(7, 13, 25), kColorPanel, false);
+    const COLORREF gridColor = BlendColor(kColorPanel, modeAccent, 0.055f);
+    for (int y = rect.top + 22; y < rect.bottom; y += 34) {
+        RECT line{ rect.left, y, rect.right, y + 1 };
+        FillSolidRect(dc, line, gridColor);
+    }
+}
+
 void DrawOverlayWindow(HDC dc, HWND window) {
     const RuntimeState state = SnapshotState();
     const OverlayLayout& layout = GetOverlayLayout(window);
@@ -10445,36 +11617,55 @@ void DrawOverlayWindow(HDC dc, HWND window) {
         fallbackHotkeyChipText = BuildOverlayHotkeyChipText(state.overlayHotkeyVirtualKey);
         hotkeyChipText = fallbackHotkeyChipText.c_str();
     }
-    FillSolidRect(dc, clientRect, kColorPanel);
-    DrawRectOutline(dc, clientRect, kColorLine);
+    const bool playerMode = state.cameraMode == CameraMode::PlayerSelfie;
+    const bool propMode = state.cameraMode == CameraMode::PropSelfie;
+    const COLORREF modeAccent = propMode ? kColorPropAccent : kColorAccent;
+    const COLORREF modeAccentStrong = propMode ? kColorPropAccentStrong : kColorAccentStrong;
+    const COLORREF modeAccentSoft = propMode ? kColorPropAccentSoft : kColorAccentSoft;
 
-    DrawSectionCard(dc, layout.headerRect, kColorPanelStrong, kColorLineStrong);
+    DrawPanelBackdrop(dc, clientRect, modeAccent);
+    DrawRectOutline(dc, clientRect, BlendColor(kColorLine, modeAccent, 0.16f));
+
+    DrawHeaderHero(dc, layout.headerRect, state.cameraMode);
     DrawSectionCard(dc, layout.enableCardRect, state.enabled ? kColorPanelElevated : kColorPanelStrong, state.enabled ? kColorAccentStrong : kColorLineStrong);
-    DrawSectionCard(dc, layout.cameraCardRect, kColorPanelStrong, state.cameraMode == CameraMode::PropSelfie ? kColorWarn : kColorAccentStrong);
-    DrawSectionCard(dc, layout.offsetCardRect, kColorPanelStrong, kColorLineStrong);
-    DrawSectionCard(dc, layout.propCardRect, kColorPanelStrong, state.lockedPropHandle.IsValid() ? kColorWarn : kColorLineStrong);
-    DrawSectionCard(dc, layout.lookCardRect, kColorPanelStrong, kColorLine);
+    DrawSectionCard(dc, layout.cameraCardRect, kColorPanelStrong, BlendColor(kColorLineStrong, modeAccent, 0.24f));
+    DrawSectionCard(dc, layout.offsetCardRect, playerMode ? kColorPanelStrong : kColorPanelInset, playerMode ? kColorAccentSoft : kColorLine);
+    DrawSectionCard(dc, layout.propCardRect, propMode ? kColorPanelStrong : kColorPanelInset, state.lockedPropHandle.IsValid() ? kColorWarn : (propMode ? kColorPropAccentSoft : kColorLine));
+    DrawSectionCard(dc, layout.lookCardRect, playerMode ? kColorPanelStrong : kColorPanelInset, playerMode ? kColorAccentSoft : kColorLine);
     DrawSectionCard(dc, layout.targetCardRect, kColorPanelStrong, state.targetMode == TargetMode::Locked ? kColorWarn : kColorLineStrong);
     DrawSectionCard(dc, layout.statusCardRect, kColorPanelStrong, kColorLine);
 
-    RECT titleAccent = layout.headerRect;
-    titleAccent.left += 8;
-    titleAccent.right = titleAccent.left + 3;
-    titleAccent.top += 12;
-    titleAccent.bottom -= 12;
-    FillSolidRect(dc, titleAccent, kColorAccent);
+    if (state.enabled) DrawActiveCardRail(dc, layout.enableCardRect, kColorAccentStrong);
+    DrawActiveCardRail(dc, playerMode ? layout.offsetCardRect : layout.propCardRect, modeAccent);
+    if (playerMode) DrawActiveCardRail(dc, layout.lookCardRect, kColorAccent);
+    if (state.targetMode == TargetMode::Locked) DrawActiveCardRail(dc, layout.targetCardRect, kColorWarn);
+
     DrawOverlayText(dc, Texts().uiTitle, layout.titleRect, g_ui.titleFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, Texts().uiSubtitle, layout.subtitleRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawChip(dc, layout.statusChipRect, GetOverlayLifecycleText(state), g_ui.bodyFont, GetOverlayLifecycleFill(state), GetOverlayLifecycleBorder(state), kColorText);
-    DrawChip(dc, layout.hotkeyChipRect, hotkeyChipText, g_ui.bodyFont, g_ui.captureOverlayHotkey ? kColorAccentSoft : kColorPanelElevated, g_ui.captureOverlayHotkey ? kColorAccentStrong : kColorLineStrong, kColorText);
+    DrawChip(dc, layout.hotkeyChipRect, hotkeyChipText, g_ui.bodyFont, g_ui.captureOverlayHotkey ? modeAccentSoft : kColorPanelElevated, g_ui.captureOverlayHotkey ? modeAccentStrong : kColorLineStrong, kColorText);
 
-    DrawOverlayText(dc, Texts().uiEnableSection, layout.enableLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawSectionTitle(dc, Texts().uiEnableSection, layout.enableLabelRect, state.enabled, kColorAccentStrong);
     DrawChip(dc, layout.enableChipRect, state.enabled ? Texts().uiEnableChipOn : Texts().uiEnableChipOff, g_ui.bodyFont, state.enabled ? kColorAccentSoft : kColorPanelElevated, state.enabled ? kColorAccentStrong : kColorLineStrong, kColorText);
 
-    DrawOverlayText(dc, Texts().uiCameraModeSection, layout.cameraLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawChip(dc, layout.cameraChipRect, CameraModeToWide(state.cameraMode), g_ui.bodyFont, kColorPanelElevated, state.cameraMode == CameraMode::PropSelfie ? kColorWarn : kColorAccentStrong, kColorText);
+    DrawSectionTitle(dc, Texts().uiCameraModeSection, layout.cameraLabelRect, true, modeAccentStrong);
+    DrawChip(dc, layout.cameraChipRect, CameraModeToWide(state.cameraMode), g_ui.bodyFont, modeAccentSoft, modeAccentStrong, kColorText);
 
-    DrawOverlayText(dc, Texts().uiOffsetSection, layout.offsetLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawParameterWell(dc, layout.offsetXLabelRect, layout.offsetXEditRect, layout.offsetXSliderRect, kColorAccent, playerMode);
+    DrawParameterWell(dc, layout.offsetYLabelRect, layout.offsetYEditRect, layout.offsetYSliderRect, kColorAccent, playerMode);
+    DrawParameterWell(dc, layout.offsetZLabelRect, layout.offsetZEditRect, layout.offsetZSliderRect, kColorAccent, playerMode);
+    DrawParameterWell(dc, layout.playerPitchLabelRect, layout.playerPitchEditRect, layout.playerPitchSliderRect, kColorAccent, playerMode);
+    DrawParameterWell(dc, layout.playerYawLabelRect, layout.playerYawEditRect, layout.playerYawSliderRect, kColorAccent, playerMode);
+    DrawParameterWell(dc, layout.playerRollLabelRect, layout.playerRollEditRect, layout.playerRollSliderRect, kColorAccent, playerMode);
+
+    DrawParameterWell(dc, layout.propOffsetXLabelRect, layout.propOffsetXEditRect, layout.propOffsetXSliderRect, kColorPropAccent, propMode);
+    DrawParameterWell(dc, layout.propOffsetYLabelRect, layout.propOffsetYEditRect, layout.propOffsetYSliderRect, kColorPropAccent, propMode);
+    DrawParameterWell(dc, layout.propOffsetZLabelRect, layout.propOffsetZEditRect, layout.propOffsetZSliderRect, kColorPropAccent, propMode);
+    DrawParameterWell(dc, layout.propPitchLabelRect, layout.propPitchEditRect, layout.propPitchSliderRect, kColorPropAccent, propMode);
+    DrawParameterWell(dc, layout.propYawLabelRect, layout.propYawEditRect, layout.propYawSliderRect, kColorPropAccent, propMode);
+    DrawParameterWell(dc, layout.propRollLabelRect, layout.propRollEditRect, layout.propRollSliderRect, kColorPropAccent, propMode);
+
+    DrawSectionTitle(dc, Texts().uiOffsetSection, layout.offsetLabelRect, playerMode, kColorAccentStrong);
     DrawOverlayText(dc, L"R", layout.offsetXLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, L"B", layout.offsetYLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, L"U", layout.offsetZLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -10483,8 +11674,8 @@ void DrawOverlayWindow(HDC dc, HWND window) {
     DrawOverlayText(dc, Texts().uiPlayerRollLabel, layout.playerRollLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, Texts().uiOffsetHint, layout.offsetHintRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    DrawOverlayText(dc, Texts().uiPropLabel, layout.propLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawChip(dc, layout.propChipRect, state.lockedPropHandle.IsValid() ? PropProjectileKindToWide(state.lockedPropKind).c_str() : Texts().uiNone, g_ui.bodyFont, kColorPanelElevated, state.lockedPropHandle.IsValid() ? kColorWarn : kColorLineStrong, kColorText);
+    DrawSectionTitle(dc, Texts().uiPropLabel, layout.propLabelRect, propMode, kColorPropAccentStrong);
+    DrawChip(dc, layout.propChipRect, state.lockedPropHandle.IsValid() ? PropProjectileKindToWide(state.lockedPropKind).c_str() : Texts().uiNone, g_ui.bodyFont, state.lockedPropHandle.IsValid() ? kColorPropAccentSoft : kColorPanelElevated, state.lockedPropHandle.IsValid() ? kColorPropAccentStrong : kColorLineStrong, kColorText);
     DrawOverlayText(dc, L"X", layout.propOffsetXLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, L"Y", layout.propOffsetYLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, L"Z", layout.propOffsetZLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -10492,10 +11683,10 @@ void DrawOverlayWindow(HDC dc, HWND window) {
     DrawOverlayText(dc, Texts().uiPropYawLabel, layout.propYawLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawOverlayText(dc, Texts().uiPropRollLabel, layout.propRollLabelRect, g_ui.bodyFont, kColorText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    DrawOverlayText(dc, Texts().uiDirectionSection, layout.lookLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawChip(dc, layout.lookChipRect, GetOverlayDirectionChipText(state.lookMode), g_ui.bodyFont, kColorPanelElevated, kColorAccentStrong, kColorText);
+    DrawSectionTitle(dc, Texts().uiDirectionSection, layout.lookLabelRect, playerMode, kColorAccentStrong);
+    DrawChip(dc, layout.lookChipRect, GetOverlayDirectionChipText(state), g_ui.bodyFont, kColorPanelElevated, kColorAccentStrong, kColorText);
 
-    DrawOverlayText(dc, Texts().uiTargetSection, layout.targetLabelRect, g_ui.bodyFont, kColorTextMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawSectionTitle(dc, Texts().uiTargetSection, layout.targetLabelRect, true, state.targetMode == TargetMode::Locked ? kColorWarn : modeAccentStrong);
     DrawChip(dc, layout.targetChipRect, state.targetMode == TargetMode::Locked ? Texts().uiTargetChipLocked : Texts().uiTargetChipFollow, g_ui.bodyFont, state.targetMode == TargetMode::Locked ? RGB(53, 32, 24) : kColorPanelElevated, state.targetMode == TargetMode::Locked ? kColorWarn : kColorLineStrong, kColorText);
 
     DrawInputChrome(dc, window, g_ui.offsetXEdit, ControlHasFocus(g_ui.offsetXEdit) ? kColorAccentStrong : kColorLineStrong);
@@ -10504,12 +11695,12 @@ void DrawOverlayWindow(HDC dc, HWND window) {
     DrawInputChrome(dc, window, g_ui.playerPitchEdit, ControlHasFocus(g_ui.playerPitchEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.playerYawEdit, ControlHasFocus(g_ui.playerYawEdit) ? kColorAccentStrong : kColorLineStrong);
     DrawInputChrome(dc, window, g_ui.playerRollEdit, ControlHasFocus(g_ui.playerRollEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.propOffsetXEdit, ControlHasFocus(g_ui.propOffsetXEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.propOffsetYEdit, ControlHasFocus(g_ui.propOffsetYEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.propOffsetZEdit, ControlHasFocus(g_ui.propOffsetZEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.propPitchEdit, ControlHasFocus(g_ui.propPitchEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.propYawEdit, ControlHasFocus(g_ui.propYawEdit) ? kColorAccentStrong : kColorLineStrong);
-    DrawInputChrome(dc, window, g_ui.propRollEdit, ControlHasFocus(g_ui.propRollEdit) ? kColorAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.propOffsetXEdit, ControlHasFocus(g_ui.propOffsetXEdit) ? kColorPropAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.propOffsetYEdit, ControlHasFocus(g_ui.propOffsetYEdit) ? kColorPropAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.propOffsetZEdit, ControlHasFocus(g_ui.propOffsetZEdit) ? kColorPropAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.propPitchEdit, ControlHasFocus(g_ui.propPitchEdit) ? kColorPropAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.propYawEdit, ControlHasFocus(g_ui.propYawEdit) ? kColorPropAccentStrong : kColorLineStrong);
+    DrawInputChrome(dc, window, g_ui.propRollEdit, ControlHasFocus(g_ui.propRollEdit) ? kColorPropAccentStrong : kColorLineStrong);
     if (g_ui.runtimeExpanded) {
         DrawInputChrome(dc, window, g_ui.statusEdit, state.lastOverrideSucceeded ? kColorSuccess : (state.enabled ? kColorDanger : kColorLineStrong));
     }
@@ -10569,7 +11760,7 @@ void HandleOverlayTimer() {
 DWORD WINAPI OverlayUiThreadMain(LPVOID) {
     INITCOMMONCONTROLSEX commonControls{};
     commonControls.dwSize = sizeof(commonControls);
-    commonControls.dwICC = ICC_STANDARD_CLASSES;
+    commonControls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;
     InitCommonControlsEx(&commonControls);
 
     if (!RegisterOverlayWindowClasses()) {
@@ -10609,7 +11800,10 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
             continue;
         }
 
-        if (g_ui.overlayVisible && IsWindow(g_ui.overlayWindow) && IsDialogMessageW(g_ui.overlayWindow, &message)) {
+        if (g_ui.overlayVisible
+            && !g_ui.imguiInitialized
+            && IsWindow(g_ui.overlayWindow)
+            && IsDialogMessageW(g_ui.overlayWindow, &message)) {
             continue;
         }
 
@@ -10625,17 +11819,30 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
     g_ui.offsetXEdit = nullptr;
     g_ui.offsetYEdit = nullptr;
     g_ui.offsetZEdit = nullptr;
+    g_ui.offsetXSlider = nullptr;
+    g_ui.offsetYSlider = nullptr;
+    g_ui.offsetZSlider = nullptr;
     g_ui.playerPitchEdit = nullptr;
     g_ui.playerYawEdit = nullptr;
     g_ui.playerRollEdit = nullptr;
+    g_ui.playerPitchSlider = nullptr;
+    g_ui.playerYawSlider = nullptr;
+    g_ui.playerRollSlider = nullptr;
+    g_ui.playerShoulderPresetButton = nullptr;
     g_ui.cameraPlayerButton = nullptr;
     g_ui.cameraPropButton = nullptr;
     g_ui.propOffsetXEdit = nullptr;
     g_ui.propOffsetYEdit = nullptr;
     g_ui.propOffsetZEdit = nullptr;
+    g_ui.propOffsetXSlider = nullptr;
+    g_ui.propOffsetYSlider = nullptr;
+    g_ui.propOffsetZSlider = nullptr;
     g_ui.propPitchEdit = nullptr;
     g_ui.propYawEdit = nullptr;
     g_ui.propRollEdit = nullptr;
+    g_ui.propPitchSlider = nullptr;
+    g_ui.propYawSlider = nullptr;
+    g_ui.propRollSlider = nullptr;
     g_ui.propClearButton = nullptr;
     g_ui.propImageStyleButton = nullptr;
     g_ui.propLockButtons.fill(nullptr);
@@ -10656,6 +11863,8 @@ DWORD WINAPI OverlayUiThreadMain(LPVOID) {
     g_ui.overlayCreated = false;
     g_ui.overlayVisible = false;
     g_ui.suppressOffsetSync = false;
+    g_ui.suppressPropEditSync = false;
+    g_ui.suppressSliderSync = false;
     g_ui.captureOverlayHotkey = false;
     g_ui.runtimeExpanded = false;
     g_ui.overlayHotkeyWasDown = false;
@@ -10720,9 +11929,23 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         return 0;
     }
 
+    if (g_ui.imguiInitialized) {
+        const LRESULT imguiResult = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam);
+        if ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST)
+            || (message >= WM_KEYFIRST && message <= WM_KEYLAST)
+            || message == WM_CHAR
+            || message == WM_SETFOCUS
+            || message == WM_KILLFOCUS) {
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        if (imguiResult != 0) {
+            return imguiResult;
+        }
+    }
+
     switch (message) {
     case WM_CREATE:
-        if (!CreateOverlayControls(window)) {
+        if (!InitializeImGuiOverlay(window)) {
             return -1;
         }
         return 0;
@@ -10740,15 +11963,25 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
     }
     case WM_SIZE:
         if (wParam != SIZE_MINIMIZED) {
-            LayoutOverlayControls(window);
+            ResizeImGuiOverlay(LOWORD(lParam), HIWORD(lParam));
         }
         InvalidateRect(window, nullptr, FALSE);
         return 0;
     case WM_COMMAND:
         HandleOverlayCommand(wParam);
         return 0;
+    case WM_HSCROLL:
+        HandleOverlaySliderScroll(reinterpret_cast<HWND>(lParam), LOWORD(wParam));
+        return 0;
     case WM_DRAWITEM:
         return HandleOverlayDrawItem(reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+    case WM_NOTIFY: {
+        auto* header = reinterpret_cast<NMHDR*>(lParam);
+        if (header != nullptr && header->code == NM_CUSTOMDRAW && IsOverlaySlider(header->hwndFrom)) {
+            return HandleOverlaySliderCustomDraw(reinterpret_cast<NMCUSTOMDRAW*>(lParam));
+        }
+        break;
+    }
     case WM_CTLCOLOREDIT:
         SetTextColor(reinterpret_cast<HDC>(wParam), kColorText);
         SetBkColor(reinterpret_cast<HDC>(wParam), kColorInput);
@@ -10766,7 +11999,8 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         HDC dc = BeginPaint(window, &paint);
-        DrawOverlayWindow(dc, window);
+        RenderImGuiOverlayFrame();
+        ImGui_ImplGdiSoftware_Present(dc);
         EndPaint(window, &paint);
         return 0;
     }
@@ -10774,6 +12008,7 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         ShowOverlayWindow(false);
         return 0;
     case WM_DESTROY:
+        CleanupImGuiOverlay();
         g_ui.overlayCreated = false;
         g_ui.overlayVisible = false;
         g_ui.hasLastHostRect = false;
@@ -10783,17 +12018,30 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         g_ui.offsetXEdit = nullptr;
         g_ui.offsetYEdit = nullptr;
         g_ui.offsetZEdit = nullptr;
+        g_ui.offsetXSlider = nullptr;
+        g_ui.offsetYSlider = nullptr;
+        g_ui.offsetZSlider = nullptr;
         g_ui.playerPitchEdit = nullptr;
         g_ui.playerYawEdit = nullptr;
         g_ui.playerRollEdit = nullptr;
+        g_ui.playerPitchSlider = nullptr;
+        g_ui.playerYawSlider = nullptr;
+        g_ui.playerRollSlider = nullptr;
+        g_ui.playerShoulderPresetButton = nullptr;
         g_ui.cameraPlayerButton = nullptr;
         g_ui.cameraPropButton = nullptr;
         g_ui.propOffsetXEdit = nullptr;
         g_ui.propOffsetYEdit = nullptr;
         g_ui.propOffsetZEdit = nullptr;
+        g_ui.propOffsetXSlider = nullptr;
+        g_ui.propOffsetYSlider = nullptr;
+        g_ui.propOffsetZSlider = nullptr;
         g_ui.propPitchEdit = nullptr;
         g_ui.propYawEdit = nullptr;
         g_ui.propRollEdit = nullptr;
+        g_ui.propPitchSlider = nullptr;
+        g_ui.propYawSlider = nullptr;
+        g_ui.propRollSlider = nullptr;
         g_ui.propClearButton = nullptr;
         g_ui.propImageStyleButton = nullptr;
         g_ui.propLockButtons.fill(nullptr);
@@ -10807,6 +12055,9 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         g_ui.runtimeToggleButton = nullptr;
         g_ui.statusEdit = nullptr;
         g_ui.captureOverlayHotkey = false;
+        g_ui.suppressOffsetSync = false;
+        g_ui.suppressPropEditSync = false;
+        g_ui.suppressSliderSync = false;
         g_ui.runtimeExpanded = false;
         g_ui.overlayPlacementInitialized = false;
         return 0;
@@ -10833,7 +12084,7 @@ DWORD InitializeSelfieStickImpl() {
         g_debugOptions.disableGunStabilization ? 1 : 0
     );
     TracePrintf("trace-version schema=%s build=%s", kSchemaProbeTraceVersion, kBuildTag);
-    TracePrintf("ui-backend=win32-gdi d3d11=0 dxgi=0 present=0");
+    TracePrintf("ui-backend=dear-imgui-gdi-software d3d11=0 dxgi=0 present=0");
 
     g_initStage.store(1, std::memory_order_relaxed);
     TracePrintf("init-stage stage=%d name=%s enter", 1, InitStageToString(1));

@@ -107,11 +107,21 @@ bool ShouldStartSchemaResolveAtStartup(bool setupViewHookCanInstallWithoutSchema
     return !setupViewHookCanInstallWithoutSchema;
 }
 
-bool ShouldUseSchemaInterfaceFallback(bool, bool, bool rawOffsetsComplete) noexcept {
-    // A readable raw payload is not necessarily a complete resolution.
-    // Current CS2 exposes inherited/duplicate field descriptors in that
-    // payload, so an incomplete raw pass must still reach exact class lookup.
-    return !rawOffsetsComplete;
+bool ShouldUseSchemaInterfaceFallback(bool, bool, bool) noexcept {
+    // Calling guessed TypeScope vtable slots is not a safe fallback: a wrong
+    // slot can enter a registration method that terminates CS2 with Fatal error.
+    return false;
+}
+
+RuntimeSchemaResolveStrategy DetermineRuntimeSchemaResolveStrategy(bool exactClientBuild) noexcept {
+    // Runtime TypeScope probing can call unrelated virtual functions when Valve
+    // changes the interface layout. Some of those functions terminate CS2 with
+    // a Fatal error instead of raising an exception, so SEH cannot make that
+    // probing safe. Only the table tied to the exact client PE fingerprint is
+    // allowed in production; unknown builds fail closed.
+    return exactClientBuild
+        ? RuntimeSchemaResolveStrategy::KnownClientOffsets
+        : RuntimeSchemaResolveStrategy::Reject;
 }
 
 bool BuildQualifiedClassName(const char* moduleName, const char* className, std::string& qualifiedName) {
@@ -222,6 +232,9 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
     }
     else if (matches("C_BaseCSGrenadeProjectile", "m_nBounces")) {
         target = 0x12C8;
+    }
+    else if (matches("C_BaseCSGrenadeProjectile", "m_vInitialVelocity")) {
+        target = 0x12BC;
     }
 
     return target != 0;

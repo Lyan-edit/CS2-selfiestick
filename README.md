@@ -1,19 +1,19 @@
 # CS2 Selfiestick
 
-CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides a ReShade-safe Win32/GDI control panel styled like ImGui and two camera modes for cinematic demo work:
+CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides a ReShade-safe Dear ImGui control panel rendered by a custom CPU/GDI software backend and two camera modes for cinematic demo work:
 
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.4.4`.
+Latest source/release package in this repository: `v0.4.5beta`.
 
 ## Supported Versions
 
 This build is marked for:
 
 - HLAE: `2.192.10` (AfxHookSource2 `0.41.9`)
-- Counter-Strike 2: Steam app `730`, buildid `26144732`
-- CS2 app manifest timestamp used locally: `2026-10-23 10:15:51 +08:00`
+- Counter-Strike 2: Steam app `730`, buildid `26445667`
+- CS2 app manifest LastUpdated: `2026-11-05 20:10:37 +08:00`
 
 CS2 and HLAE update often. If Valve or HLAE changes schema, entity layout, or `SetUpView`, load may fail by design and the panel will show a reason instead of silently using an unsafe fallback.
 
@@ -58,11 +58,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.4` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.5beta` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
 
-If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use `v0.4.4` with CS2 buildid `26144732`, or rebuild after validating a newer game binary.
+If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use this build with CS2 buildid `26445667`, or rebuild after validating a newer game binary.
 
-If the DLL is loaded while a demo is already playing, `v0.4.4` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. HLAE 2.192.10 / AfxHookSource2 0.41.9 patches the same 16-byte site before a later `mirv_loadlibrary`; this build recognizes that HLAE trampoline, replays it first, preserves its `IsPlayingDemo` result, and then runs the Selfiestick camera callback instead of rejecting or bypassing HLAE's patch. The `Ins` panel is also created lazily, but uses only native Win32 controls and GDI drawing. It does not create a D3D device, DXGI swap chain, or Present call, so it does not enter ReShade's graphics-hook chain. Schema resolution starts with exact class lookup instead of a broad raw payload scan. The flatter nSkinz-inspired panel keeps Runtime diagnostics collapsed by default and repaints only after state changes. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode spreads entity discovery across bounded 192-entity batches, limits an in-progress scan to one batch per 8 ms, and normally reads projectile position directly from `CGameSceneNode::m_vecAbsOrigin` instead of running the expensive dynamic-origin search every camera callback. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
+If the DLL is loaded while a demo is already playing, `v0.4.5beta` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. HLAE 2.192.10 / AfxHookSource2 0.41.9 patches the same 16-byte site before a later `mirv_loadlibrary`; this build recognizes that HLAE trampoline, replays it first, preserves its `IsPlayingDemo` result, and then runs the Selfiestick camera callback instead of rejecting or bypassing HLAE's patch. The `Ins` panel is created lazily and now uses genuine Dear ImGui widgets with a custom CPU/GDI software renderer. It creates no D3D device, DXGI swap chain, OpenGL context, or Present call, so it stays outside ReShade's graphics-hook chain. The renderer redraws a complete off-screen frame before copying it to the panel, eliminating native Trackbar trail/smear artifacts. Schema resolution uses only the offset table tied to the exact supported client PE fingerprint; unknown builds fail closed without probing TypeScope virtual functions. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode spreads entity discovery across bounded 192-entity batches, limits an in-progress scan to one batch per 8 ms, checks the newest entity tail at roughly 30 Hz before lock, and normally reads projectile position directly from `CGameSceneNode::m_vecAbsOrigin` instead of running the expensive dynamic-origin search every camera callback. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
 
 If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
@@ -76,7 +76,7 @@ demo_timescale 0.1
 
 | Key | Action |
 | --- | --- |
-| `Ins` | Show or hide the native pseudo-ImGui panel |
+| `Ins` | Show or hide the Dear ImGui software-rendered panel |
 | `F8` | Enable or disable Selfiestick |
 | `F9` | Lock the current spectator target |
 | `F10` | Return target mode to Follow |
@@ -91,14 +91,15 @@ Controls:
 
 - `Selfie Left`: selfie-facing composition from the target's left side.
 - `Selfie Right`: selfie-facing composition from the target's right side.
-- `Forward`: forward-facing camera mode.
+- `Over Shoulder`: right-shoulder forward view; the agent stays in the left foreground like a third-person shoulder camera.
+- `Apply Over-Shoulder Preset`: switches to Player Selfie, clears the extra trim, and applies the built-in shoulder framing.
 - `Follow`: use the current spectator target each frame.
 - `Lock Current`: lock the current target agent.
 - `Clear`: clear the locked target.
-- `Player R / B / U`: local position trim for Right / Back / Up, editable in native numeric fields.
-- `Player Pitch / Yaw / Roll`: local angle trim on top of the existing player selfie view, editable in native numeric fields.
+- `Player R / B / U`: local position trim for Right / Back / Up, editable in native numeric fields or the matching 0.25-step sliders.
+- `Player Pitch / Yaw / Roll`: local angle trim on top of the existing player selfie view, editable in native numeric fields or sliders.
 
-The built-in player framing is applied first. `R / B / U` and `Pitch / Yaw / Roll` are extra local trim values on top of that framing, so Selfie Left, Selfie Right, Forward, Follow, and Lock Current keep their existing behavior.
+The default left/right selfie camera is placed in front of the gun muzzle or knife and looks back at the agent's centered upper body. The old cross-frame target bias is removed. The built-in player framing is applied first; `R / B / U` and `Pitch / Yaw / Roll` remain extra local trim values, and left/right stay symmetric.
 
 ## Prop Selfie Mode
 
@@ -121,16 +122,16 @@ Behavior:
 - If exactly one valid flying projectile exists and no prop is locked, the DLL auto-locks it.
 - If multiple valid projectiles exist, it does not auto-switch. Use `LOCK` on the desired candidate.
 - `CLEAR PROP` clears the current prop lock. If exactly one valid prop still exists on the next frame, it can auto-lock again.
-- Tracking is only for flying projectile entities. When the projectile ends or disappears, the prop camera stops overriding and reports the reason.
+- Tracking is only for flying projectile entities. To avoid losing very short throws, unlocked discovery checks the newest entity tail at roughly 30 Hz; after disappearance, flash/HE/fire/decoy retain the last valid camera pose for 0.45 seconds and smoke retains it for 1.2 seconds.
 
 Prop controls:
 
-- `Prop X / Y / Z`: local prop camera offset.
-- `X / Y / Z`: native numeric fields for local prop camera position.
-- `Pitch / Yaw / Roll`: native numeric fields for local view angle trim.
+- `Prop X / Y / Z`: native numeric fields plus 0.25-step sliders for local prop camera position.
+- `Pitch / Yaw / Roll`: native numeric fields plus sliders for local view angle trim.
+- `Centered Lookback Preset`: places the camera directly on the outgoing trajectory axis: `X=0`, `Y=-13.5`, `Z=2.25`, `Pitch=0`, `Yaw=0`, `Roll=0`.
 - Recent Props: shows recent projectile candidates, validity, handle, age, and lock buttons.
 
-The prop camera uses a smoothed, predicted projectile anchor to reduce stepping and jitter across slow motion and normal demo speed. It combines the current schema velocity direction (`C_BaseEntity::m_vecVelocity`) with the observed movement rate so prediction respects demo playback speed, falls back to measured position deltas when unavailable, stops extrapolating when demo motion pauses, and resets stale prediction immediately when `C_BaseCSGrenadeProjectile::m_nBounces` changes.
+The prop camera caches the inverse horizontal yaw of `C_BaseCSGrenadeProjectile::m_vInitialVelocity` instead of continuously steering toward the thrower's later position. Keeping the carrier horizon level avoids the extreme high/low view produced by ballistic launch pitch; explicit `Z` and angle trim remain available. Its smoothed, predicted anchor moves only the camera carrier while the view always targets the projectile's current raw origin, keeping the prop centered at high speed. Discovery scans newest entity indices first, prioritizes the newest 128-slot hot tail, ignores stationary leftovers, checks every owner field for a pawn/controller match, and can early-lock a newly thrown moving prop without waiting for the complete entity-list pass.
 
 ## Status And Debugging
 
@@ -162,12 +163,12 @@ selfiestick_trace.log
 The current trace marker is:
 
 ```text
-schema-probe-v27-cs2-26144732
+schema-probe-v35-cs2-26445667
 ```
 
 If the marker is older, HLAE/CS2 is loading an old DLL. Fully restart HLAE and CS2 after replacing DLLs because Windows keeps loaded DLLs inside the process.
 
-The `v0.4.4` panel deliberately has no `D3D11.dll` or `DXGI.dll` import and does not call Present. If a new dump still points through a ReShade-provided `dxgi.dll`, verify that the trace marker and DLL hash belong to `v0.4.4`, then inspect the remaining graphics injectors independently.
+The `v0.4.5beta` panel deliberately has no `D3D11.dll` or `DXGI.dll` import and does not call Present. If a new dump still points through a ReShade-provided `dxgi.dll`, verify that the trace marker and DLL hash belong to `v0.4.5beta`, then inspect the remaining graphics injectors independently.
 
 ## Build From Source
 
@@ -176,6 +177,17 @@ Requirements:
 - Visual Studio 2022
 - MSVC C++ toolchain
 - Windows SDK
+
+PowerShell 7 build (static MSVC runtime, no PDB compiler dependency):
+
+```powershell
+pwsh -NoProfile -File tools/Build-Native.ps1 -Target Dll -Language zh-CN
+pwsh -NoProfile -File tools/Build-Native.ps1 -Target Dll -Language en-US
+pwsh -NoProfile -File tools/Build-Native.ps1 -Target Validation
+pwsh -NoProfile -File tools/Build-Native.ps1 -Target UiPreview -Language zh-CN
+```
+
+Outputs are under `native_dll/bin/native-<Target>-<Language>/`. The UI preview executable renders the production player/prop panel in a hidden standalone process and checks default ImGui styling, slider-frame cleanup and shared-edge rasterization. Run it with a writable working directory for its BMP captures. It never starts the game or installs hooks. See [the background validation report](docs/2026-11-01-validation.md).
 
 Native solution:
 
@@ -197,7 +209,7 @@ Installed-CS2 binary compatibility check:
 py -3 tools\check_cs2_binary_compatibility.py --client "<CS2>\game\csgo\bin\win64\client.dll" --schema "<CS2>\game\bin\win64\schemasystem.dll"
 ```
 
-This check validates the PE fingerprint, signature match counts, attachment call targets, the SetUpView 16-byte instruction boundary, and the `RBX` origin/angle context used by entity, attachment, schema, and camera access.
+This check validates the PE fingerprint, signature match counts, attachment call targets, the SetUpView 16-byte instruction boundary, the `RBX` origin/angle context, and all 22 build-gated fields against the PE-resident static schema tables. It does not load the game DLL or call schema interfaces.
 
 Release dependency check:
 
@@ -217,13 +229,13 @@ The release packager follows the same five-asset layout used by nSkinz: English 
 Use PowerShell 7 (`pwsh`) for the release scripts:
 
 ```powershell
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.4 -Cs2Build 26144732 -HlaeVersion 2.192.10
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.5beta -Cs2Build 26445667 -HlaeVersion 2.192.10
 ```
 
-After committing and pushing the matching tag, the publisher creates a draft GitHub Release, uploads all five assets through the GitHub REST API, verifies remote byte sizes and SHA-256 hashes, and only then publishes it as the latest release. Authentication is read from Git Credential Manager and is never printed.
+After committing and pushing the matching tag, the publisher creates a draft GitHub Release, uploads all five assets through the GitHub REST API, verifies remote byte sizes and SHA-256 hashes, and only then publishes it. Beta versions are marked as GitHub pre-releases; the stable latest release remains unchanged. Authentication is read from Git Credential Manager and is never printed.
 
 ```powershell
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.4
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.5beta
 ```
 
 ## Repository Layout
@@ -231,7 +243,7 @@ pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubReleas
 ```text
 native_dll/selfiestick_hlae/             Main DLL source and Visual Studio project
 native_dll/selfiestick_hlae_validation/  Lightweight native validation executable
-native_dll/third_party/imgui/            Legacy vendored source retained for history; not built into v0.4.4
+native_dll/third_party/imgui/            Dear ImGui 1.92 core and Win32 platform backend used by the software-rendered panel
 release/en-US/                           English release DLL and manual
 release/zh-CN/                           Chinese release DLL and manual
 bin/                                     Local build outputs

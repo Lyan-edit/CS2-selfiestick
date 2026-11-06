@@ -87,6 +87,13 @@ bool ShouldUseSmokePostFlightHold(
     double secondsSinceLastLive,
     double holdSeconds
 ) noexcept;
+bool ShouldUsePropPostFlightHold(
+    PropProjectileKind kind,
+    bool projectileEntityStillValid,
+    double secondsSinceLastLive,
+    double smokeHoldSeconds,
+    double shortPropHoldSeconds
+) noexcept;
 bool ShouldUseActualThrowerDirection(
     bool actualThrowerResolved,
     bool currentTargetResolved
@@ -140,10 +147,21 @@ CameraVector ExtrapolateProjectileOrigin(
 ) noexcept;
 CameraVector ApplyAngleTrim(CameraVector baseAngles, CameraVector trim) noexcept;
 CameraVector ApplyPlayerSelfieAngleTrim(CameraVector baseAngles, CameraVector playerRotation) noexcept;
+bool TryBuildPlayerSelfiePose(
+    CameraVector anchor, CameraVector target,
+    CameraVector forward, CameraVector right, CameraVector up,
+    CameraOffset offset, CameraVector& position, CameraVector& direction
+) noexcept;
 bool TryBuildPropCenteredViewDirection(
     CameraVector cameraPosition,
     CameraVector propOrigin,
     CameraVector fallbackDirection,
+    CameraVector& direction
+) noexcept;
+bool TryBuildPropLaunchLookbackDirection(
+    CameraVector initialVelocity,
+    CameraVector propOrigin,
+    CameraVector throwerOrigin,
     CameraVector& direction
 ) noexcept;
 bool TrySelectNearestPlausibleVector(

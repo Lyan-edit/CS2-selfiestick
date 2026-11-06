@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.4',
+    [string]$Version = 'v0.4.5beta',
     [string]$Repository = 'Lyan-edit/CS2-selfiestick',
     [string]$AssetDirectory,
     [string]$ReleaseNotesPath
@@ -14,7 +14,7 @@ if ([string]::IsNullOrWhiteSpace($AssetDirectory)) {
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot 'release\RELEASE_NOTES.md'
 }
-if ($Version -notmatch '^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+if ($Version -notmatch '^v\d+\.\d+\.\d+(?:beta\d*|[-+][0-9A-Za-z.-]+)?$') {
     throw "Invalid release version: $Version"
 }
 if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
@@ -51,6 +51,7 @@ $headers = @{
     'User-Agent' = 'Lyan-CS2-selfiestick-release'
 }
 $apiRoot = "https://api.github.com/repos/$Repository"
+$isPrerelease = $Version -match '(?i)(beta|alpha|rc|preview|-[0-9A-Za-z])'
 
 $release = $null
 try {
@@ -87,7 +88,7 @@ $releasePayload = @{
     name = "CS2 Selfiestick $Version"
     body = $releaseBody
     draft = $true
-    prerelease = $false
+    prerelease = $isPrerelease
     generate_release_notes = $false
 } | ConvertTo-Json -Depth 5
 if ($null -eq $release) {
@@ -137,8 +138,8 @@ try {
 
     $publishPayload = @{
         draft = $false
-        prerelease = $false
-        make_latest = 'true'
+        prerelease = $isPrerelease
+        make_latest = $(if ($isPrerelease) { 'false' } else { 'true' })
     } | ConvertTo-Json
     $published = Invoke-RestMethod -Method Patch -Uri "$apiRoot/releases/$($release.id)" -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $publishPayload
     Write-Host "Published: $($published.html_url)"

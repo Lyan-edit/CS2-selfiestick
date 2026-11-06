@@ -24,8 +24,14 @@ $blocked = @(
     "D3DCOMPILER_47.dll",
     "D3DCOMPILER_46.dll",
     "D3DCOMPILER_43.dll",
+    "D3D9.dll",
+    "D3D10.dll",
     "D3D11.dll",
-    "DXGI.dll"
+    "D3D12.dll",
+    "DXGI.dll",
+    "D2D1.dll",
+    "OPENGL32.dll",
+    "VULKAN-1.dll"
 )
 
 $blocked += @(
