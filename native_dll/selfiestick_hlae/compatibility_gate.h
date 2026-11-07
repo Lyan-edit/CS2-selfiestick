@@ -110,7 +110,9 @@ bool ShouldUseObserverPawnAsFollowTarget(
     ClientEntityKind splitScreenEntityKind,
     bool observerTargetValid,
     bool observerPawnResolved,
-    bool observerPawnHandleValid
+    bool observerPawnHandleValid,
+    bool isSpectatorPawn = false,
+    int observerMode = -1
 ) noexcept;
 bool ShouldUseSceneOriginEyeFallback(bool renderEyeOriginSucceeded, bool sceneOriginAvailable) noexcept;
 bool ShouldUseViewSetupEyeFallback(

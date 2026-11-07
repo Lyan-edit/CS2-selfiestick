@@ -156,6 +156,67 @@ def check_static_schema(image: PeImage, source_path: Path, failures: list[str]) 
             failures.append(f"static schema mismatch or ambiguity: {class_name}::{field_name}")
 
 
+def check_player_eye_virtual(image: PeImage, source: str, failures: list[str]) -> None:
+    """Validate the primary pawn RTTI/vtable and the eye-output call site offline."""
+    slot_match = re.search(r"kRenderEyeOriginVtableIndex\s*=\s*(\d+)u", source)
+    if slot_match is None:
+        failures.append("missing explicit render-eye vtable index")
+        return
+    slot = int(slot_match.group(1))
+    if not 0 <= slot < 512:
+        failures.append("invalid render-eye vtable index")
+        return
+    data = image.data
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    base = struct.unpack_from("<Q", data, pe + 48)[0]
+
+    def raw(rva: int) -> int:
+        for section in image.sections:
+            if section.virtual_address <= rva < section.virtual_address + section.raw_size:
+                return section.raw_offset + rva - section.virtual_address
+        raise ValueError("RVA outside file-backed sections")
+
+    descriptor = data.find(b".?AVC_CSPlayerPawn@@\0")
+    if descriptor < 16:
+        failures.append("pawn RTTI type descriptor missing")
+        return
+    type_rva = image.raw_to_rva(descriptor - 16)
+    candidates: set[int] = set()
+    cursor = 0
+    while (reference := data.find(struct.pack("<I", type_rva), cursor)) >= 0:
+        cursor = reference + 1
+        col = reference - 12
+        if col < 0:
+            continue
+        try:
+            values = struct.unpack_from("<6I", data, col)
+            if values[:3] != (1, 0, 0) or values[5] != image.raw_to_rva(col):
+                continue
+            vcursor = 0
+            while (vref := data.find(struct.pack("<Q", base + values[5]), vcursor)) >= 0:
+                vcursor = vref + 8
+                target = struct.unpack_from("<Q", data, vref + 8 + slot * 8)[0] - base
+                if image.is_executable_rva(target):
+                    candidates.add(target)
+        except (ValueError, struct.error):
+            continue
+    if len(candidates) != 1:
+        failures.append(f"pawn eye slot {slot}: missing/ambiguous primary vtable target {candidates}")
+        return
+    target = next(iter(candidates))
+    offset = raw(target)
+    prologue = data[offset:offset + 96]
+    # Current fingerprint-gated implementation saves the output in RSI, reads
+    # pawn camera services at 0x1328 and returns the output pointer. The old slot
+    # 166 only forwards to a zero-return stub and cannot pass these checks.
+    if not all(pattern in prologue for pattern in (
+        b"\x48\x8B\xF2", b"\x48\x8B\x89\x28\x13\x00\x00", b"\x48\x8B\xC6"
+    )):
+        failures.append(f"pawn eye slot {slot} no longer proves the expected output/camera-service path")
+        return
+    print(f"pawn RenderEyeOrigin: slot={slot} RVA=0x{target:X}, output/camera-service path verified")
+
+
 def find_pattern(data: bytes, pattern: tuple[int | None, ...], limit: int = 3) -> list[int]:
     matches: list[int] = []
     concrete = next((index for index, value in enumerate(pattern) if value is not None), None)
@@ -270,6 +331,7 @@ def main() -> int:
             failures.append("SetUpView context no longer proves CViewSetup origin/angles at [RBX+0x4A0/0x4B8]")
 
     check_static_schema(client, args.source.with_name("schema_probe.cpp"), failures)
+    check_player_eye_virtual(client, source, failures)
 
     if failures:
         for failure in failures:

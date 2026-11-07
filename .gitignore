@@ -30,5 +30,6 @@ worktrees/
 
 native_dll/**/intermediate/
 release/**/selfiestick.ini
+release/**/selfiestick.ini.*.bak
 !release/defaults/selfiestick.ini
 release/**/selfiestick_trace.log

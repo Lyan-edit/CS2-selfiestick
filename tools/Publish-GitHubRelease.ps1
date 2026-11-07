@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.5beta',
+    [string]$Version = 'v0.4.5',
     [string]$Repository = 'Lyan-edit/CS2-selfiestick',
     [string]$AssetDirectory,
     [string]$ReleaseNotesPath
@@ -14,7 +14,7 @@ if ([string]::IsNullOrWhiteSpace($AssetDirectory)) {
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot 'release\RELEASE_NOTES.md'
 }
-if ($Version -notmatch '^v\d+\.\d+\.\d+(?:beta\d*|[-+][0-9A-Za-z.-]+)?$') {
+if ($Version -notmatch '^v\d+\.\d+\.\d+(?:z|beta\d*|[-+][0-9A-Za-z.-]+)?$') {
     throw "Invalid release version: $Version"
 }
 if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {

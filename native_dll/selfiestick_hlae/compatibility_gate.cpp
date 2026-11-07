@@ -291,9 +291,12 @@ bool ShouldUseObserverPawnAsFollowTarget(
     ClientEntityKind splitScreenEntityKind,
     bool observerTargetValid,
     bool observerPawnResolved,
-    bool observerPawnHandleValid
+    bool observerPawnHandleValid,
+    bool isSpectatorPawn,
+    int observerMode
 ) noexcept {
-    if (observerTargetValid || !observerPawnResolved || !observerPawnHandleValid) {
+    if (observerTargetValid || !observerPawnResolved || !observerPawnHandleValid
+        || isSpectatorPawn || observerMode > 0) {
         return false;
     }
 

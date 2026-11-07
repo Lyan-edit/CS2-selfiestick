@@ -45,8 +45,9 @@ constexpr wchar_t kTier0ModuleName[] = L"tier0.dll";
 constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
-constexpr char kBuildTag[] = "v0.4.5beta " __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v35-cs2-26445667";
+constexpr char kBuildTag[] = "v0.4.5 " __DATE__ " " __TIME__;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v37-eye-origin-cs2-26445667";
+constexpr std::size_t kRenderEyeOriginVtableIndex = 173u;
 constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AEBC4DAu;
 constexpr std::uint32_t kSupportedClientSizeOfImage = 0x029A3000u;
 constexpr std::uint32_t kSupportedClientChecksum = 0x0256CDA1u;
@@ -78,7 +79,7 @@ constexpr wchar_t kSettingsSectionHotkeys[] = L"Hotkeys";
 constexpr wchar_t kSettingsKeyPanelToggleVirtualKey[] = L"PanelToggleVirtualKey";
 constexpr wchar_t kSettingsSectionCamera[] = L"Camera";
 constexpr wchar_t kSettingsKeyFramingVersion[] = L"FramingVersion";
-constexpr int kCurrentFramingVersion = 5;
+constexpr int kCurrentFramingVersion = 6;
 constexpr wchar_t kSettingsKeyCameraMode[] = L"Mode";
 constexpr wchar_t kSettingsKeyPropOffsetX[] = L"PropOffsetX";
 constexpr wchar_t kSettingsKeyPropOffsetY[] = L"PropOffsetY";
@@ -230,6 +231,8 @@ constexpr Vec3 kSyntheticFallbackSelfieBaseOffset{ 5.0f, -18.0f, 3.5f };
 // mode is intentionally framed as a right-shoulder camera instead of a first-
 // person forward view.
 constexpr Vec3 kGunSelfieBaseOffset{ 5.0f, -19.0f, 3.25f };
+constexpr Vec3 kPawnHandSelfieBaseOffset{ 5.0f, -36.0f, 4.0f };
+constexpr Vec3 kPawnHandForwardBaseOffset{ 7.0f, 30.0f, 1.0f };
 constexpr Vec3 kGunForwardBaseOffset{ 7.0f, 18.0f, -1.0f };
 constexpr Vec3 kWorldUp{ 0.0f, 0.0f, 1.0f };
 constexpr float kGunUpperBodyTargetBlendFactor = 0.34f;
@@ -264,6 +267,7 @@ struct WeaponFrameBasis {
     EntityHandle weaponHandle{};
     SupportedWeaponId supportedWeaponId{SupportedWeaponId::None};
     bool syntheticFallbackHandAnchor{false};
+    bool pawnHandAnchor{false};
 };
 
 enum class LookMode {
@@ -584,7 +588,7 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiEnableChipOn = L"ON",
     .uiEnableChipOff = L"OFF",
     .uiOffsetSection = L"PLAYER CAMERA",
-    .uiOffsetHint = L"MUZZLE ANCHOR  /  POSITION + ROTATION",
+    .uiOffsetHint = L"AGENT HAND ANCHOR  /  POSITION + ROTATION",
     .uiDirectionSection = L"PLAYER COMPOSITION",
     .uiDirectionChipSelfieLeft = L"LEFT",
     .uiDirectionChipSelfieRight = L"RIGHT",
@@ -753,7 +757,7 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiEnableChipOn = L"开",
     .uiEnableChipOff = L"关",
     .uiOffsetSection = L"人物镜头",
-    .uiOffsetHint = L"枪口锚点  /  位置与角度微调",
+    .uiOffsetHint = L"探员手部锚点  /  位置与角度微调",
     .uiDirectionSection = L"人物构图",
     .uiDirectionChipSelfieLeft = L"左侧",
     .uiDirectionChipSelfieRight = L"右侧",
@@ -1484,7 +1488,9 @@ bool TryCopyCString(const char* source, std::string& value, std::size_t maxLengt
 }
 
 bool TryWriteViewSetupPose(float* origin, float* angles, const Vec3& cameraPosition, float pitch, float yaw, float roll = 0.0f) {
-    if (origin == nullptr || angles == nullptr) {
+    if (origin == nullptr || angles == nullptr
+        || !std::isfinite(cameraPosition.x) || !std::isfinite(cameraPosition.y) || !std::isfinite(cameraPosition.z)
+        || !std::isfinite(pitch) || !std::isfinite(yaw) || !std::isfinite(roll)) {
         return false;
     }
 
@@ -5033,24 +5039,25 @@ const char* ClientEntityKindToTraceString(compat::ClientEntityKind kind) {
 }
 
 bool TryEntityGetRenderEyeOrigin(void* entity, float output[3], std::string& failure) {
-    output[0] = 0.0f;
-    output[1] = 0.0f;
-    output[2] = 0.0f;
+    // A virtual call can return normally without writing the output buffer.
+    // Zero initialization hid the old wrong-slot call and teleported the
+    // camera near the world origin. Unwritten components must remain invalid.
+    output[0] = output[1] = output[2] = std::numeric_limits<float>::quiet_NaN();
     if (entity == nullptr) {
         failure = Texts().reasonInvalidEyeOrigin;
         return false;
     }
 
     auto** vtable = *reinterpret_cast<void***>(entity);
-    if (vtable == nullptr || !IsAddressExecutableInModule(g_clientModule, vtable[166])) {
+    if (vtable == nullptr || !IsAddressExecutableInModule(g_clientModule, vtable[kRenderEyeOriginVtableIndex])) {
         failure = FormatIncompatibleBuildReason("RenderEyeOrigin vtable slot changed");
-        TracePrintf("eye-origin-slot-invalid entity=%p slot=%p", entity, vtable == nullptr ? nullptr : vtable[166]);
+        TracePrintf("eye-origin-slot-invalid entity=%p index=%u slot=%p", entity, static_cast<unsigned>(kRenderEyeOriginVtableIndex), vtable == nullptr ? nullptr : vtable[kRenderEyeOriginVtableIndex]);
         return false;
     }
 
-    if (!TryInvokeRenderEyeOrigin(entity, vtable[166], output)) {
+    if (!TryInvokeRenderEyeOrigin(entity, vtable[kRenderEyeOriginVtableIndex], output)) {
         failure = FormatIncompatibleBuildReason("RenderEyeOrigin call faulted");
-        TracePrintf("eye-origin-call-fault entity=%p slot=%p", entity, vtable[166]);
+        TracePrintf("eye-origin-call-fault entity=%p slot=%p", entity, vtable[kRenderEyeOriginVtableIndex]);
         return false;
     }
     if (!IsFiniteVec3(Vec3{ output[0], output[1], output[2] })) {
@@ -5062,18 +5069,32 @@ bool TryEntityGetRenderEyeOrigin(void* entity, float output[3], std::string& fai
 }
 
 bool TryGetEntityEyeOrigin(void* entity, const Vec3* viewSetupEyeOrigin, bool allowViewSetupFallback, float output[3], std::string& failure) {
-    if (TryEntityGetRenderEyeOrigin(entity, output, failure)) {
-        return true;
-    }
-
     static std::atomic<unsigned long long> eyeFallbackTraceCounter{0};
     const unsigned long long eyeTraceIndex = eyeFallbackTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
     const bool traceEyeFallback = compat::ShouldEmitSampledTrace(eyeTraceIndex, 5u, 60u);
-    const std::string renderFailure = failure;
     Vec3 sceneOrigin{};
     std::string sceneFailure;
     const bool sceneOriginAvailable = TryGetEntityAbsOrigin(entity, sceneOrigin, sceneFailure);
-    if (compat::ShouldUseSceneOriginEyeFallback(false, sceneOriginAvailable)) {
+    const bool renderEyeAvailable = TryEntityGetRenderEyeOrigin(entity, output, failure);
+    const std::string renderFailure = failure;
+    if (renderEyeAvailable && sceneOriginAvailable) {
+        const Vec3 relative{output[0] - sceneOrigin.x, output[1] - sceneOrigin.y, output[2] - sceneOrigin.z};
+        // Validate against the selected pawn, not CViewSetup which may contain
+        // a different observer camera. Includes crouched and standing heights.
+        if (std::fabs(relative.x) <= 48.0f && std::fabs(relative.y) <= 48.0f
+            && relative.z >= 16.0f && relative.z <= 96.0f) {
+            failure.clear();
+            return true;
+        }
+        if (traceEyeFallback) {
+            TracePrintf("eye-origin-rejected entity=%p eye=(%.3f,%.3f,%.3f) pawn=(%.3f,%.3f,%.3f)", entity, output[0], output[1], output[2], sceneOrigin.x, sceneOrigin.y, sceneOrigin.z);
+        }
+    }
+    // An uninitialized scene node at zero plus an unwritten/invalid eye is not
+    // a usable actor pose. Leave the upstream view intact instead of jumping.
+    const bool sceneUsable = sceneOriginAvailable
+        && IsFiniteVec3(sceneOrigin) && Length(sceneOrigin) > 0.001f;
+    if (compat::ShouldUseSceneOriginEyeFallback(false, sceneUsable)) {
         output[0] = sceneOrigin.x;
         output[1] = sceneOrigin.y;
         output[2] = sceneOrigin.z + kFallbackEyeOriginHeight;
@@ -5104,7 +5125,8 @@ bool TryGetEntityEyeOrigin(void* entity, const Vec3* viewSetupEyeOrigin, bool al
     }
 
     const bool viewSetupOriginAvailable = allowViewSetupFallback && viewSetupEyeOrigin != nullptr && IsFiniteVec3(*viewSetupEyeOrigin);
-    if (!compat::ShouldUseViewSetupEyeFallback(false, sceneOriginAvailable, viewSetupOriginAvailable)) {
+    if (!compat::ShouldUseViewSetupEyeFallback(false, sceneUsable, viewSetupOriginAvailable)) {
+        failure = Texts().reasonInvalidEyeOrigin;
         return false;
     }
 
@@ -5485,7 +5507,9 @@ void* ResolveHandleToEntity(EntityHandle handle) {
         return nullptr;
     }
 
-    return entity;
+    // An entity-list slot can be reused after a weapon/pawn is destroyed.
+    // Never let an old serial resolve to the replacement at the same index.
+    return entity != nullptr && EntityGetHandle(entity).raw == handle.raw ? entity : nullptr;
 }
 
 void RestoreSuppressedRenderWithViewModels() {
@@ -5495,12 +5519,11 @@ void RestoreSuppressedRenderWithViewModels() {
     }
 
     void* weaponEntity = ResolveHandleToEntity(g_viewModelSuppression.weaponHandle);
-    if (weaponEntity == nullptr) {
-        weaponEntity = g_viewModelSuppression.weaponEntity;
-    }
-
     const std::uint8_t restoreValue = g_viewModelSuppression.previousRenderWithViewModels ? 1u : 0u;
-    const bool restored = TryWriteOffsetValue(weaponEntity, g_offsets.renderWithViewModels, restoreValue);
+    // A saved raw pointer is not a lifetime guarantee. Skip restoration once
+    // the exact old entity is gone rather than writing into reused memory.
+    const bool restored = weaponEntity != nullptr
+        && TryWriteOffsetValue(weaponEntity, g_offsets.renderWithViewModels, restoreValue);
     TracePrintf(
         "viewmodel-restore weapon=%u entity=%p offset=0x%llX value=%u restored=%d",
         g_viewModelSuppression.weaponHandle.raw,
@@ -5701,6 +5724,9 @@ Vec3 GetBaseOffsetForHeldItem(HeldItemKind kind, LookMode lookMode) {
 }
 
 Vec3 GetBaseOffsetForBasis(const WeaponFrameBasis& basis, LookMode lookMode) {
+    if (basis.pawnHandAnchor) {
+        return lookMode == LookMode::Forward ? kPawnHandForwardBaseOffset : kPawnHandSelfieBaseOffset;
+    }
     if (basis.syntheticFallbackHandAnchor && IsSelfieLookMode(lookMode)) {
         return kSyntheticFallbackSelfieBaseOffset;
     }
@@ -5871,7 +5897,9 @@ TargetResolution ResolveFollowTarget() {
             splitScreenKind,
             observerTarget.IsValid(),
             observerPawn != nullptr,
-            EntityIsPlayerPawn(observerPawn) && observerPawnHandle.IsValid()
+            EntityIsPlayerPawn(observerPawn) && observerPawnHandle.IsValid(),
+            ContainsIgnoreCaseAscii(TryGetEntityRttiClassName(observerPawn), "ObserverPawn"),
+            observerModeRead ? observerMode : -1
         );
         if (g_debugOptions.traceEnabled) {
             const unsigned long long resolveIndex = g_followResolutionTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
@@ -6026,89 +6054,87 @@ Vec3 AnglesToForward(const Vec3& angles);
 
 bool TryBuildHumanFrameBasis(
     void* targetPawn,
-    HeldItemKind heldItemKind,
-    const Vec3* viewSetupEyeOrigin,
-    const Vec3* viewSetupEyeAngles,
+    HeldItemKind /*heldItemKind*/,
+    const Vec3* /*viewSetupEyeOrigin*/,
+    const Vec3* /*viewSetupEyeAngles*/,
     WeaponFrameBasis& basis,
     std::string& failure
 ) {
-    Vec3 handOrigin{};
-    if (!TryGetAttachmentOrigin(targetPawn, kAnchorAttachmentName, handOrigin, failure)) {
-        failure = FormatText(Texts().reasonAttachmentMissingFormat, kAnchorAttachmentName);
+    // This attachment belongs to the pawn skeleton, not to its active weapon.
+    // Keep cached fallback data in pawn-local coordinates so the camera still
+    // follows the agent during a short attachment/animation transition.
+    struct HandCache {
+        EntityHandle pawn{};
+        Vec3 local{10.0f, 12.0f, -18.0f};
+        Vec3 angles{};
+        double handTime{};
+        double angleTime{};
+        bool hasHand{};
+        bool hasAngles{};
+    };
+    static thread_local HandCache cache{};
+    const EntityHandle pawnHandle = EntityGetHandle(targetPawn);
+    if (!pawnHandle.IsValid()) {
+        failure = Texts().reasonTargetEntityMissing;
         return false;
     }
+    if (cache.pawn.raw != pawnHandle.raw) {
+        cache = {};
+        cache.pawn = pawnHandle;
+    }
 
-    float eyeOriginRaw[3]{};
-    if (!TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, true, eyeOriginRaw, failure)) {
+    float eyeRaw[3]{};
+    // A locked agent's eye must come from that agent. CViewSetup may already
+    // contain an unrelated observer/HLAE camera and is not a safe fallback.
+    if (!TryGetEntityEyeOrigin(targetPawn, nullptr, false, eyeRaw, failure)) {
         return false;
     }
-    const Vec3 eyeOrigin{ eyeOriginRaw[0], eyeOriginRaw[1], eyeOriginRaw[2] };
-
-    const Vec3 upperBodyTarget = Lerp(eyeOrigin, handOrigin, GetUpperBodyTargetBlendForHeldItem(heldItemKind));
-    if (!IsFiniteVec3(upperBodyTarget)) {
-        failure = Texts().reasonUpperBodyTargetInvalid;
-        return false;
+    const Vec3 eye{eyeRaw[0], eyeRaw[1], eyeRaw[2]};
+    const double now = HighResolutionSeconds();
+    Vec3 facing{};
+    if (TryGetPawnEyeAngles(targetPawn, facing, failure)) {
+        cache.angles = facing;
+        cache.angleTime = now;
+        cache.hasAngles = true;
     }
-
-    Vec3 right = Subtract(handOrigin, eyeOrigin);
-    right = ProjectOntoPlane(right, kWorldUp);
-    if (!TryNormalize(right)) {
-        failure = Texts().reasonCombatRightAxisDegenerate;
-        return false;
-    }
-
-    Vec3 forward{};
-    Vec3 facingAngles{};
-    std::string facingFailure;
-    bool facingAvailable = TryGetPawnEyeAngles(targetPawn, facingAngles, facingFailure);
-    if (!facingAvailable && viewSetupEyeAngles != nullptr && IsFiniteVec3(*viewSetupEyeAngles)) {
-        facingAngles = *viewSetupEyeAngles;
-        facingAvailable = true;
-    }
-
-    if (facingAvailable) {
-        forward = ProjectOntoPlane(AnglesToForward(facingAngles), kWorldUp);
-        if (!TryNormalize(forward)) {
-            facingAvailable = false;
-        }
-    }
-
-    if (facingAvailable) {
-        // Knife / utility entities do not expose a reliable muzzle transform.
-        // Use the agent's facing direction for the front axis and the right-hand
-        // attachment only as the anchor, avoiding a model-dependent 180-degree
-        // flip from deriving forward with a cross product alone.
-        right = Cross(forward, kWorldUp);
-        if (!TryNormalize(right)) {
-            failure = Texts().reasonCombatRightAxisDegenerate;
-            return false;
-        }
+    else if (cache.hasAngles && now - cache.angleTime >= 0.0 && now - cache.angleTime <= 0.25) {
+        facing = cache.angles;
     }
     else {
-        forward = Cross(right, kWorldUp);
-        if (!TryNormalize(forward)) {
-            failure = Texts().reasonCombatForwardAxisDegenerate;
-            return false;
-        }
-    }
-
-    Vec3 up = facingAvailable
-        ? Cross(right, forward)
-        : Cross(forward, right);
-    if (!TryNormalize(up)) {
-        failure = Texts().reasonCombatUpAxisDegenerate;
         return false;
     }
 
-    basis.anchorOrigin = handOrigin;
-    basis.upperBodyTarget = upperBodyTarget;
+    // Build a yaw-only frame. Even a vertical look or 180-degree turn preserves
+    // world-up; no previous-world-right sign correction is applied.
+    const float yaw = facing.y * 3.14159265358979323846f / 180.0f;
+    const Vec3 forward{std::cos(yaw), std::sin(yaw), 0.0f};
+    const Vec3 right{forward.y, -forward.x, 0.0f};
+    Vec3 hand{};
+    std::string handFailure;
+    bool liveHand = TryGetAttachmentOrigin(targetPawn, kAnchorAttachmentName, hand, handFailure)
+        && IsFiniteVec3(hand) && Length(Subtract(hand, eye)) <= 128.0f;
+    if (liveHand) {
+        const Vec3 relative = Subtract(hand, eye);
+        cache.local = {Dot(relative, right), Dot(relative, forward), relative.z};
+        cache.handTime = now;
+        cache.hasHand = true;
+    }
+    else {
+        const bool recentHand = cache.hasHand && now - cache.handTime >= 0.0 && now - cache.handTime <= 0.25;
+        const Vec3 local = recentHand ? cache.local : kKnifeFallbackHandAnchorOffset;
+        hand = ComposeBasisPoint(eye, right, forward, kWorldUp, local.x, local.y, local.z);
+    }
+
+    basis = {};
+    basis.anchorOrigin = hand;
+    // Keep the look-at target independent of the current item and hand animation.
+    basis.upperBodyTarget = Add(eye, Vec3{0.0f, 0.0f, -6.0f});
     basis.right = right;
     basis.forward = forward;
-    basis.up = up;
-    basis.heldItemKind = heldItemKind;
-    basis.weaponHandle = {};
-    basis.supportedWeaponId = SupportedWeaponId::None;
-    basis.syntheticFallbackHandAnchor = false;
+    basis.up = kWorldUp;
+    basis.syntheticFallbackHandAnchor = !liveHand;
+    basis.pawnHandAnchor = true;
+    failure.clear();
     return true;
 }
 
@@ -6351,16 +6377,19 @@ bool TryBuildFallbackFrameBasis(void* targetPawn, HeldItemKind heldItemKind, con
 }
 
 bool TryBuildWeaponFrameBasis(void* targetPawn, const Vec3* viewSetupEyeOrigin, const Vec3* viewSetupEyeAngles, WeaponFrameBasis& basis, std::string& failure) {
-    const HeldItemKind heldItemKind = GetHeldItemKindForPawn(targetPawn);
-    if (g_lookupAttachment == nullptr || g_getAttachment == nullptr) {
-        return TryBuildFallbackFrameBasis(targetPawn, heldItemKind, viewSetupEyeOrigin, viewSetupEyeAngles, basis, failure);
+    // Player geometry must not depend on the active weapon being alive. Item
+    // metadata is optional and is used only for FOV/viewmodel housekeeping.
+    if (!TryBuildHumanFrameBasis(targetPawn, HeldItemKind::Unknown, viewSetupEyeOrigin, viewSetupEyeAngles, basis, failure)) {
+        return false;
     }
-
-    if (heldItemKind == HeldItemKind::Gun) {
-        return TryBuildGunFrameBasis(targetPawn, viewSetupEyeOrigin, basis, failure);
+    const EntityHandle weaponHandle = PawnGetActiveWeaponHandle(targetPawn);
+    void* weapon = ResolveHandleToEntity(weaponHandle);
+    if (weapon != nullptr) {
+        basis.weaponHandle = weaponHandle;
+        basis.heldItemKind = ClassifyHeldItemEntity(weapon);
+        basis.supportedWeaponId = TryGetSupportedWeaponId(weapon);
     }
-
-    return TryBuildHumanFrameBasis(targetPawn, heldItemKind, viewSetupEyeOrigin, viewSetupEyeAngles, basis, failure);
+    return true;
 }
 
 void VectorToAngles(const Vec3& direction, float& pitch, float& yaw) {
@@ -8532,6 +8561,12 @@ void LoadPersistedCameraSettings() {
         1,
         settingsPath.c_str()
     ));
+    if (framingVersion < 6 && GetFileAttributesW(settingsPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        // Keep the user's muzzle-framed settings before the one-time hand-frame
+        // migration. Never overwrite a previously preserved backup.
+        const std::wstring backupPath = settingsPath + L".pre-hand-anchor.bak";
+        CopyFileW(settingsPath.c_str(), backupPath.c_str(), TRUE);
+    }
     wchar_t modeBuffer[64]{};
     GetPrivateProfileStringW(
         kSettingsSectionCamera,
@@ -8597,11 +8632,10 @@ void LoadPersistedCameraSettings() {
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerBack, 0.0f),
             ReadProfileFloat(kSettingsSectionCamera, kSettingsKeyPlayerUp, 0.0f)
         };
-        if (framingVersion < 5) {
-            // v5 changes the selfie base from a forward-looking shoulder
-            // interpretation to a muzzle/knife-front lookback. Old trims can
-            // place the camera behind the agent and make the new default look
-            // forward again, so migrate once to the centered zero-trim preset.
+        if (framingVersion < 6) {
+            // v6 uses a pawn-hand frame for every held item. Muzzle-relative
+            // offsets/angles do not describe the same composition; back up the
+            // settings above and migrate player trim once. Prop trim is kept.
             g_state.lookMode = LookMode::SelfieRight;
             g_state.offset = Vec3{};
             g_state.playerRotation = Vec3{};

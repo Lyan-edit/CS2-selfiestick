@@ -25,6 +25,12 @@ struct DeclaredClassProbe {
 } // namespace
 
 int main() {
+    if (selfiestick::compat::ShouldUseObserverPawnAsFollowTarget(
+            selfiestick::compat::ClientEntityKind::PlayerController, false, true, true, true, 0)
+        || selfiestick::compat::ShouldUseObserverPawnAsFollowTarget(
+            selfiestick::compat::ClientEntityKind::PlayerController, false, true, true, false, 5)) {
+        return ReportFailure("missing observer target must not lock the spectator pawn or a pawn in observer mode");
+    }
     using selfiestick::compat::CanProbeSetUpViewHook;
     using selfiestick::compat::CanInstallSetUpViewHook;
     using selfiestick::compat::CanEnableCameraOverride;

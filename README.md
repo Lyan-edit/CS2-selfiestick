@@ -5,7 +5,11 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.4.5beta`.
+Latest source/release package in this repository: `v0.4.5` (regular GitHub Release / Latest).
+
+Player Selfie binds to the agent's `weapon_hand_r` skeleton attachment for every held item. The active weapon is optional FOV/viewmodel metadata. Missing hand transforms use a short pawn-local cache, then a body-relative hand position; camera facing comes from the pawn, not an unrelated observer view. Exact handle serial validation rejects reused entity slots, and weapon restoration never falls back to an unvalidated saved pointer. Framing v6 backs up old settings to `selfiestick.ini.pre-hand-anchor.bak` before resetting old player trim once; prop trim is retained. These fixes are included in v0.4.5; see [the hand-anchor investigation](docs/2026-11-06-hand-anchor-fix.md).
+
+The pawn render-eye function uses verified vtable slot 173 (also used by HLAE 2.192.10). The previous slot 166 forwarded to a zero-return stub without writing the output, which could place the camera near world origin. Version v0.4.5 uses NaN sentinels, validates eye coordinates against the selected pawn's scene origin, rejects uninitialized actor poses and guards non-finite final writes. The offline binary checker verifies the pawn RTTI/vtable and eye-output path. See [the eye-origin investigation](docs/2026-11-07-eye-origin-fix.md). This corrects world placement; automatic map-geometry collision avoidance is not implemented. Validation remains background/offline only.
 
 ## Supported Versions
 
@@ -58,11 +62,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.5beta` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.5` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
 
 If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use this build with CS2 buildid `26445667`, or rebuild after validating a newer game binary.
 
-If the DLL is loaded while a demo is already playing, `v0.4.5beta` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. HLAE 2.192.10 / AfxHookSource2 0.41.9 patches the same 16-byte site before a later `mirv_loadlibrary`; this build recognizes that HLAE trampoline, replays it first, preserves its `IsPlayingDemo` result, and then runs the Selfiestick camera callback instead of rejecting or bypassing HLAE's patch. The `Ins` panel is created lazily and now uses genuine Dear ImGui widgets with a custom CPU/GDI software renderer. It creates no D3D device, DXGI swap chain, OpenGL context, or Present call, so it stays outside ReShade's graphics-hook chain. The renderer redraws a complete off-screen frame before copying it to the panel, eliminating native Trackbar trail/smear artifacts. Schema resolution uses only the offset table tied to the exact supported client PE fingerprint; unknown builds fail closed without probing TypeScope virtual functions. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode spreads entity discovery across bounded 192-entity batches, limits an in-progress scan to one batch per 8 ms, checks the newest entity tail at roughly 30 Hz before lock, and normally reads projectile position directly from `CGameSceneNode::m_vecAbsOrigin` instead of running the expensive dynamic-origin search every camera callback. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
+If the DLL is loaded while a demo is already playing, `v0.4.5` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. HLAE 2.192.10 / AfxHookSource2 0.41.9 patches the same 16-byte site before a later `mirv_loadlibrary`; this build recognizes that HLAE trampoline, replays it first, preserves its `IsPlayingDemo` result, and then runs the Selfiestick camera callback instead of rejecting or bypassing HLAE's patch. The `Ins` panel is created lazily and now uses genuine Dear ImGui widgets with a custom CPU/GDI software renderer. It creates no D3D device, DXGI swap chain, OpenGL context, or Present call, so it stays outside ReShade's graphics-hook chain. The renderer redraws a complete off-screen frame before copying it to the panel, eliminating native Trackbar trail/smear artifacts. Schema resolution uses only the offset table tied to the exact supported client PE fingerprint; unknown builds fail closed without probing TypeScope virtual functions. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode spreads entity discovery across bounded 192-entity batches, limits an in-progress scan to one batch per 8 ms, checks the newest entity tail at roughly 30 Hz before lock, and normally reads projectile position directly from `CGameSceneNode::m_vecAbsOrigin` instead of running the expensive dynamic-origin search every camera callback. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
 
 If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
@@ -163,12 +167,12 @@ selfiestick_trace.log
 The current trace marker is:
 
 ```text
-schema-probe-v35-cs2-26445667
+schema-probe-v37-eye-origin-cs2-26445667
 ```
 
 If the marker is older, HLAE/CS2 is loading an old DLL. Fully restart HLAE and CS2 after replacing DLLs because Windows keeps loaded DLLs inside the process.
 
-The `v0.4.5beta` panel deliberately has no `D3D11.dll` or `DXGI.dll` import and does not call Present. If a new dump still points through a ReShade-provided `dxgi.dll`, verify that the trace marker and DLL hash belong to `v0.4.5beta`, then inspect the remaining graphics injectors independently.
+The `v0.4.5` panel deliberately has no `D3D11.dll` or `DXGI.dll` import and does not call Present. If a new dump still points through a ReShade-provided `dxgi.dll`, verify that the trace marker and DLL hash belong to `v0.4.5`, then inspect the remaining graphics injectors independently.
 
 ## Build From Source
 
@@ -229,13 +233,13 @@ The release packager follows the same five-asset layout used by nSkinz: English 
 Use PowerShell 7 (`pwsh`) for the release scripts:
 
 ```powershell
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.5beta -Cs2Build 26445667 -HlaeVersion 2.192.10
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.5 -Cs2Build 26445667 -HlaeVersion 2.192.10
 ```
 
 After committing and pushing the matching tag, the publisher creates a draft GitHub Release, uploads all five assets through the GitHub REST API, verifies remote byte sizes and SHA-256 hashes, and only then publishes it. Beta versions are marked as GitHub pre-releases; the stable latest release remains unchanged. Authentication is read from Git Credential Manager and is never printed.
 
 ```powershell
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.5beta
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.5
 ```
 
 ## Repository Layout

@@ -1,53 +1,60 @@
-# CS2 Selfiestick v0.4.5beta
+# CS2 Selfiestick v0.4.5
 
 ## 支持版本 / Supported runtime
 
-- CS2: Steam app `730`, buildid `26445667` (installed update: `2026-11-05 20:10:37 +08:00`).
+- CS2: Steam app `730`, buildid `26445667`.
 - HLAE: `2.192.10`, AfxHookSource2: `0.41.9`.
-- Windows x64; intended for HLAE demo / cinematic workflows.
-- GitHub Pre-release / Beta：这是测试版。
+- Windows x64，HLAE demo / 影视制作工作流。
+- 正式 Release，设为 GitHub Latest；不勾选 Pre-release。
 
-## 本版更新
+## 相比 v0.4.5beta 的修复
 
-- 使用真正的 Dear ImGui 控件和官方 Dark 风格；十二个位置/角度参数提供滑块与数值输入，运行状态可折叠。
-- 保留 CPU/GDI 软件后端，不创建 D3D/DXGI 设备、交换链或 Present，减少与 ReShade 图形钩子的交互。
-- 修复软件渲染的斜线接缝和滑块残影；拖动结束后才保存配置，减少反复写入 INI。
-- 人物自拍从枪口/刀前侧回看探员上半身中心，左右机位对称；提供居中自拍与越肩预设，并限制相机穿到探员背后。
-- 道具自拍使用出手方向的水平反向轴，镜头瞄准道具当前原点；改进短寿命道具捕获及消失后的短暂镜头保留。
-- 修复配置版本被错误写成 v3、导致下次启动重复迁移的问题，当前构图配置为 `FramingVersion=5`。
-- Schema 使用与当前 client.dll PE 指纹绑定的偏移表，避免调用猜测的 TypeScope 虚函数造成 Fatal error。未知版本会拒绝启用相机。
-- 保留 HLAE 2.192.10 已改写 SetUpView 位点的串接处理，以及分批实体扫描和 attachment 缓存。
+- 人物主锚点改为探员骨架上的 `weapon_hand_r` 右手附件，解除相机构图对枪械/刀实体生命周期的依赖。
+- 手部附件短暂不可用时使用人物局部坐标缓存，再回退至身体相对位置；换枪、切刀和暂无活动武器时保持相同构图基准。
+- 人物朝向从自身偏航构建，保持世界上方向；瞄准探员上半身中心，保留左右自拍与越肩预设。
+- 修复眼位接口误用第 166 槽的问题。本机 client.dll 中该槽不写出眼位，旧代码把零缓冲误当成有效坐标，可能把镜头放到地图原点附近。现使用已核验的第 173 槽。
+- 眼位输出改用 NaN 哨兵，拒绝未写出、部分写出、零坐标和远离人物的异常结果；最终相机写入也拒绝非有限数值。
+- 校验完整实体句柄及序列号，拒绝已销毁实体槽位的复用对象；武器显示状态恢复不再通过旧裸指针写入。
+- 无观战目标时拒绝误锁观察员实体和处于观察模式的人物。
+- 构图配置为 `FramingVersion=6`。从旧配置迁移时先保存 `selfiestick.ini.pre-hand-anchor.bak`，一次性重置旧人物微调；道具参数保留。
+- 保留真正的 Dear ImGui Dark 面板、十二组滑块/数值输入、可折叠运行状态，以及不创建 D3D/DXGI/Present 的 CPU/GDI 软件后端。
+- 保留道具出手方向回看、原点居中、分批实体扫描和短寿命道具捕获逻辑。
 
-## 适配确认与验证范围
+## 发布前验证与限制
 
-2026-11-06 对本机 build `26445667` 重新检查：
+2026-11-07 对本机 build `26445667` 核验：
 
-- 所需实体/附件/SetUpView 特征码匹配，附件调用目标和 16 字节 SetUpView 指令边界、RBX 视角指针上下文通过。
-- 直接从本机 client.dll 的静态 schema 表逐类核对全部 22 个字段，偏移一致。
-- PE 指纹：timestamp `0x6AEBC4DA`，image `0x029A3000`，checksum `0x0256CDA1`。
-- 发布前重新编译中英文 DLL，执行兼容与相机数学回归、隐藏窗口面板渲染和依赖审计。
-- 按用户要求仅在后台验证，未进入 demo 实测。游戏内构图、ReShade 共存和实际帧率仍需实机确认，不作零闪退/零掉帧承诺。
+- 全部 22 个 class-qualified schema 字段与静态偏移表一致。
+- 实体/附件/SetUpView 特征码、附件调用目标、16 字节指令边界和 RBX 视角指针上下文通过。
+- C_CSPlayerPawn 眼位虚表第 173 槽的输出/相机服务路径通过；第 166 槽负向检查会被拒绝。
+- 中英文 DLL 重新编译；原生回归、真实生产函数的隐藏窗口手部/眼位/面板测试及依赖审计通过。
+- 上传后下载校验全部五个附件，核对文件大小和 SHA-256。
+
+按用户要求仅做后台验证，尚未进入 demo 测试构图、ReShade 共存或实际帧率，不承诺零闪退/零掉帧。此次眼位修复针对错误世界坐标；普通近墙场景的自动碰撞避让尚未实现。人物实体自身死亡重生或 demo 跳转后重建时，旧锁定会安全失效，需要重新锁定。
 
 ## 使用
 
-1. 完整重启 HLAE/CS2，打开 demo。
-2. 使用 HLAE 控制台 `mirv_loadlibrary "<DLL 的绝对路径>"` 加载中英文 DLL 之一。
-3. `Ins` 打开面板，`F8` 启用相机。
-4. 人物 `R / B / U` 分别为右、后、上；自拍时 B 减小拉远、增大拉近。道具 Y 默认 `-13.5`，更负更远。
-5. 已加载的旧 DLL 不会因覆盖文件而更新，必须重启后加载新版。
+1. 完整退出并重启 HLAE/CS2，打开 demo。
+2. `mirv_loadlibrary "<DLL 的绝对路径>"` 加载中英文 DLL 之一，避免同一进程混用旧版 DLL。
+3. `Ins` 打开面板，`F8` 启用相机；需要清除人物微调时点击“居中人物自拍”。
+4. `R / B / U` 为右/后/上；人物自拍 B 减小拉远、增大拉近。道具 Y 默认 `-13.5`，更负更远。
+5. 面板打开时使用“锁定当前”按钮；F9 热键在面板隐藏且游戏前台时生效。
+6. 覆盖已加载的 DLL 文件不会更新进程内代码，必须重启后重新加载。
 
 ## English
 
-This beta updates the exact compatibility gate to installed CS2 build `26445667` and HLAE `2.192.10` / AfxHookSource2 `0.41.9`. All required signatures, attachment CALL targets, SetUpView instruction boundaries and all 22 schema fields were verified offline against the installed binary.
+v0.4.5 is a regular GitHub release for CS2 build `26445667` and HLAE `2.192.10` / AfxHookSource2 `0.41.9`. It includes agent-hand anchoring independent of weapon lifetime, local missing-hand fallback, exact handle-serial validation, safe viewmodel restoration and spectator-target rejection.
 
-The release includes genuine Dear ImGui Dark controls, a CPU/GDI renderer, centered player lookback and over-shoulder presets, projectile launch-axis lookback, bounded discovery and framing-persistence fixes. Background validation covers native compatibility/camera regression, hidden-window UI rendering and release dependencies. No in-demo, ReShade coexistence or frame-time test was performed.
+The render-eye call now uses verified pawn vtable slot 173. The obsolete slot 166 returned without writing the output; accepting its zero-initialized buffer could place the camera near world origin. NaN sentinels, actor-relative validation and non-finite pose-write rejection guard this path.
 
-Restart HLAE/CS2 after replacing a loaded DLL. Press Ins for the panel and F8 to enable. Player R/B/U mean Right/Back/Up; decrease B to move farther from the subject.
+Framing v6 backs up older settings before migrating player trim once; prop settings remain. Genuine Dear ImGui Dark controls and the CPU/GDI software renderer are retained.
 
-## Downloads / 下载
+Validation was background/offline only. No in-demo, ReShade coexistence or FPS test was performed. Automatic map collision avoidance is not implemented. Restart HLAE/CS2 after replacing a loaded DLL.
 
-- `Lyan_selfiestick-v0.4.5beta-zh-CN.dll` — 中文 DLL。
-- `Lyan_selfiestick-v0.4.5beta-EN.dll` — English DLL.
-- `Lyan_selfiestick-v0.4.5beta-CS2-26445667-HLAE-2.192.10-windows-x64.zip` — 双语 DLL、手册、默认配置及热键参考。
-- `Lyan_selfiestick-v0.4.5beta-source.zip` — 完整项目源码（含第三方许可与构建工具）。
-- `SHA256SUMS.txt` — four asset SHA-256 checksums.
+## 附件 / Assets
+
+- `Lyan_selfiestick-v0.4.5-zh-CN.dll` — 中文 DLL。
+- `Lyan_selfiestick-v0.4.5-EN.dll` — English DLL.
+- `Lyan_selfiestick-v0.4.5-CS2-26445667-HLAE-2.192.10-windows-x64.zip` — 双语 DLL、手册、默认配置和热键参考。
+- `Lyan_selfiestick-v0.4.5-source.zip` — 完整项目源码、第三方许可和构建工具。
+- `SHA256SUMS.txt` — 两个 DLL 与两个 ZIP 的校验清单。

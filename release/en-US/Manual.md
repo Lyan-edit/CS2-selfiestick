@@ -1,5 +1,7 @@
 # CS2 Selfiestick Manual
 
+Version v0.4.5 is a regular release. The player camera uses the agent skeleton's `weapon_hand_r` attachment; the gun/knife entity is no longer the primary anchor. The render-eye call uses verified vtable slot 173. Missing hand transforms use a short pawn-local cache and then a body-relative fallback. Framing v6 backs up older settings as `selfiestick.ini.pre-hand-anchor.bak` before resetting player trim once; prop settings remain. Validation is background/offline only; no in-demo test or automatic map collision avoidance is included.
+
 ## Package Contents
 
 This English release folder contains:
@@ -45,7 +47,7 @@ Current release DLLs also avoid heavy startup schema resolving and no longer ins
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 
-The current v0.4.5beta DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.5beta, then inspect the remaining graphics injectors independently.
+The current v0.4.5 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.5, then inspect the remaining graphics injectors independently.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
@@ -80,7 +82,7 @@ Controls:
 - `Player R / B / U`: Right / Back / Up local camera trim through native numeric fields and 0.25-step sliders
 - `Player Pitch / Yaw / Roll`: local angle trim through native numeric fields and sliders
 
-The normal selfie view is placed in front of the gun muzzle or knife and looks back at the agent's centered upper body. Left and right are symmetric, and the old cross-frame aim bias is removed. `CENTERED PLAYER SELFIE` restores this composition and clears old trim. `FramingVersion=5` also migrates pre-v5 Player trim once, and the selfie camera cannot cross behind the agent into a forward view. Player angle trim is applied after Selfie Left, Selfie Right, or Over Shoulder is calculated.
+The default selfie uses the agent's right-hand skeleton attachment and looks back toward its upper-body center. Its geometry is independent of the gun/knife entity. Left and right are symmetric. `CENTERED PLAYER SELFIE` clears player trim. Framing v6 backs up old settings and resets muzzle-relative player trim once; prop trim remains. Player angle trim is applied after Selfie Left, Selfie Right, or Over Shoulder is calculated.
 
 ## Prop Selfie
 

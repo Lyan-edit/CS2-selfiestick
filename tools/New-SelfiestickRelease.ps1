@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.5beta',
+    [string]$Version = 'v0.4.5',
     [string]$Cs2Build = '26445667',
     [string]$HlaeVersion = '2.192.10'
 )
@@ -10,7 +10,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $outputRoot = Join-Path $repoRoot (Join-Path 'dist' $Version)
 $stageRoot = Join-Path $outputRoot '_stage'
 
-if ($Version -notmatch '^v\d+\.\d+\.\d+(?:beta\d*|[-+][0-9A-Za-z.-]+)?$') {
+if ($Version -notmatch '^v\d+\.\d+\.\d+(?:z|beta\d*|[-+][0-9A-Za-z.-]+)?$') {
     throw "Invalid release version: $Version"
 }
 if ($Cs2Build -notmatch '^\d+$') {

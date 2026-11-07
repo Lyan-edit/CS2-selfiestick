@@ -3,6 +3,7 @@
 #include "../selfiestick_hlae/selfiestick_hlae.cpp"
 #include <cstdio>
 #include <vector>
+#include "player_hand_checks.h"
 
 namespace {
 LRESULT CALLBACK PreviewProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -61,6 +62,7 @@ bool SaveFrame(HWND window, const wchar_t* path) {
 
 int wmain() {
     using namespace selfiestick;
+    if (!hand_checks::Run()) return 20;
     WNDCLASSW wc{};
     wc.lpfnWndProc = PreviewProc;
     wc.hInstance = GetModuleHandleW(nullptr);
