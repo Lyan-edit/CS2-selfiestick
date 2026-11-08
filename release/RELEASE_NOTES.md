@@ -1,60 +1,57 @@
-# CS2 Selfiestick v0.4.5
+# CS2 Selfiestick v0.4.6
 
 ## 支持版本 / Supported runtime
 
-- CS2: Steam app `730`, buildid `26445667`.
-- HLAE: `2.192.10`, AfxHookSource2: `0.41.9`.
+- **CS2**：Steam app `730`，buildid **`26445667`**。
+- **HLAE**：**`2.192.10`**，AfxHookSource2 `0.41.9`。
 - Windows x64，HLAE demo / 影视制作工作流。
-- 正式 Release，设为 GitHub Latest；不勾选 Pre-release。
+- **正式版**，设为 GitHub Latest，不勾选 Pre-release。
 
-## 相比 v0.4.5beta 的修复
+## 相比 v0.4.5 的更新
 
-- 人物主锚点改为探员骨架上的 `weapon_hand_r` 右手附件，解除相机构图对枪械/刀实体生命周期的依赖。
-- 手部附件短暂不可用时使用人物局部坐标缓存，再回退至身体相对位置；换枪、切刀和暂无活动武器时保持相同构图基准。
-- 人物朝向从自身偏航构建，保持世界上方向；瞄准探员上半身中心，保留左右自拍与越肩预设。
-- 修复眼位接口误用第 166 槽的问题。本机 client.dll 中该槽不写出眼位，旧代码把零缓冲误当成有效坐标，可能把镜头放到地图原点附近。现使用已核验的第 173 槽。
-- 眼位输出改用 NaN 哨兵，拒绝未写出、部分写出、零坐标和远离人物的异常结果；最终相机写入也拒绝非有限数值。
-- 校验完整实体句柄及序列号，拒绝已销毁实体槽位的复用对象；武器显示状态恢复不再通过旧裸指针写入。
-- 无观战目标时拒绝误锁观察员实体和处于观察模式的人物。
-- 构图配置为 `FramingVersion=6`。从旧配置迁移时先保存 `selfiestick.ini.pre-hand-anchor.bak`，一次性重置旧人物微调；道具参数保留。
-- 保留真正的 Dear ImGui Dark 面板、十二组滑块/数值输入、可折叠运行状态，以及不创建 D3D/DXGI/Present 的 CPU/GDI 软件后端。
-- 保留道具出手方向回看、原点居中、分批实体扫描和短寿命道具捕获逻辑。
+- 修复道具与背景在同一机位内抽搐、闪烁的问题：通过游戏自身绝对坐标接口处理待重算的场景变换，再读取坐标。用户已实测确认 fix5 的抖动完全解决，0.4.6 保留该坐标与构图实现。
+- 道具创建事件优先捕获，并补充完整 `0..32767` 槽位的分摊扫描。修复短寿命道具漏跟随、稀疏高槽位遗漏、归属信息延迟到达和上一颗阻挡下一颗接续的问题。
+- 相机位置和朝向使用同一次有效采样，锁存首次有效出手方向，保持固定相对距离；不再独立积分镜头速度，不依赖周期刷新拉回机位。
+- 短暂坐标／归属缺失时保留有效画面；下一颗道具尚无可用机位时保持上一画面，减少闪回观战。每颗道具锁存 FOV。
+- **自动接续**：落地后继续跟随，实际爆开后定格 **Demo 时间 2 秒**，随后返回当前探员原生主视角。暂停停止计时，慢放延长现实停留时间；继续等待后续新投掷。
+- **快速衔接**：新的有效道具立即接管，无需等待上一颗 2 秒停留结束。
+- **锁定当前道具**：一直跟随至爆开，之后无限保留最终机位，不被其它投掷打断。
+- 列表按钮改为 **“选中并锁定”**：选择指定的有效候选，再应用同一锁定规则。上方按钮则锁住当前选中的道具；已结束且没有有效机位缓存的候选不可重新选择。
+- **清除锁定并返回探员**：立即释放当前镜头，防止已清除道具下一帧又被自动抓回；后续新出手仍可自动捕获。下方“跟随目标→清除锁定”同时释放道具镜头并恢复探员目标跟随。
+- 保留探员 `weapon_hand_r` 手部锚点、眼位第 173 槽、句柄序列校验、左右自拍与越肩预设，以及真正的 Dear ImGui Dark 面板、可折叠状态栏和 CPU/GDI 软件渲染后端。
 
-## 发布前验证与限制
+## 验证范围
 
-2026-11-07 对本机 build `26445667` 核验：
+- 2026-11-08 对本机 CS2 `26445667` 重新核验：全部特征码、**30 个 schema 字段**、眼位虚表槽、实体创建调用链、绝对坐标重算路径，以及 engine2 Demo tick 接口。
+- PowerShell 7 编译中英文 x64 静态运行库 DLL；原生兼容性、隐藏生产代码回归和两版依赖审计通过。
+- 覆盖脏坐标缓存、固定相对距离、短寿命道具、跳转／暂停／慢放、临时坐标恢复、快速接续、128 Demo tick 释放、无限锁定、手动清除后不重新捕获，以及 ImGui 滑轨涂抹检查。
+- 12 个稳定关键区段与用户确认的 fix5 基线哈希一致；源码包包含可重复运行的稳定区段校验清单与工具。
+- 五个附件在草稿阶段全部回下载，核对大小和 SHA-256 后公开发布。
 
-- 全部 22 个 class-qualified schema 字段与静态偏移表一致。
-- 实体/附件/SetUpView 特征码、附件调用目标、16 字节指令边界和 RBX 视角指针上下文通过。
-- C_CSPlayerPawn 眼位虚表第 173 槽的输出/相机服务路径通过；第 166 槽负向检查会被拒绝。
-- 中英文 DLL 重新编译；原生回归、真实生产函数的隐藏窗口手部/眼位/面板测试及依赖审计通过。
-- 上传后下载校验全部五个附件，核对文件大小和 SHA-256。
-
-按用户要求仅做后台验证，尚未进入 demo 测试构图、ReShade 共存或实际帧率，不承诺零闪退/零掉帧。此次眼位修复针对错误世界坐标；普通近墙场景的自动碰撞避让尚未实现。人物实体自身死亡重生或 demo 跳转后重建时，旧锁定会安全失效，需要重新锁定。
+**验证边界**：fix5 的无抖动已有用户实机确认；0.4.6 新机位生命周期仅完成后台／隐藏进程验证，未进行本次实机 Demo、ReShade 共存或 FPS 测试。自动地图碰撞避让尚未实现。道具若完全处于两次可见相机帧之间，仍需慢放才能观察。
 
 ## 使用
 
-1. 完整退出并重启 HLAE/CS2，打开 demo。
-2. `mirv_loadlibrary "<DLL 的绝对路径>"` 加载中英文 DLL 之一，避免同一进程混用旧版 DLL。
-3. `Ins` 打开面板，`F8` 启用相机；需要清除人物微调时点击“居中人物自拍”。
-4. `R / B / U` 为右/后/上；人物自拍 B 减小拉远、增大拉近。道具 Y 默认 `-13.5`，更负更远。
-5. 面板打开时使用“锁定当前”按钮；F9 热键在面板隐藏且游戏前台时生效。
-6. 覆盖已加载的 DLL 文件不会更新进程内代码，必须重启后重新加载。
+1. 完整重启 HLAE/CS2，打开 demo，使用 `mirv_loadlibrary "<DLL 绝对路径>"` 加载中英文 DLL 之一。
+2. `Ins` 打开面板，`F8` 启用。投掷前开启“道具自拍”，以提前接收道具创建通知。
+3. 选择“自动接续”或“锁定当前道具”；需要立即回到探员时点击“清除锁定并返回探员”。
+4. 人物 `R / B / U` 为右／后／上；道具 X/Y/Z 的直线距离为 `sqrt(X²+Y²+Z²)`。默认道具 Y 为 `-13.5`。
+5. 个人 INI 不被更新流程覆盖；整包附带干净默认配置。覆盖已加载 DLL 不会更新进程内代码，需重启后重新加载。
 
 ## English
 
-v0.4.5 is a regular GitHub release for CS2 build `26445667` and HLAE `2.192.10` / AfxHookSource2 `0.41.9`. It includes agent-hand anchoring independent of weapon lifetime, local missing-hand fallback, exact handle-serial validation, safe viewmodel restoration and spectator-target rejection.
+v0.4.6 is a regular release for **CS2 build `26445667`**, **HLAE `2.192.10` / AfxHookSource2 `0.41.9`**.
 
-The render-eye call now uses verified pawn vtable slot 173. The obsolete slot 166 returned without writing the output; accepting its zero-initialized buffer could place the camera near world origin. NaN sentinels, actor-relative validation and non-finite pose-write rejection guard this path.
+It retains the user-confirmed fix5 resolved-origin camera and improves short-lived projectile capture, sparse-slot discovery, delayed ownership, exact-handle handoff and temporary data recovery. The rigid prop-relative rig and per-shot FOV are unchanged.
 
-Framing v6 backs up older settings before migrating player trim once; prop settings remain. Genuine Dear ImGui Dark controls and the CPU/GDI software renderer are retained.
+AUTO HANDOFF follows through detonation, holds the final shot for **2 demo seconds**, then returns to the native agent camera while remaining armed for future throws. Pause stops the timer. New valid throws preempt the hold immediately. PIN CURRENT PROP retains the final view indefinitely; SELECT + PIN chooses a specific live candidate. CLEAR LOCK releases the view without automatically recapturing canceled shots.
 
-Validation was background/offline only. No in-demo, ReShade coexistence or FPS test was performed. Automatic map collision avoidance is not implemented. Restart HLAE/CS2 after replacing a loaded DLL.
+The new lifecycle passed background/native regression checks only; no new live demo, ReShade coexistence or FPS test was performed. Automatic map collision avoidance is not implemented. Fully restart HLAE/CS2 after replacing a loaded DLL.
 
 ## 附件 / Assets
 
-- `Lyan_selfiestick-v0.4.5-zh-CN.dll` — 中文 DLL。
-- `Lyan_selfiestick-v0.4.5-EN.dll` — English DLL.
-- `Lyan_selfiestick-v0.4.5-CS2-26445667-HLAE-2.192.10-windows-x64.zip` — 双语 DLL、手册、默认配置和热键参考。
-- `Lyan_selfiestick-v0.4.5-source.zip` — 完整项目源码、第三方许可和构建工具。
+- `Lyan_selfiestick-v0.4.6-zh-CN.dll` — 中文 DLL。
+- `Lyan_selfiestick-v0.4.6-EN.dll` — English DLL.
+- `Lyan_selfiestick-v0.4.6-CS2-26445667-HLAE-2.192.10-windows-x64.zip` — 双语 DLL、手册、默认配置和热键参考。
+- `Lyan_selfiestick-v0.4.6-source.zip` — 完整项目源码、第三方许可和构建／校验工具。
 - `SHA256SUMS.txt` — 两个 DLL 与两个 ZIP 的校验清单。

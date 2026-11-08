@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.5',
+    [string]$Version = 'v0.4.6',
     [string]$Repository = 'Lyan-edit/CS2-selfiestick',
     [string]$AssetDirectory,
     [string]$ReleaseNotesPath
@@ -132,7 +132,14 @@ try {
     }
     finally {
         if (Test-Path -LiteralPath $verifyRoot) {
-            Remove-Item -LiteralPath $verifyRoot -Recurse -Force
+            $resolvedVerifyRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $verifyRoot).Path)
+            $expectedVerifyRoot = [IO.Path]::GetFullPath($verifyRoot)
+            if ($resolvedVerifyRoot -ne $expectedVerifyRoot -or
+                (Split-Path -Leaf $resolvedVerifyRoot) -notmatch '^selfiestick-release-verify-[a-f0-9]{32}$' -or
+                (Split-Path -Parent $resolvedVerifyRoot) -ne [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)) {
+                throw 'Refusing to clean an unexpected verification directory.'
+            }
+            Remove-Item -LiteralPath $resolvedVerifyRoot -Recurse -Force
         }
     }
 

@@ -100,6 +100,11 @@
   <ItemGroup>
     <ClInclude Include="compatibility_gate.h" />
     <ClInclude Include="imgui_impl_gdi_software.h" />
+    <ClInclude Include="prop_discovery.inl" />
+    <ClInclude Include="prop_lifecycle.inl" />
+    <ClInclude Include="prop_view.inl" />
+    <ClInclude Include="prop_demo_clock.inl" />
+    <ClInclude Include="prop_motion_diagnostics.inl" />
     <ClInclude Include="schema_probe.h" />
     <ClInclude Include="setup_view_hook.h" />
   </ItemGroup>

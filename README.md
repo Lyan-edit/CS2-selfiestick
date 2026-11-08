@@ -5,7 +5,9 @@ CS2 Selfiestick is a Counter-Strike 2 spectator camera DLL for HLAE. It provides
 - Player Selfie: the original player-mounted selfiestick.
 - Prop Selfie: a projectile-mounted selfiestick for smoke, molotov/incendiary, HE, flashbang, and decoy projectiles.
 
-Latest source/release package in this repository: `v0.4.5` (regular GitHub Release / Latest).
+Current release: [v0.4.6](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.6) (regular GitHub Release / Latest).
+
+Version 0.4.6 includes the user-confirmed shake fix and the two-demo-second automatic effect hold followed by native-agent return. Resolved-origin sampling, rigid framing, birth capture and per-shot FOV are preserved. The [stable baseline](docs/2026-11-08-confirmed-stable-fix5.md), [lifecycle update](docs/2026-11-08-prop-hold-fix6.md) and [release validation](docs/2026-11-08-v0.4.6-release-validation.md) record the changes and checks.
 
 Player Selfie binds to the agent's `weapon_hand_r` skeleton attachment for every held item. The active weapon is optional FOV/viewmodel metadata. Missing hand transforms use a short pawn-local cache, then a body-relative hand position; camera facing comes from the pawn, not an unrelated observer view. Exact handle serial validation rejects reused entity slots, and weapon restoration never falls back to an unvalidated saved pointer. Framing v6 backs up old settings to `selfiestick.ini.pre-hand-anchor.bak` before resetting old player trim once; prop trim is retained. These fixes are included in v0.4.5; see [the hand-anchor investigation](docs/2026-11-06-hand-anchor-fix.md).
 
@@ -62,11 +64,11 @@ Chinese DLL:
 mirv_loadlibrary "D:\tools\selfiestick\zh-CN\Lyan_CS2自拍杆.dll"
 ```
 
-If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.5` DLLs no longer depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
+If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the path is correct. Current `v0.4.6` DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
 
 If the console prints `LoadLibraryA Ok.` followed by `SetUpView hook blocked by compatibility gate`, the DLL did load, but the compatibility gate rejected hook installation. Use this build with CS2 buildid `26445667`, or rebuild after validating a newer game binary.
 
-If the DLL is loaded while a demo is already playing, `v0.4.5` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. HLAE 2.192.10 / AfxHookSource2 0.41.9 patches the same 16-byte site before a later `mirv_loadlibrary`; this build recognizes that HLAE trampoline, replays it first, preserves its `IsPlayingDemo` result, and then runs the Selfiestick camera callback instead of rejecting or bypassing HLAE's patch. The `Ins` panel is created lazily and now uses genuine Dear ImGui widgets with a custom CPU/GDI software renderer. It creates no D3D device, DXGI swap chain, OpenGL context, or Present call, so it stays outside ReShade's graphics-hook chain. The renderer redraws a complete off-screen frame before copying it to the panel, eliminating native Trackbar trail/smear artifacts. Schema resolution uses only the offset table tied to the exact supported client PE fingerprint; unknown builds fail closed without probing TypeScope virtual functions. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode spreads entity discovery across bounded 192-entity batches, limits an in-progress scan to one batch per 8 ms, checks the newest entity tail at roughly 30 Hz before lock, and normally reads projectile position directly from `CGameSceneNode::m_vecAbsOrigin` instead of running the expensive dynamic-origin search every camera callback. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
+If the DLL is loaded while a demo is already playing, `v0.4.6` installs the SetUpView camera hotpatch lazily only when the user presses `F8` or clicks Enable. HLAE 2.192.10 / AfxHookSource2 0.41.9 patches the same 16-byte site before a later `mirv_loadlibrary`; this build recognizes that HLAE trampoline, replays it first, preserves its `IsPlayingDemo` result, and then runs the Selfiestick camera callback instead of rejecting or bypassing HLAE's patch. The `Ins` panel is created lazily and now uses genuine Dear ImGui widgets with a custom CPU/GDI software renderer. It creates no D3D device, DXGI swap chain, OpenGL context, or Present call, so it stays outside ReShade's graphics-hook chain. The renderer redraws a complete off-screen frame before copying it to the panel, eliminating native Trackbar trail/smear artifacts. Schema resolution uses only the offset table tied to the exact supported client PE fingerprint; unknown builds fail closed without probing TypeScope virtual functions. Player mode reuses the last trusted follow target between 50 ms refreshes and caches attachment indices. Prop mode uses a resumable all-slot sweep with cached vtable kinds and a 0.5 ms soft scan budget on each active callback, and reads projectile position through the verified engine absolute-origin accessor, which resolves dirty scene transforms before returning the vector. A failed hook attempt leaves the DLL loaded with a Runtime reason instead of crashing or freezing the demo process. Trace logging remains off by default.
 
 If you previously used an older build that created `selfiestick.ini`, delete that old ini or make sure `[Debug] TraceEnabled=0`; an existing ini value overrides the new default.
 
@@ -123,10 +125,10 @@ Behavior:
 
 - The target agent still comes from the same `Follow` / `Lock Current` logic as Player Selfie.
 - The DLL scans only projectiles owned/thrown by that target pawn or controller.
-- If exactly one valid flying projectile exists and no prop is locked, the DLL auto-locks it.
-- If multiple valid projectiles exist, it does not auto-switch. Use `LOCK` on the desired candidate.
-- `CLEAR PROP` clears the current prop lock. If exactly one valid prop still exists on the next frame, it can auto-lock again.
-- Tracking is only for flying projectile entities. To avoid losing very short throws, unlocked discovery checks the newest entity tail at roughly 30 Hz; after disappearance, flash/HE/fire/decoy retain the last valid camera pose for 0.45 seconds and smoke retains it for 1.2 seconds.
+- `AUTO HANDOFF` follows through detonation, holds the final view for **2 demo seconds**, then returns to the agent's native view while staying armed for future throws. Pause stops this timer; slow playback extends its wall-clock duration. A newer valid throw takes over immediately, including during the hold.
+- `PIN CURRENT PROP` follows the currently selected shot through detonation and retains its final view indefinitely, ignoring other throws. A row `SELECT + PIN` chooses a specific live candidate and applies the same pin policy. AUTO HANDOFF unpins; if two demo seconds have already elapsed, it returns to the agent unless another shot takes over.
+- `CLEAR LOCK / RETURN TO AGENT` immediately releases the view and suppresses automatic recapture of the cleared/existing candidates. Future throws still trigger auto capture. The lower target `Clear Lock` also releases the prop view and returns target selection to Follow. Explicit row selection can reopen a live cleared candidate.
+- Landing and scheduled explosion/smoke ticks do not stop tracking. Actual effect flags or entity removal start the final-view hold while game effects continue. A projectile born and destroyed entirely between camera callbacks still requires slower playback.
 
 Prop controls:
 
@@ -135,9 +137,11 @@ Prop controls:
 - `Centered Lookback Preset`: places the camera directly on the outgoing trajectory axis: `X=0`, `Y=-13.5`, `Z=2.25`, `Pitch=0`, `Yaw=0`, `Roll=0`.
 - Recent Props: shows recent projectile candidates, validity, handle, age, and lock buttons.
 
-The prop camera caches the inverse horizontal yaw of `C_BaseCSGrenadeProjectile::m_vInitialVelocity` instead of continuously steering toward the thrower's later position. Keeping the carrier horizon level avoids the extreme high/low view produced by ballistic launch pitch; explicit `Z` and angle trim remain available. Its smoothed, predicted anchor moves only the camera carrier while the view always targets the projectile's current raw origin, keeping the prop centered at high speed. Discovery scans newest entity indices first, prioritizes the newest 128-slot hot tail, ignores stationary leftovers, checks every owner field for a pawn/controller match, and can early-lock a newly thrown moving prop without waiting for the complete entity-list pass.
+The prop camera latches the first valid inverse horizontal launch yaw for that exact handle. A temporary fallback can be promoted once when initial velocity arrives; later updates cannot rotate the established rig. Both position and aim use the same current scene sample, so `sqrt(X*X + Y*Y + Z*Z)` is the prop-relative distance, independent of playback speed, FPS or refresh. Legacy `PropFollowSpeed` is retained in INI files but no longer limits the carrier. Guessed memory-vector origin searches remain removed. Temporarily missing data keeps the last validated view while allowing recovery; a pending new shot takes over only when its pose is usable. Creation observation preserves the original engine/HLAE call chain; complete 0..32767 slot coverage remains the fallback if observation cannot be installed.
 
 ## Status And Debugging
+
+For same-shot motion problems, expand Runtime and select `EXPORT MOTION DIAGNOSTICS`. It explicitly exports the most recent 1,024 in-memory camera samples to `selfiestick_prop_motion.csv` beside the loaded DLL. The file records build/marker, selected/displayed handles, phases, cached/resolved origins, camera pose and FOV. Camera callbacks perform no diagnostic file writes; export uses a worker. These are callback samples, not a measured game FPS trace.
 
 The Runtime diagnostics bar is collapsed by default. Click it to expand the following live state:
 
@@ -167,12 +171,12 @@ selfiestick_trace.log
 The current trace marker is:
 
 ```text
-schema-probe-v37-eye-origin-cs2-26445667
+schema-probe-v42-prop-origin-cs2-26445667
 ```
 
 If the marker is older, HLAE/CS2 is loading an old DLL. Fully restart HLAE and CS2 after replacing DLLs because Windows keeps loaded DLLs inside the process.
 
-The `v0.4.5` panel deliberately has no `D3D11.dll` or `DXGI.dll` import and does not call Present. If a new dump still points through a ReShade-provided `dxgi.dll`, verify that the trace marker and DLL hash belong to `v0.4.5`, then inspect the remaining graphics injectors independently.
+The `v0.4.6` panel has no `D3D11.dll` or `DXGI.dll` import and does not call Present. If a new dump still points through a ReShade-provided `dxgi.dll`, verify that the build label and DLL hash belong to `v0.4.6`, then inspect the remaining graphics injectors independently. The diagnostic marker above identifies the retained origin implementation; the build label identifies the release version.
 
 ## Build From Source
 

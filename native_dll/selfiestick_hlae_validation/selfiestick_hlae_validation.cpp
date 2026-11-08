@@ -740,7 +740,7 @@ int main() {
         const char* fieldName;
         std::ptrdiff_t offset;
     };
-    constexpr std::array<ExpectedSchemaFallback, 21> currentPlayerAndPropFallbacks{ {
+    constexpr std::array<ExpectedSchemaFallback, 29> currentPlayerAndPropFallbacks{ {
         { "CEntityInstance", "m_pEntity", 0x10 },
         { "CBasePlayerController", "m_hPawn", 0x6BC },
         { "CCSPlayerController", "m_hPlayerPawn", 0x92C },
@@ -761,7 +761,15 @@ int main() {
         { "C_BaseGrenade", "m_hThrower", 0x1290 },
         { "C_BaseGrenade", "m_hOriginalThrower", 0x12AC },
         { "C_BaseCSGrenadeProjectile", "m_vInitialVelocity", 0x12BC },
-        { "C_BaseCSGrenadeProjectile", "m_nBounces", 0x12C8 }
+        { "C_BaseCSGrenadeProjectile", "m_nBounces", 0x12C8 },
+        { "C_BaseCSGrenadeProjectile", "m_flSpawnTime", 0x12E8 },
+        { "C_BaseCSGrenadeProjectile", "m_nExplodeEffectTickBegin", 0x12D8 },
+        { "C_BaseCSGrenadeProjectile", "m_bExplodeEffectBegan", 0x12FC },
+        { "C_SmokeGrenadeProjectile", "m_nSmokeEffectTickBegin", 0x1360 },
+        { "C_SmokeGrenadeProjectile", "m_bDidSmokeEffect", 0x1364 },
+        { "C_DecoyProjectile", "m_nDecoyShotTick", 0x1348 },
+        { "CEntityIdentity", "m_designerName", 0x20 },
+        { "C_BaseEntity", "m_flSimulationTime", 0x3B8 }
     } };
     for (const auto& expected : currentPlayerAndPropFallbacks) {
         if (!TryGetKnownClientSchemaFieldOffsetFallback(expected.className, expected.fieldName, fallbackOffset)

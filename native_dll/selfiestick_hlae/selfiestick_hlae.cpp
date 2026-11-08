@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -45,8 +46,14 @@ constexpr wchar_t kTier0ModuleName[] = L"tier0.dll";
 constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
-constexpr char kBuildTag[] = "v0.4.5 " __DATE__ " " __TIME__;
-constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v37-eye-origin-cs2-26445667";
+constexpr char kBuildTag[] = "v0.4.6 " __DATE__ " " __TIME__;
+constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v42-prop-origin-cs2-26445667";
+constexpr std::uint32_t kEntityAbsOriginRva = 0x00219BC0u;
+constexpr std::uint32_t kSceneTransformResolveRva = 0x009D2280u;
+constexpr std::ptrdiff_t kSceneAbsTransformDirtyOffset = 0x110;
+constexpr std::uint32_t kPropLifecycleVtableRva = 0x01C33A10u;
+constexpr std::uint32_t kPropLifecycleAddRva = 0x009F95D0u;
+constexpr std::uint32_t kPropLifecycleRemoveRva = 0x009FA050u;
 constexpr std::size_t kRenderEyeOriginVtableIndex = 173u;
 constexpr std::uint32_t kSupportedClientTimeDateStamp = 0x6AEBC4DAu;
 constexpr std::uint32_t kSupportedClientSizeOfImage = 0x029A3000u;
@@ -158,8 +165,9 @@ constexpr float kGunAnchorStabilizationFactor = 0.18f;
 constexpr float kScopedFovThreshold = 60.0f;
 constexpr float kFallbackUnscopedFov = 90.0f;
 constexpr std::size_t kMaxPropCandidates = 5u;
-constexpr int kPropCandidateScanBatchSize = 192;
-constexpr unsigned long long kPropCandidateScanBatchIntervalMs = 8ull;
+constexpr std::size_t kMaxPropEntitySlots = 32768u;
+constexpr double kPropDiscoveryBudgetSeconds = 0.0005;
+constexpr double kFreshPropInitialVelocityGraceSeconds = 0.1;
 constexpr float kDefaultPropOffsetX = 0.0f;
 constexpr float kDefaultPropOffsetY = -13.5f;
 constexpr float kDefaultPropOffsetZ = 2.25f;
@@ -167,8 +175,6 @@ constexpr float kDefaultPropPitch = 0.0f;
 constexpr float kDefaultPropYaw = 0.0f;
 constexpr float kDefaultPropRoll = 0.0f;
 constexpr float kDefaultPropFollowSpeed = 640.0f;
-constexpr double kSmokePostFlightHoldSeconds = 1.2;
-constexpr double kShortPropPostFlightHoldSeconds = 0.45;
 constexpr float kOverlayTickSeconds = static_cast<float>(kOverlayTimerIntervalMs) / 1000.0f;
 
 struct Vec3 {
@@ -616,10 +622,10 @@ constexpr LocalizedText kLocalizedTextEnUs{
     .uiPropRotationLabel = L"Pitch / Yaw / Roll",
     .uiPropRecentSection = L"Recent Props",
     .uiPropLive = L"live",
-    .uiPropEnded = L"ended",
-    .uiButtonPropLock = L"LOCK",
+    .uiPropEnded = L"still / ended",
+    .uiButtonPropLock = L"SELECT + PIN",
     .uiButtonPropLocked = L"LOCKED",
-    .uiButtonPropClear = L"CLEAR PROP",
+    .uiButtonPropClear = L"CLEAR LOCK / RETURN TO AGENT",
     .uiButtonPropImageStyle = L"CENTERED LOOKBACK PRESET",
     .uiPropLockLabel = L"Prop lock: ",
     .uiPropXyzLabel = L"Prop XYZ: ",
@@ -785,10 +791,10 @@ constexpr LocalizedText kLocalizedTextZhCn{
     .uiPropRotationLabel = L"俯仰 / 偏航 / 翻滚",
     .uiPropRecentSection = L"最近道具",
     .uiPropLive = L"飞行中",
-    .uiPropEnded = L"已结束",
-    .uiButtonPropLock = L"锁定",
+    .uiPropEnded = L"静止 / 已结束",
+    .uiButtonPropLock = L"选中并锁定",
     .uiButtonPropLocked = L"已锁定",
-    .uiButtonPropClear = L"清除道具",
+    .uiButtonPropClear = L"清除锁定并返回探员",
     .uiButtonPropImageStyle = L"居中回看预设",
     .uiPropLockLabel = L"道具锁定: ",
     .uiPropXyzLabel = L"道具 XYZ: ",
@@ -836,6 +842,14 @@ struct ClientOffsets {
     std::ptrdiff_t projectileOwnerEntity{};
     std::ptrdiff_t projectileBounceCount{};
     std::ptrdiff_t projectileInitialVelocity{};
+    std::ptrdiff_t projectileSpawnTime{};
+    std::ptrdiff_t projectileExplodeTick{};
+    std::ptrdiff_t projectileExplodeBegan{};
+    std::ptrdiff_t smokeEffectTick{};
+    std::ptrdiff_t smokeEffectBegan{};
+    std::ptrdiff_t decoyShotTick{};
+    std::ptrdiff_t identityDesignerName{};
+    std::ptrdiff_t entitySimulationTime{};
 };
 
 struct SchemaField {
@@ -874,6 +888,8 @@ struct SchemaClassInfoLegacy {
     SchemaFieldModern* fields;
 };
 
+enum class PropViewPhase { Waiting, Tracking, Recovering, EffectHold };
+
 struct RuntimeState {
     bool initialized{false};
     bool enabled{false};
@@ -892,6 +908,8 @@ struct RuntimeState {
     EntityHandle lockedPropHandle{};
     EntityHandle lockedPropThrowerHandle{};
     PropProjectileKind lockedPropKind{PropProjectileKind::Unknown};
+    bool manualPropLock{false};
+    PropViewPhase propViewPhase{PropViewPhase::Waiting};
     std::array<PropCandidate, kMaxPropCandidates> propCandidates{};
     bool attachmentAvailable{false};
     bool lastOverrideSucceeded{false};
@@ -953,15 +971,6 @@ struct PropSmoothingState {
     EntityHandle propHandle{};
     Vec3 position{};
     Vec3 lastRawOrigin{};
-    Vec3 velocity{};
-    Vec3 targetVelocity{};
-    float lastRawIntervalSeconds{};
-    double lastRawTimeSeconds{};
-    double lastUpdateTimeSeconds{};
-    unsigned long long lastRawTickMs{};
-    unsigned long long lastUpdateTickMs{};
-    int bounceCount{};
-    bool bounceCountValid{false};
     bool valid{false};
 };
 
@@ -982,12 +991,23 @@ struct PropOriginHistoryState {
     unsigned int missedFrames{};
     bool lastOriginValid{false};
     bool valid{false};
+    Vec3 cachedBeforeResolve{};
+    std::uint8_t dirtyBeforeResolve{};
+    bool engineResolved{false};
+    std::uint64_t readSequence{};
+};
+
+struct PropOriginRead {
+    Vec3 cached{};
+    std::uint8_t dirty{};
+    bool engineResolved{false};
 };
 
 struct PropCameraReferenceState {
     EntityHandle propHandle{};
     Vec3 forward{};
     bool valid{false};
+    bool fromInitialVelocity{false};
 };
 
 struct PropLookTargetState {
@@ -996,14 +1016,38 @@ struct PropLookTargetState {
     bool valid{false};
 };
 
-struct PropPostFlightHoldState {
-    EntityHandle propHandle{};
+struct PropSelection {
+    EntityHandle handle{};
     EntityHandle throwerHandle{};
     PropProjectileKind kind{PropProjectileKind::Unknown};
-    Vec3 anchor{};
-    Vec3 forward{};
-    double lastLiveTimeSeconds{};
+    bool manual{false};
+};
+
+struct PropViewCache {
+    EntityHandle handle{}, targetHandle{};
+    Vec3 origin{}, forward{}, position{}, angles{};
+    double failureSince{-1.0};
+    double effectDemoTime{-1.0};
+    double sampledDemoTime{-1.0};
+    float fov{};
+    bool fovValid{false};
     bool valid{false};
+    bool terminal{false};
+};
+
+struct PropDiscoverySlot {
+    EntityHandle handle{};
+    EntityHandle suppressedHandle{};
+    double freshUntilSeconds{};
+    std::uint64_t eligibleSequence{};
+    Vec3 lastOrigin{};
+    bool observed{false};
+    bool originValid{false};
+};
+
+struct PropClassKind {
+    PropProjectileKind kind{PropProjectileKind::Unknown};
+    bool needsDesignerName{false};
 };
 
 struct PropCandidateScanState {
@@ -1011,10 +1055,16 @@ struct PropCandidateScanState {
     EntityHandle targetHandle{};
     EntityHandle controllerHandle{};
     int nextEntityIndex{};
-    int highestEntityIndex{-1};
-    std::array<PropCandidate, kMaxPropCandidates> discovered{};
-    std::size_t discoveredCount{};
-    bool active{false};
+    int baselineHighestIndex{-1};
+    std::array<PropDiscoverySlot, kMaxPropEntitySlots> slots{};
+    std::unordered_map<void*, PropClassKind> kindsByVtable{};
+    std::vector<int> projectileSlots{};
+    std::uint64_t nextEligibleSequence{};
+    std::uint64_t lastAcquiredSequence{};
+    EntityHandle lastAcquiredHandle{};
+    float lastAcquiredSpawnTime{-1.0f};
+    float lastSimulationTime{};
+    bool simulationTimeValid{false};
 };
 
 enum OverlayControlId : int {
@@ -1149,6 +1199,7 @@ using LookupAttachmentFn = void(__fastcall*)(void* entity, std::uint8_t& outInde
 using GetAttachmentFn = bool(__fastcall*)(void* entity, std::uint8_t attachmentIndex, void* outputTransform);
 using GetSplitScreenPlayerFn = void* (__fastcall*)(int slot);
 using FrameStageNotifyFn = void(__fastcall*)(void* thisPointer, int stage);
+using EntityAbsOriginFn = const Vec3* (__fastcall*)(void* entity);
 using Tier0MsgFn = void(__cdecl*)(const char*, ...);
 using FindTypeScopeForModuleFn = void* (__fastcall*)(void* schemaSystem, const char* moduleName, void* unused);
 using FindDeclaredClassInTypeScopeFn = void* (__fastcall*)(void* typeScope, const char* className);
@@ -1169,6 +1220,9 @@ GetAttachmentFn g_getAttachment{};
 GetSplitScreenPlayerFn g_getSplitScreenPlayer{};
 std::vector<GetSplitScreenPlayerFn> g_getSplitScreenPlayerCandidates{};
 FrameStageNotifyFn g_originalFrameStageNotify{};
+EntityAbsOriginFn g_getEntityAbsOrigin{};
+std::atomic<std::uint64_t> g_propDirtyOriginResolves{0};
+std::atomic<std::uint64_t> g_propOriginReadSequence{0};
 void* g_setupViewPatchAddress{};
 void* g_setupViewDetourStub{};
 std::array<std::uint8_t, hook::kSetUpViewPatchSize> g_setupViewOriginalBytes{};
@@ -1187,7 +1241,7 @@ std::mutex g_propSmoothingMutex;
 std::mutex g_propOriginHistoryMutex;
 std::mutex g_propCameraReferenceMutex;
 std::mutex g_propLookTargetMutex;
-std::mutex g_propPostFlightHoldMutex;
+std::mutex g_propViewMutex;
 std::mutex g_propCandidateScanMutex;
 std::mutex g_solidBrushCacheMutex;
 std::mutex g_penCacheMutex;
@@ -1202,12 +1256,15 @@ PropSmoothingState g_propSmoothing;
 PropOriginHistoryState g_propOriginHistory;
 PropCameraReferenceState g_propCameraReference;
 PropLookTargetState g_propLookTarget;
-PropPostFlightHoldState g_propPostFlightHold;
+PropViewCache g_propView;
 PropCandidateScanState g_propCandidateScan;
 DebugOptions g_debugOptions;
 std::atomic<bool> g_uiThreadStarted{false};
 std::atomic<bool> g_setupViewCallbackObserved{false};
 std::atomic<bool> g_enabledSetUpViewObserved{false};
+std::atomic<bool> g_propDiscoveryCaptureActive{false};
+std::atomic<bool> g_propDiscoveryResetRequested{false};
+std::atomic<std::uint32_t> g_propAutoReleasedHandle{0xFFFFFFFFu};
 std::atomic<bool> g_setupViewHookInstallInProgress{false};
 std::atomic<unsigned long long> g_setupViewBridgeCounter{0};
 std::atomic<unsigned long long> g_traceFrameCounter{0};
@@ -1215,10 +1272,6 @@ std::atomic<unsigned long long> g_followResolutionTraceCounter{0};
 std::atomic<unsigned long long> g_lastFollowTargetRefreshTickMs{0};
 std::atomic<unsigned long long> g_controllerPawnFallbackTraceCounter{0};
 std::atomic<unsigned long long> g_knifeFallbackAnchorTraceCounter{0};
-std::atomic<unsigned long long> g_lastPropCandidateRefreshTickMs{0};
-std::atomic<unsigned long long> g_lastPropCandidateScanBatchTickMs{0};
-std::atomic<unsigned long long> g_lastPropHotTailScanTickMs{0};
-std::atomic<bool> g_propCandidateScanInProgress{false};
 std::atomic<int> g_initStage{0};
 std::atomic<bool> g_schemaOffsetsResolved{false};
 std::atomic<bool> g_schemaResolveInProgress{false};
@@ -1237,8 +1290,10 @@ void ConsolePrintf(const char* format, ...);
 void TracePrintf(const char* format, ...);
 void MarkOverlayDirty();
 std::wstring GetSettingsFilePath();
+std::wstring GetTraceFilePath();
 void PersistCameraSettingsSnapshot(const RuntimeState& state);
 const std::string& TryGetEntityRttiClassName(void* entity);
+bool PropCandidatesEqual(const std::array<PropCandidate, kMaxPropCandidates>& left, const std::array<PropCandidate, kMaxPropCandidates>& right);
 void StartOverlayHotkeyCapture();
 bool HandleOverlayHotkeyCaptureKeyDown(WPARAM wParam);
 const wchar_t* GetOverlayLifecycleText(const RuntimeState& state);
@@ -1347,6 +1402,21 @@ bool TryInvokeGetHighestEntityIndex(void* entityList, int& highestIndex) {
         highestIndex = -1;
         return false;
     }
+}
+
+bool TryInvokeEntityAbsOrigin(EntityAbsOriginFn function, void* entity, Vec3& origin) {
+    if (function == nullptr || entity == nullptr) return false;
+    __try {
+        const auto* pointer = function(entity);
+        if (pointer == nullptr) return false;
+        const volatile float* coordinates = reinterpret_cast<const volatile float*>(pointer);
+        const Vec3 first{coordinates[0], coordinates[1], coordinates[2]};
+        const Vec3 second{coordinates[0], coordinates[1], coordinates[2]};
+        if (first.x != second.x || first.y != second.y || first.z != second.z) return false;
+        origin = second;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
 bool TryInvokeRenderEyeOrigin(void* entity, void* functionAddress, float output[3]) {
@@ -1797,6 +1867,24 @@ RuntimeState SnapshotState() {
     return g_state;
 }
 
+const char* PropViewPhaseText(PropViewPhase phase) {
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    switch (phase) {
+    case PropViewPhase::Tracking: return "跟随飞行 / 落地等待";
+    case PropViewPhase::Recovering: return "保留机位，等待有效坐标";
+    case PropViewPhase::EffectHold: return "爆开效果 / 最终机位";
+    default: return "等待道具";
+    }
+#else
+    switch (phase) {
+    case PropViewPhase::Tracking: return "Tracking / awaiting detonation";
+    case PropViewPhase::Recovering: return "Holding view while data recovers";
+    case PropViewPhase::EffectHold: return "Effect / final view";
+    default: return "Waiting for a prop";
+    }
+#endif
+}
+
 void RefreshStatusTextLocked() {
     std::ostringstream stream;
     stream
@@ -1805,6 +1893,8 @@ void RefreshStatusTextLocked() {
         << " cameraMode=" << CameraModeToString(g_state.cameraMode)
         << " look=" << LookModeToString(g_state.lookMode)
         << " targetMode=" << TargetModeToString(g_state.targetMode)
+        << " propPinned=" << (g_state.manualPropLock ? "1" : "0")
+        << " propView=" << PropViewPhaseText(g_state.propViewPhase)
         << " trimRBU=(" << FormatFloat(g_state.offset.x) << "," << FormatFloat(g_state.offset.y) << "," << FormatFloat(g_state.offset.z) << ")"
         << " playerPYR=(" << FormatFloat(g_state.playerRotation.x) << "," << FormatFloat(g_state.playerRotation.y) << "," << FormatFloat(g_state.playerRotation.z) << ")"
         << " propXYZ=(" << FormatFloat(g_state.propOffset.x) << "," << FormatFloat(g_state.propOffset.y) << "," << FormatFloat(g_state.propOffset.z) << ")"
@@ -1900,6 +1990,7 @@ void SetEnabled(bool enabled) {
             std::lock_guard lock(g_stateMutex);
             changed = g_state.enabled;
             g_state.enabled = false;
+            g_propDiscoveryCaptureActive.store(false, std::memory_order_release);
             RefreshStatusTextLocked();
             MarkOverlayDirty();
         }
@@ -1914,6 +2005,7 @@ void SetEnabled(bool enabled) {
         std::lock_guard lock(g_stateMutex);
         changed = g_state.enabled != enabled;
         g_state.enabled = enabled;
+        g_propDiscoveryCaptureActive.store(enabled && g_state.cameraMode == CameraMode::PropSelfie, std::memory_order_release);
         RefreshStatusTextLocked();
         MarkOverlayDirty();
     }
@@ -1953,6 +2045,7 @@ void SetCameraMode(CameraMode cameraMode) {
         std::lock_guard lock(g_stateMutex);
         changed = g_state.cameraMode != cameraMode;
         g_state.cameraMode = cameraMode;
+        g_propDiscoveryCaptureActive.store(g_state.enabled && cameraMode == CameraMode::PropSelfie, std::memory_order_release);
         if (cameraMode == CameraMode::PlayerSelfie && g_state.lookMode == LookMode::Forward) {
             // Clicking the Player Selfie tab is an explicit request for a
             // selfie. Over-shoulder remains available through its dedicated
@@ -1997,7 +2090,11 @@ void SetPlayerRotation(const Vec3& rotation, bool persist = true) {
     MarkOverlayDirty();
 }
 
-void ResetPropTrackingState() {
+void ResetPropTrackingState(bool keepLastView = false) {
+    if (!keepLastView) {
+        std::lock_guard lock(g_propViewMutex);
+        g_propView = {};
+    }
     {
         std::lock_guard lock(g_propSmoothingMutex);
         g_propSmoothing = {};
@@ -2013,10 +2110,6 @@ void ResetPropTrackingState() {
     {
         std::lock_guard lock(g_propLookTargetMutex);
         g_propLookTarget = {};
-    }
-    {
-        std::lock_guard lock(g_propPostFlightHoldMutex);
-        g_propPostFlightHold = {};
     }
 }
 
@@ -2115,17 +2208,56 @@ void SetTargetMode(TargetMode targetMode) {
     }
 }
 
-void ClearLockedProp() {
+void ClearLockedProp(EntityHandle expectedHandle = {}, bool requireExpectedHandle = false) {
+    // Match discovery's scan -> state order. Manual cancellation snapshots the
+    // already-present shots, so the next callback cannot undo the user's clear.
+    std::unique_lock scanLock(g_propCandidateScanMutex, std::defer_lock);
+    if (!requireExpectedHandle) scanLock.lock();
     {
         std::lock_guard lock(g_stateMutex);
+        if (requireExpectedHandle && g_state.lockedPropHandle.raw != expectedHandle.raw) return;
+        if (!requireExpectedHandle) {
+            auto& scan = g_propCandidateScan;
+            const auto suppress = [&](EntityHandle handle) {
+                if (handle.IsValid()) scan.slots[static_cast<std::size_t>(handle.Index())].suppressedHandle = handle;
+            };
+            suppress(g_state.lockedPropHandle);
+            for (const auto& candidate : g_state.propCandidates) suppress(candidate.handle);
+            for (const int index : scan.projectileSlots) {
+                if (index >= 0 && index < static_cast<int>(kMaxPropEntitySlots)) suppress(scan.slots[index].handle);
+            }
+            scan.lastAcquiredSequence = scan.nextEligibleSequence;
+            scan.lastAcquiredHandle = {};
+            g_propAutoReleasedHandle.store(g_state.lockedPropHandle.raw, std::memory_order_release);
+        }
         g_state.lockedPropHandle = {};
         g_state.lockedPropThrowerHandle = {};
         g_state.lockedPropKind = PropProjectileKind::Unknown;
+        g_state.manualPropLock = false;
+        g_state.propViewPhase = PropViewPhase::Waiting;
+        ResetPropTrackingState();
         RefreshStatusTextLocked();
     }
-    ResetPropTrackingState();
     MarkOverlayDirty();
     TracePrintf("prop-lock cleared");
+}
+
+PropSelection GetPropSelection() {
+    std::lock_guard lock(g_stateMutex);
+    return {g_state.lockedPropHandle, g_state.lockedPropThrowerHandle, g_state.lockedPropKind, g_state.manualPropLock};
+}
+
+PropViewCache SnapshotPropView() {
+    std::lock_guard lock(g_propViewMutex);
+    return g_propView;
+}
+
+void SetPropPinned(bool pinned) {
+    std::lock_guard lock(g_stateMutex);
+    if (pinned && !g_state.lockedPropHandle.IsValid()) return;
+    g_state.manualPropLock = pinned;
+    RefreshStatusTextLocked();
+    MarkOverlayDirty();
 }
 
 void SetLockedProp(const PropCandidate& candidate) {
@@ -2134,12 +2266,17 @@ void SetLockedProp(const PropCandidate& candidate) {
     }
     {
         std::lock_guard lock(g_stateMutex);
+        const bool changed = g_state.lockedPropHandle.raw != candidate.handle.raw;
         g_state.lockedPropHandle = candidate.handle;
         g_state.lockedPropThrowerHandle = candidate.throwerHandle;
         g_state.lockedPropKind = candidate.kind;
+        g_state.manualPropLock = true;
+        if (changed) {
+            ResetPropTrackingState();
+            g_state.propViewPhase = PropViewPhase::Waiting;
+        }
         RefreshStatusTextLocked();
     }
-    ResetPropTrackingState();
     MarkOverlayDirty();
     TracePrintf(
         "prop-lock handle=%u kind=%s thrower=%u",
@@ -2150,6 +2287,9 @@ void SetLockedProp(const PropCandidate& candidate) {
 }
 
 void ClearLockedTarget() {
+    bool propMode{};
+    { std::lock_guard lock(g_stateMutex); propMode = g_state.cameraMode == CameraMode::PropSelfie; }
+    if (propMode) ClearLockedProp();
     std::lock_guard lock(g_stateMutex);
     g_state.lockedHandle = EntityHandle{};
     g_state.targetMode = TargetMode::Follow;
@@ -2238,6 +2378,8 @@ bool WriteProcessMemoryProtected(void* address, const void* bytes, std::size_t s
     VirtualProtect(address, size, oldProtect, &discard);
     return true;
 }
+
+#include "prop_lifecycle.inl"
 
 struct SuspendedThread {
     HANDLE handle{};
@@ -4316,6 +4458,14 @@ bool TryBuildKnownClientOffsets(ClientOffsets& offsets) {
     ok = getKnown("C_BaseEntity", "m_hOwnerEntity", offsets.projectileOwnerEntity) && ok;
     ok = getKnown("C_BaseCSGrenadeProjectile", "m_nBounces", offsets.projectileBounceCount) && ok;
     ok = getKnown("C_BaseCSGrenadeProjectile", "m_vInitialVelocity", offsets.projectileInitialVelocity) && ok;
+    ok = getKnown("C_BaseCSGrenadeProjectile", "m_flSpawnTime", offsets.projectileSpawnTime) && ok;
+    ok = getKnown("C_BaseCSGrenadeProjectile", "m_nExplodeEffectTickBegin", offsets.projectileExplodeTick) && ok;
+    ok = getKnown("C_BaseCSGrenadeProjectile", "m_bExplodeEffectBegan", offsets.projectileExplodeBegan) && ok;
+    ok = getKnown("C_SmokeGrenadeProjectile", "m_nSmokeEffectTickBegin", offsets.smokeEffectTick) && ok;
+    ok = getKnown("C_SmokeGrenadeProjectile", "m_bDidSmokeEffect", offsets.smokeEffectBegan) && ok;
+    ok = getKnown("C_DecoyProjectile", "m_nDecoyShotTick", offsets.decoyShotTick) && ok;
+    ok = getKnown("CEntityIdentity", "m_designerName", offsets.identityDesignerName) && ok;
+    ok = getKnown("C_BaseEntity", "m_flSimulationTime", offsets.entitySimulationTime) && ok;
     return ok;
 }
 
@@ -5016,6 +5166,16 @@ bool ResolveEntityAccess() {
     g_runtimeCompatibility.schemaOffsetsReady = g_schemaOffsetsResolved.load(std::memory_order_acquire);
     g_runtimeCompatibility.splitScreenAccessorReady = g_getSplitScreenPlayer != nullptr;
 
+    g_getEntityAbsOrigin = nullptr;
+    if (g_knownClientSchemaFallbackAllowed.load(std::memory_order_acquire)) {
+        auto* getter = reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(g_clientModule) + kEntityAbsOriginRva);
+        if (!IsAddressExecutableInModule(g_clientModule, getter)) {
+            SetInitialized(false, FormatIncompatibleBuildReason("verified absolute-origin accessor unavailable"));
+            return false;
+        }
+        g_getEntityAbsOrigin = reinterpret_cast<EntityAbsOriginFn>(getter);
+    }
+
     return g_runtimeCompatibility.entityAccessReady && g_runtimeCompatibility.splitScreenAccessorReady;
 }
 
@@ -5272,6 +5432,38 @@ bool TryGetEntityAbsOrigin(void* entity, Vec3& origin, std::string& failure) {
     }
 
     return true;
+}
+
+bool TryGetResolvedPropOrigin(void* entity, Vec3& origin, std::string& failure, PropOriginRead* sample = nullptr) {
+    void* scene = nullptr;
+    if (!TryReadOffsetPointer(entity, g_offsets.sceneNode, scene) || scene == nullptr) {
+        failure = Texts().reasonWeaponSceneNodeMissing;
+        return false;
+    }
+    std::uint8_t dirty{};
+    TryReadOffsetValue(scene, kSceneAbsTransformDirtyOffset, dirty);
+    if (sample != nullptr) {
+        *sample = {};
+        TryReadOffsetValue(scene, g_offsets.sceneAbsOrigin, sample->cached);
+        sample->dirty = dirty;
+    }
+    if (g_getEntityAbsOrigin != nullptr) {
+        if (!TryInvokeEntityAbsOrigin(g_getEntityAbsOrigin, entity, origin) || !IsFiniteVec3(origin)) {
+            failure = "absolute-origin resolver failed or changed during sampling";
+            return false;
+        }
+        if (dirty != 0) g_propDirtyOriginResolves.fetch_add(1u, std::memory_order_relaxed);
+        if (sample != nullptr) sample->engineResolved = true;
+        failure.clear();
+        return true;
+    }
+    // Standalone mock entities have no client resolver. Never use an unresolved
+    // scene cache in a known production client if binding the resolver failed.
+    if (g_knownClientSchemaFallbackAllowed.load(std::memory_order_acquire)) {
+        failure = "absolute-origin resolver is not bound";
+        return false;
+    }
+    return TryGetEntityAbsOrigin(entity, origin, failure);
 }
 
 bool TryGetPawnEyeAngles(void* pawn, Vec3& angles, std::string& failure) {
@@ -6398,19 +6590,74 @@ void VectorToAngles(const Vec3& direction, float& pitch, float& yaw) {
     yaw = std::atan2(direction.y, direction.x) * 180.0f / 3.14159265358979323846f;
 }
 
-bool IsProjectileMovingForDiscovery(void* projectile) {
+PropClassKind ReadPropClassKind(void* entity) {
+    const auto& name = TryGetEntityRttiClassName(entity);
+    const auto kind = compat::ClassifyPropProjectileClassName(name);
+    return {kind, kind == PropProjectileKind::Unknown
+        && (name.empty() || name.find("CSGrenadeProjectile") != std::string::npos)};
+}
+
+PropProjectileKind ResolvePropClassKind(void* entity, const PropClassKind& type) {
+    if (!type.needsDesignerName) return type.kind;
+    void* identity = nullptr;
+    void* namePointer = nullptr;
+    std::string name;
+    if (TryReadOffsetPointer(entity, g_offsets.entityInstanceToIdentity, identity)
+        && TryReadOffsetPointer(identity, g_offsets.identityDesignerName, namePointer)
+        && TryCopyCString(static_cast<const char*>(namePointer), name, 64u)) {
+        return compat::ClassifyPropProjectileClassName(name);
+    }
+    return PropProjectileKind::Unknown;
+}
+
+PropProjectileKind GetPropProjectileKind(void* entity) {
+    return entity != nullptr ? ResolvePropClassKind(entity, ReadPropClassKind(entity)) : PropProjectileKind::Unknown;
+}
+
+float ReadPropSpawnTime(void* entity) {
+    float time = -1.0f;
+    return TryReadOffsetValue(entity, g_offsets.projectileSpawnTime, time)
+        && std::isfinite(time) && time > 0.0f && time < 10000000.0f ? time : -1.0f;
+}
+
+bool HasPropProjectileEnded(void* entity, PropProjectileKind kind) {
+    if (entity == nullptr) return true;
+    const auto positiveTick = [&](std::ptrdiff_t offset) {
+        int tick{};
+        return TryReadOffsetValue(entity, offset, tick) && tick > 0;
+    };
+    const auto effectBegan = [&](std::ptrdiff_t offset) {
+        std::uint8_t value{};
+        return TryReadOffsetValue(entity, offset, value) && value != 0u;
+    };
+    return effectBegan(g_offsets.projectileExplodeBegan)
+        || (kind == PropProjectileKind::Smoke && effectBegan(g_offsets.smokeEffectBegan))
+        || (kind == PropProjectileKind::Decoy && positiveTick(g_offsets.decoyShotTick));
+}
+
+bool HasPropEffectStarted(void* entity, PropProjectileKind kind) {
+    // TickBegin may be scheduled while the grenade is still rolling. Existing
+    // shots wait for actual client effect flags (or removal), not a future tick.
+    return HasPropProjectileEnded(entity, kind);
+}
+
+bool IsProjectileMovingForDiscovery(void* projectile, bool allowFreshInitialVelocity = false) {
     constexpr float kMinimumFlyingSpeed = 4.0f;
     constexpr float kMaximumProjectileSpeed = 100000.0f;
-    if (projectile == nullptr || g_offsets.projectileVelocity == 0) {
+    if (projectile == nullptr) {
         return false;
     }
 
     Vec3 velocity{};
-    return TryReadOffsetValue(projectile, g_offsets.projectileVelocity, velocity)
+    const auto flying = [&](std::ptrdiff_t offset) {
+        return offset != 0 && TryReadOffsetValue(projectile, offset, velocity)
         && compat::IsUsableProjectileVelocity(
             compat::CameraVector{ velocity.x, velocity.y, velocity.z },
             kMaximumProjectileSpeed)
         && Length(velocity) >= kMinimumFlyingSpeed;
+    };
+    return flying(g_offsets.projectileVelocity)
+        || (allowFreshInitialVelocity && flying(g_offsets.projectileInitialVelocity));
 }
 
 bool TryReadProjectileOwnerHandle(
@@ -6450,22 +6697,24 @@ bool TryReadProjectileOwnerHandle(
     return false;
 }
 
-bool IsPropProjectileForTarget(void* entity, EntityHandle targetHandle, EntityHandle targetControllerHandle, PropCandidate& candidate) {
+bool IsPropProjectileForTarget(void* entity, EntityHandle targetHandle, EntityHandle targetControllerHandle, PropCandidate& candidate,
+    bool allowFreshInitialVelocity = false, PropProjectileKind knownKind = PropProjectileKind::Unknown,
+    bool observedMovement = false) {
     candidate = {};
     if (entity == nullptr || !targetHandle.IsValid()) {
         return false;
     }
 
-    const std::string& className = TryGetEntityRttiClassName(entity);
-    const PropProjectileKind kind = compat::ClassifyPropProjectileClassName(className);
-    if (kind == PropProjectileKind::Unknown) {
+    const PropProjectileKind kind = knownKind != PropProjectileKind::Unknown ? knownKind
+        : GetPropProjectileKind(entity);
+    if (kind == PropProjectileKind::Unknown || HasPropProjectileEnded(entity, kind)) {
         return false;
     }
 
     // Landed smoke projectiles can remain in the entity list for a long time.
     // Excluding stationary entities prevents them from filling the five slots
     // and blocking auto-lock for the newly thrown projectile.
-    if (!IsProjectileMovingForDiscovery(entity)) {
+    if (!observedMovement && !IsProjectileMovingForDiscovery(entity, allowFreshInitialVelocity)) {
         return false;
     }
 
@@ -6490,16 +6739,16 @@ bool IsPropProjectileForTarget(void* entity, EntityHandle targetHandle, EntityHa
 bool IsLockedPropProjectileStillOwnedByThrower(
     void* entity,
     EntityHandle lockedThrowerHandle,
-    PropCandidate& candidate
+    PropCandidate& candidate,
+    bool includeEffects = false
 ) {
     candidate = {};
     if (entity == nullptr || !lockedThrowerHandle.IsValid()) {
         return false;
     }
 
-    const std::string& className = TryGetEntityRttiClassName(entity);
-    const PropProjectileKind kind = compat::ClassifyPropProjectileClassName(className);
-    if (kind == PropProjectileKind::Unknown) {
+    const PropProjectileKind kind = GetPropProjectileKind(entity);
+    if (kind == PropProjectileKind::Unknown || (!includeEffects && HasPropProjectileEnded(entity, kind))) {
         return false;
     }
 
@@ -6521,320 +6770,7 @@ bool IsLockedPropProjectileStillOwnedByThrower(
     return true;
 }
 
-bool TryFindNewestMovingPropCandidate(
-    void* entityList,
-    int highestEntityIndex,
-    void* targetPawn,
-    EntityHandle targetHandle,
-    PropCandidate& candidate
-) {
-    constexpr int kHotEntityTailCount = 128;
-    candidate = {};
-    if (entityList == nullptr || highestEntityIndex < 0 || targetPawn == nullptr || !targetHandle.IsValid()) {
-        return false;
-    }
-
-    const EntityHandle controllerHandle = PawnGetControllerHandle(targetPawn);
-    const int lowestHotIndex = std::max(0, highestEntityIndex - kHotEntityTailCount + 1);
-    for (int entityIndex = highestEntityIndex; entityIndex >= lowestHotIndex; --entityIndex) {
-        void* entity = nullptr;
-        if (!TryInvokeGetEntityFromIndex(entityList, entityIndex, entity) || entity == nullptr) {
-            continue;
-        }
-
-        if (IsPropProjectileForTarget(entity, targetHandle, controllerHandle, candidate)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool ShouldScanPropHotTail() {
-    constexpr unsigned long long kHotTailIntervalMs = 32u;
-    const unsigned long long nowTickMs = GetTickCount64();
-    unsigned long long previousTickMs = g_lastPropHotTailScanTickMs.load(std::memory_order_relaxed);
-    while (previousTickMs == 0u
-        || nowTickMs < previousTickMs
-        || nowTickMs - previousTickMs >= kHotTailIntervalMs) {
-        if (g_lastPropHotTailScanTickMs.compare_exchange_weak(
-                previousTickMs,
-                nowTickMs,
-                std::memory_order_relaxed,
-                std::memory_order_relaxed)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void UpdatePropCandidatesForTarget(void* targetPawn, EntityHandle targetHandle) {
-    if (targetPawn == nullptr || !targetHandle.IsValid() || g_entityListStorage == nullptr || *g_entityListStorage == nullptr) {
-        std::lock_guard scanLock(g_propCandidateScanMutex);
-        g_propCandidateScan = {};
-        g_propCandidateScanInProgress.store(false, std::memory_order_release);
-        return;
-    }
-
-    void* entityList = *g_entityListStorage;
-    const EntityHandle controllerHandle = PawnGetControllerHandle(targetPawn);
-    int currentHighestIndex = -1;
-    if (!TryInvokeGetHighestEntityIndex(entityList, currentHighestIndex)) {
-        return;
-    }
-
-    // Short-lived flash / HE projectiles can disappear before a complete
-    // batched pass. Revisit the newest entity tail on every active batch and
-    // lock a moving owner-matched projectile immediately.
-    if (!GetLockedPropHandle().IsValid() && ShouldScanPropHotTail()) {
-        PropCandidate hotCandidate{};
-        if (TryFindNewestMovingPropCandidate(
-                entityList,
-                currentHighestIndex,
-                targetPawn,
-                targetHandle,
-                hotCandidate)) {
-            SetLockedProp(hotCandidate);
-            TracePrintf(
-                "prop-hot-lock handle=%u kind=%s thrower=%u highest=%d",
-                hotCandidate.handle.raw,
-                PropProjectileKindToString(hotCandidate.kind),
-                hotCandidate.throwerHandle.raw,
-                currentHighestIndex
-            );
-            return;
-        }
-    }
-
-    std::unique_lock scanLock(g_propCandidateScanMutex, std::try_to_lock);
-    if (!scanLock.owns_lock()) {
-        return;
-    }
-    g_lastPropCandidateScanBatchTickMs.store(GetTickCount64(), std::memory_order_relaxed);
-
-    const bool targetChanged = !g_propCandidateScan.active
-        || g_propCandidateScan.entityList != entityList
-        || g_propCandidateScan.targetHandle.raw != targetHandle.raw
-        || g_propCandidateScan.controllerHandle.raw != controllerHandle.raw;
-    if (targetChanged) {
-        g_propCandidateScan = {};
-        g_propCandidateScan.entityList = entityList;
-        g_propCandidateScan.targetHandle = targetHandle;
-        g_propCandidateScan.controllerHandle = controllerHandle;
-        // Projectiles are normally among the newest/highest entity indices.
-        // Scanning backwards finds the just-thrown prop before old world and
-        // player entities without increasing the per-callback work budget.
-        g_propCandidateScan.nextEntityIndex = currentHighestIndex;
-        g_propCandidateScan.highestEntityIndex = currentHighestIndex;
-        g_propCandidateScan.active = true;
-        g_propCandidateScanInProgress.store(true, std::memory_order_release);
-    }
-    else if (currentHighestIndex > g_propCandidateScan.highestEntityIndex) {
-        // Include entities created after this full pass began.
-        g_propCandidateScan.highestEntityIndex = currentHighestIndex;
-        g_propCandidateScan.nextEntityIndex = currentHighestIndex;
-    }
-
-    const int batchEnd = std::max(
-        0,
-        g_propCandidateScan.nextEntityIndex - kPropCandidateScanBatchSize + 1
-    );
-    for (int entityIndex = g_propCandidateScan.nextEntityIndex; entityIndex >= batchEnd; --entityIndex) {
-        void* entity = nullptr;
-        if (!TryInvokeGetEntityFromIndex(entityList, entityIndex, entity) || entity == nullptr) {
-            continue;
-        }
-
-        PropCandidate candidate{};
-        if (!IsPropProjectileForTarget(entity, targetHandle, controllerHandle, candidate)) {
-            continue;
-        }
-
-        bool duplicate = false;
-        for (std::size_t existing = 0u; existing < g_propCandidateScan.discoveredCount; ++existing) {
-            duplicate = duplicate || g_propCandidateScan.discovered[existing].handle.raw == candidate.handle.raw;
-        }
-        if (duplicate) {
-            continue;
-        }
-
-        if (g_propCandidateScan.discoveredCount < g_propCandidateScan.discovered.size()) {
-            g_propCandidateScan.discovered[g_propCandidateScan.discoveredCount++] = candidate;
-        }
-        else {
-            g_propCandidateScan.nextEntityIndex = -1;
-            break;
-        }
-    }
-
-    if (g_propCandidateScan.nextEntityIndex >= batchEnd) {
-        g_propCandidateScan.nextEntityIndex = batchEnd - 1;
-    }
-    if (g_propCandidateScan.nextEntityIndex >= 0) {
-        // Do not wait for a full entity-list pass before following a clearly
-        // flying, owner-matched projectile. Because the scan is descending,
-        // this provisional candidate is also the newest matching entity.
-        const PropCandidate earlyCandidate = g_propCandidateScan.discoveredCount > 0u
-            ? g_propCandidateScan.discovered[0]
-            : PropCandidate{};
-        scanLock.unlock();
-        if (earlyCandidate.valid && !GetLockedPropHandle().IsValid()) {
-            SetLockedProp(earlyCandidate);
-            TracePrintf(
-                "prop-early-lock handle=%u kind=%s thrower=%u",
-                earlyCandidate.handle.raw,
-                PropProjectileKindToString(earlyCandidate.kind),
-                earlyCandidate.throwerHandle.raw
-            );
-        }
-        return;
-    }
-
-    const auto discovered = g_propCandidateScan.discovered;
-    const std::size_t discoveredCount = g_propCandidateScan.discoveredCount;
-    g_propCandidateScan = {};
-    g_propCandidateScanInProgress.store(false, std::memory_order_release);
-    g_lastPropCandidateRefreshTickMs.store(GetTickCount64(), std::memory_order_relaxed);
-    scanLock.unlock();
-
-    std::lock_guard lock(g_stateMutex);
-    for (auto& existing : g_state.propCandidates) {
-        if (existing.valid) {
-            ++existing.ageFrames;
-        }
-        existing.valid = false;
-    }
-
-    for (std::size_t index = 0u; index < discoveredCount; ++index) {
-        const PropCandidate& candidate = discovered[index];
-        auto existingIt = std::find_if(g_state.propCandidates.begin(), g_state.propCandidates.end(), [&](const PropCandidate& existing) {
-            return existing.handle.raw == candidate.handle.raw;
-        });
-        if (existingIt != g_state.propCandidates.end()) {
-            existingIt->kind = candidate.kind;
-            existingIt->throwerHandle = candidate.throwerHandle;
-            existingIt->valid = true;
-            existingIt->ageFrames = 0u;
-            continue;
-        }
-
-        for (std::size_t moveIndex = g_state.propCandidates.size() - 1u; moveIndex > 0u; --moveIndex) {
-            g_state.propCandidates[moveIndex] = g_state.propCandidates[moveIndex - 1u];
-        }
-        g_state.propCandidates[0] = candidate;
-    }
-
-    if (g_state.lockedPropHandle.IsValid()) {
-        bool lockedStillValid = false;
-        PropProjectileKind lockedKind = g_state.lockedPropKind;
-        EntityHandle lockedThrowerHandle = g_state.lockedPropThrowerHandle;
-        for (const auto& candidate : g_state.propCandidates) {
-            if (candidate.valid && candidate.handle.raw == g_state.lockedPropHandle.raw) {
-                lockedStillValid = true;
-                lockedKind = candidate.kind;
-                lockedThrowerHandle = candidate.throwerHandle;
-                break;
-            }
-        }
-        if (!lockedStillValid && lockedKind != PropProjectileKind::Unknown) {
-            PropPostFlightHoldState hold{};
-            {
-                std::lock_guard holdLock(g_propPostFlightHoldMutex);
-                hold = g_propPostFlightHold;
-            }
-            const double secondsSinceLastLive = hold.valid && hold.propHandle.raw == g_state.lockedPropHandle.raw
-                ? HighResolutionSeconds() - hold.lastLiveTimeSeconds
-                : std::numeric_limits<double>::infinity();
-            if (hold.valid
-                && hold.propHandle.raw == g_state.lockedPropHandle.raw
-                && compat::ShouldUsePropPostFlightHold(
-                    hold.kind,
-                    false,
-                    secondsSinceLastLive,
-                    kSmokePostFlightHoldSeconds,
-                    kShortPropPostFlightHoldSeconds)) {
-                lockedStillValid = true;
-                lockedThrowerHandle = hold.throwerHandle;
-            }
-        }
-        if (!compat::ShouldKeepManualPropLock(true, lockedStillValid, g_state.lockedPropHandle.raw, g_state.propCandidates[0].handle.raw)) {
-            g_state.lockedPropHandle = {};
-            g_state.lockedPropThrowerHandle = {};
-            g_state.lockedPropKind = PropProjectileKind::Unknown;
-            ResetPropTrackingState();
-        }
-        else {
-            g_state.lockedPropKind = lockedKind;
-            g_state.lockedPropThrowerHandle = lockedThrowerHandle;
-        }
-    }
-
-    unsigned int validCandidateCount = 0u;
-    PropCandidate onlyValidCandidate{};
-    for (const auto& candidate : g_state.propCandidates) {
-        if (!candidate.valid || !candidate.handle.IsValid()) {
-            continue;
-        }
-
-        ++validCandidateCount;
-        onlyValidCandidate = candidate;
-    }
-
-    if (compat::ShouldAutoLockSinglePropCandidate(g_state.lockedPropHandle.IsValid(), validCandidateCount)) {
-        g_state.lockedPropHandle = onlyValidCandidate.handle;
-        g_state.lockedPropThrowerHandle = onlyValidCandidate.throwerHandle;
-        g_state.lockedPropKind = onlyValidCandidate.kind;
-        ResetPropTrackingState();
-        TracePrintf(
-            "prop-auto-lock handle=%u kind=%s thrower=%u",
-            onlyValidCandidate.handle.raw,
-            PropProjectileKindToString(onlyValidCandidate.kind),
-            onlyValidCandidate.throwerHandle.raw
-        );
-    }
-
-    RefreshStatusTextLocked();
-    MarkOverlayDirty();
-}
-
-bool ShouldRefreshPropCandidates(bool hasLockedProp) {
-    // Poll the newest entity tail at roughly 30 Hz until a prop is acquired.
-    // This closes the gap for flash / HE demo frames without keeping the more
-    // expensive full entity scan active after a lock has been established.
-    constexpr unsigned long long kUnlockedRefreshIntervalMs = 32u;
-    constexpr unsigned long long kLockedRefreshIntervalMs = 250u;
-
-    const unsigned long long nowTickMs = GetTickCount64();
-    if (g_propCandidateScanInProgress.load(std::memory_order_acquire)) {
-        unsigned long long previousBatchTickMs = g_lastPropCandidateScanBatchTickMs.load(std::memory_order_relaxed);
-        while (previousBatchTickMs == 0u
-            || nowTickMs < previousBatchTickMs
-            || nowTickMs - previousBatchTickMs >= kPropCandidateScanBatchIntervalMs) {
-            if (g_lastPropCandidateScanBatchTickMs.compare_exchange_weak(
-                    previousBatchTickMs,
-                    nowTickMs,
-                    std::memory_order_relaxed,
-                    std::memory_order_relaxed)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    const unsigned long long interval = hasLockedProp ? kLockedRefreshIntervalMs : kUnlockedRefreshIntervalMs;
-    unsigned long long previousTickMs = g_lastPropCandidateRefreshTickMs.load(std::memory_order_relaxed);
-    while (previousTickMs == 0u || nowTickMs < previousTickMs || nowTickMs - previousTickMs >= interval) {
-        if (g_lastPropCandidateRefreshTickMs.compare_exchange_weak(
-                previousTickMs,
-                nowTickMs,
-                std::memory_order_relaxed,
-                std::memory_order_relaxed)) {
-            return true;
-        }
-    }
-
-    return false;
-}
+#include "prop_discovery.inl"
 
 Vec3 MoveTowardsVec3(const Vec3& current, const Vec3& target, float maxDistance) {
     const auto moved = compat::MoveTowards(
@@ -6887,195 +6823,30 @@ ProjectileKinematicSample ReadProjectileKinematics(void* projectile) {
     return sample;
 }
 
-Vec3 SmoothPropAnchor(
-    EntityHandle propHandle,
-    const Vec3& rawOrigin,
-    const ProjectileKinematicSample& kinematics,
-    float followSpeed
-) {
-    constexpr float kMinProjectileExtrapolateSeconds = 0.04f;
-    constexpr float kMaxProjectileExtrapolateSeconds = 0.75f;
-    constexpr float kProjectileExtrapolateIntervalScale = 4.0f;
-    constexpr float kProjectilePredictionLeadIntervalScale = 0.35f;
-    constexpr float kMaxProjectilePredictionLeadSeconds = 0.035f;
-    constexpr float kProjectileVelocityResponseRate = 7.5f;
-    constexpr float kMaxProjectileVelocity = 100000.0f;
-    constexpr float kMaxObservedPlaybackScale = 8.0f;
-    constexpr float kProjectileMotionStaleSeconds = 0.10f;
-    constexpr float kRawOriginMoveThreshold = 0.01f;
-    constexpr float kMinFrameSeconds = 0.001f;
-    constexpr float kMaxFrameSeconds = 0.050f;
-    constexpr float kAnchorCorrectionRate = 3.4f;
-    constexpr float kMaxAnchorCorrectionBlend = 0.05f;
-
+// Retain the legacy call signature for configuration compatibility. The
+// carrier shares the current render-scene origin; no independent integration.
+Vec3 SmoothPropAnchor(EntityHandle handle, const Vec3& origin,
+    const ProjectileKinematicSample&, float, double = 0.0) {
     std::lock_guard lock(g_propSmoothingMutex);
-    const unsigned long long nowTickMs = GetTickCount64();
-    const double nowSeconds = HighResolutionSeconds();
-    if (!g_propSmoothing.valid || g_propSmoothing.propHandle.raw != propHandle.raw) {
-        g_propSmoothing.propHandle = propHandle;
-        g_propSmoothing.position = rawOrigin;
-        g_propSmoothing.lastRawOrigin = rawOrigin;
-        g_propSmoothing.velocity = Vec3{};
-        g_propSmoothing.targetVelocity = g_propSmoothing.velocity;
-        g_propSmoothing.lastRawIntervalSeconds = 0.0f;
-        g_propSmoothing.lastRawTimeSeconds = nowSeconds;
-        g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
-        g_propSmoothing.lastRawTickMs = nowTickMs;
-        g_propSmoothing.lastUpdateTickMs = nowTickMs;
-        g_propSmoothing.bounceCount = kinematics.bounceCount;
-        g_propSmoothing.bounceCountValid = kinematics.bounceCountValid;
-        g_propSmoothing.valid = true;
-        return rawOrigin;
-    }
-
-    const bool bounced = compat::DidProjectileBounce(
-        g_propSmoothing.bounceCountValid,
-        g_propSmoothing.bounceCount,
-        kinematics.bounceCountValid,
-        kinematics.bounceCount
-    );
-    if (kinematics.bounceCountValid) {
-        g_propSmoothing.bounceCount = kinematics.bounceCount;
-        g_propSmoothing.bounceCountValid = true;
-    }
-    if (bounced) {
-        g_propSmoothing.position = rawOrigin;
-        g_propSmoothing.lastRawOrigin = rawOrigin;
-        g_propSmoothing.velocity = Vec3{};
-        g_propSmoothing.targetVelocity = g_propSmoothing.velocity;
-        g_propSmoothing.lastRawIntervalSeconds = 0.0f;
-        g_propSmoothing.lastRawTimeSeconds = nowSeconds;
-        g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
-        g_propSmoothing.lastRawTickMs = nowTickMs;
-        g_propSmoothing.lastUpdateTickMs = nowTickMs;
-        TracePrintf(
-            "prop-bounce-reset handle=%u bounces=%d velocity=(%.3f,%.3f,%.3f)",
-            propHandle.raw,
-            kinematics.bounceCount,
-            g_propSmoothing.velocity.x,
-            g_propSmoothing.velocity.y,
-            g_propSmoothing.velocity.z
-        );
-        return rawOrigin;
-    }
-
-    float updateSeconds = kOverlayTickSeconds;
-    if (g_propSmoothing.lastUpdateTimeSeconds > 0.0 && nowSeconds > g_propSmoothing.lastUpdateTimeSeconds) {
-        updateSeconds = static_cast<float>(nowSeconds - g_propSmoothing.lastUpdateTimeSeconds);
-    }
-    updateSeconds = std::min(std::max(updateSeconds, kMinFrameSeconds), kMaxFrameSeconds);
-
-    const Vec3 rawDelta = Subtract(rawOrigin, g_propSmoothing.lastRawOrigin);
-    const bool rawOriginMoved = IsFiniteVec3(rawDelta) && Length(rawDelta) > kRawOriginMoveThreshold;
-    if (rawOriginMoved) {
-        float rawSeconds = kOverlayTickSeconds;
-        if (g_propSmoothing.lastRawTimeSeconds > 0.0 && nowSeconds > g_propSmoothing.lastRawTimeSeconds) {
-            rawSeconds = static_cast<float>(nowSeconds - g_propSmoothing.lastRawTimeSeconds);
-        }
-        rawSeconds = std::max(rawSeconds, kMinFrameSeconds);
-        g_propSmoothing.lastRawIntervalSeconds = rawSeconds;
-
-        const Vec3 measuredVelocity = Scale(rawDelta, 1.0f / rawSeconds);
-        const float measuredVelocityLength = Length(measuredVelocity);
-        if (IsFiniteVec3(measuredVelocity)
-            && std::isfinite(measuredVelocityLength)
-            && measuredVelocityLength <= kMaxProjectileVelocity) {
-            Vec3 targetVelocity = measuredVelocity;
-            if (kinematics.velocityValid) {
-                const float schemaVelocityLength = Length(kinematics.velocity);
-                if (std::isfinite(schemaVelocityLength) && schemaVelocityLength > 0.001f) {
-                    const float observedPlaybackScale = std::min(
-                        kMaxObservedPlaybackScale,
-                        std::max(0.0f, measuredVelocityLength / schemaVelocityLength)
-                    );
-                    targetVelocity = Scale(kinematics.velocity, observedPlaybackScale);
-                }
-                else {
-                    targetVelocity = Vec3{};
-                }
-            }
-
-            g_propSmoothing.targetVelocity = targetVelocity;
-            const float currentVelocityLength = Length(g_propSmoothing.velocity);
-            if (!IsFiniteVec3(g_propSmoothing.velocity)
-                || !std::isfinite(currentVelocityLength)
-                || currentVelocityLength <= 0.001f) {
-                g_propSmoothing.velocity = targetVelocity;
-            }
-        }
-        else {
-            g_propSmoothing.velocity = Vec3{};
-            g_propSmoothing.targetVelocity = Vec3{};
-        }
-        g_propSmoothing.lastRawOrigin = rawOrigin;
-        g_propSmoothing.lastRawTimeSeconds = nowSeconds;
-        g_propSmoothing.lastRawTickMs = nowTickMs;
-    }
-
-    const bool rawMotionStale = !rawOriginMoved
-        && g_propSmoothing.lastRawTimeSeconds > 0.0
-        && nowSeconds > g_propSmoothing.lastRawTimeSeconds
-        && nowSeconds - g_propSmoothing.lastRawTimeSeconds >= kProjectileMotionStaleSeconds;
-    if (rawMotionStale
-        || (kinematics.velocityValid && Length(kinematics.velocity) <= 0.001f)) {
-        g_propSmoothing.position = rawOrigin;
-        g_propSmoothing.velocity = Vec3{};
-        g_propSmoothing.targetVelocity = Vec3{};
-        g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
-        g_propSmoothing.lastUpdateTickMs = nowTickMs;
-        return rawOrigin;
-    }
-
-    float extrapolateSeconds = 0.0f;
-    if (g_propSmoothing.lastRawTimeSeconds > 0.0 && nowSeconds > g_propSmoothing.lastRawTimeSeconds) {
-        extrapolateSeconds = static_cast<float>(nowSeconds - g_propSmoothing.lastRawTimeSeconds);
-    }
-
-    const float rawIntervalSeconds = std::isfinite(g_propSmoothing.lastRawIntervalSeconds) && g_propSmoothing.lastRawIntervalSeconds > 0.0f
-        ? g_propSmoothing.lastRawIntervalSeconds
-        : kMinProjectileExtrapolateSeconds;
-    const float predictionLeadSeconds = std::min(
-        rawIntervalSeconds * kProjectilePredictionLeadIntervalScale,
-        kMaxProjectilePredictionLeadSeconds
-    );
-    const float maxExtrapolateSeconds = std::min(
-        std::max(rawIntervalSeconds * kProjectileExtrapolateIntervalScale, kMinProjectileExtrapolateSeconds),
-        kMaxProjectileExtrapolateSeconds
-    );
-
-    const auto predicted = compat::ExtrapolateProjectileOrigin(
-        compat::CameraVector{ g_propSmoothing.lastRawOrigin.x, g_propSmoothing.lastRawOrigin.y, g_propSmoothing.lastRawOrigin.z },
-        compat::CameraVector{ g_propSmoothing.targetVelocity.x, g_propSmoothing.targetVelocity.y, g_propSmoothing.targetVelocity.z },
-        extrapolateSeconds + predictionLeadSeconds,
-        maxExtrapolateSeconds
-    );
-    const Vec3 predictedOrigin{ predicted.x, predicted.y, predicted.z };
-
-    const float velocityBlend = std::min(1.0f, std::max(0.0f, updateSeconds * kProjectileVelocityResponseRate));
-    g_propSmoothing.velocity = Lerp(g_propSmoothing.velocity, g_propSmoothing.targetVelocity, velocityBlend);
-    const Vec3 integratedPosition = Add(g_propSmoothing.position, Scale(g_propSmoothing.velocity, updateSeconds));
-    const float correctionBlend = std::min(kMaxAnchorCorrectionBlend, std::max(0.0f, updateSeconds * kAnchorCorrectionRate));
-    const Vec3 correctedPosition = Lerp(integratedPosition, predictedOrigin, correctionBlend);
-    const float maxCorrectionDistance = std::isfinite(followSpeed) && followSpeed > 0.0f
-        ? std::max(1.0f, followSpeed * updateSeconds)
-        : std::numeric_limits<float>::max();
-    g_propSmoothing.position = MoveTowardsVec3(integratedPosition, correctedPosition, maxCorrectionDistance);
-    g_propSmoothing.lastUpdateTimeSeconds = nowSeconds;
-    g_propSmoothing.lastUpdateTickMs = nowTickMs;
-    return g_propSmoothing.position;
+    g_propSmoothing.propHandle = handle;
+    g_propSmoothing.position = origin;
+    g_propSmoothing.lastRawOrigin = origin;
+    g_propSmoothing.valid = true;
+    return origin;
 }
 
-bool TryGetCachedPropForward(EntityHandle propHandle, Vec3& forward) {
+bool TryGetCachedPropForward(EntityHandle propHandle, Vec3& forward, bool* fromInitialVelocity = nullptr) {
     std::lock_guard lock(g_propCameraReferenceMutex);
     if (!g_propCameraReference.valid || g_propCameraReference.propHandle.raw != propHandle.raw) {
         return false;
     }
 
     forward = g_propCameraReference.forward;
+    if (fromInitialVelocity != nullptr) *fromInitialVelocity = g_propCameraReference.fromInitialVelocity;
     return IsFiniteVec3(forward) && TryNormalize(forward);
 }
 
-void UpdateCachedPropForward(EntityHandle propHandle, const Vec3& forward) {
+void UpdateCachedPropForward(EntityHandle propHandle, const Vec3& forward, bool fromInitialVelocity = false) {
     Vec3 normalized = forward;
     if (!IsFiniteVec3(normalized) || !TryNormalize(normalized)) {
         return;
@@ -7085,6 +6856,7 @@ void UpdateCachedPropForward(EntityHandle propHandle, const Vec3& forward) {
     g_propCameraReference.propHandle = propHandle;
     g_propCameraReference.forward = normalized;
     g_propCameraReference.valid = true;
+    g_propCameraReference.fromInitialVelocity = fromInitialVelocity;
 }
 
 Vec3 SmoothPropLookTarget(EntityHandle propHandle, const Vec3& rawTarget) {
@@ -7104,286 +6876,81 @@ Vec3 SmoothPropLookTarget(EntityHandle propHandle, const Vec3& rawTarget) {
     return g_propLookTarget.target;
 }
 
-bool TryGetProjectileOriginWithFallback(EntityHandle propHandle, void* propEntity, const Vec3& referenceOrigin, Vec3& origin, std::string& failure) {
-    constexpr unsigned int kMaxPropOriginHoldFrames = 5u;
-    constexpr float kLockedProjectileOriginMaxDistance = 8192.0f;
-
-    if (propEntity == nullptr) {
+bool TryGetProjectileOriginWithFallback(EntityHandle propHandle, void* propEntity,
+    const Vec3& referenceOrigin, Vec3& origin, std::string& failure) {
+    // The engine getter resolves dirty parent/local transforms first. Reading
+    // m_vecAbsOrigin directly can alternate between stale and recalculated data.
+    PropOriginRead sampleRead{};
+    if (!TryGetResolvedPropOrigin(propEntity, origin, failure, &sampleRead)) return false;
+    const compat::OffsetCameraVector sample{g_offsets.sceneAbsOrigin, {origin.x, origin.y, origin.z}};
+    compat::OffsetCameraVector trusted{};
+    if (!compat::TrySelectTrustedProjectileSceneOrigin(&sample, 1u,
+            {referenceOrigin.x, referenceOrigin.y, referenceOrigin.z}, 8192.0f, trusted)) {
         failure = Texts().reasonWeaponOriginInvalid;
         return false;
     }
-
-    void* sceneNode = nullptr;
-    if (g_offsets.sceneNode != 0) {
-        (void)TryReadOffsetPointer(propEntity, g_offsets.sceneNode, sceneNode);
-    }
-
-    Vec3 schemaOrigin{};
-    std::string schemaOriginFailure;
-    if (sceneNode != nullptr
-        && g_offsets.sceneAbsOrigin != 0
-        && TryGetEntityAbsOrigin(propEntity, schemaOrigin, schemaOriginFailure)) {
-        const compat::OffsetCameraVector schemaCandidate{
-            g_offsets.sceneAbsOrigin,
-            compat::CameraVector{ schemaOrigin.x, schemaOrigin.y, schemaOrigin.z }
-        };
-        compat::OffsetCameraVector trustedSchemaOrigin{};
-        if (compat::TrySelectTrustedProjectileSceneOrigin(
-                &schemaCandidate,
-                1u,
-                compat::CameraVector{ referenceOrigin.x, referenceOrigin.y, referenceOrigin.z },
-                kLockedProjectileOriginMaxDistance,
-                trustedSchemaOrigin)) {
-            origin = Vec3{
-                trustedSchemaOrigin.value.x,
-                trustedSchemaOrigin.value.y,
-                trustedSchemaOrigin.value.z
-            };
-            {
-                std::lock_guard lock(g_propOriginHistoryMutex);
-                g_propOriginHistory = {};
-                g_propOriginHistory.propHandle = propHandle;
-                g_propOriginHistory.lastOrigin = origin;
-                g_propOriginHistory.lastOriginValid = true;
-                g_propOriginHistory.valid = true;
-            }
-            static std::atomic<unsigned long long> schemaOriginTraceCounter{0};
-            const unsigned long long traceIndex = schemaOriginTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
-            if (compat::ShouldEmitSampledTrace(traceIndex, 5u, 120u)) {
-                TracePrintf(
-                    "prop-origin-schema entity=%p sceneNode=%p offset=0x%llX origin=(%.3f,%.3f,%.3f)",
-                    propEntity,
-                    sceneNode,
-                    static_cast<unsigned long long>(g_offsets.sceneAbsOrigin),
-                    origin.x,
-                    origin.y,
-                    origin.z
-                );
-            }
-            failure.clear();
-            return true;
-        }
-    }
-
-    std::array<compat::OffsetCameraVector, 1536> dynamicCandidates{};
-    unsigned int dynamicCandidateCount = 0u;
-    const auto addDynamicCandidate = [&](const void* base, std::ptrdiff_t offset) {
-        if (base == nullptr || offset < 0 || dynamicCandidateCount >= dynamicCandidates.size()) {
-            return;
-        }
-
-        auto* vectorBase = reinterpret_cast<const float*>(reinterpret_cast<const std::uint8_t*>(base) + offset);
-        Vec3 candidate{};
-        if (!TryReadFloatPointer(vectorBase + 0, candidate.x)
-            || !TryReadFloatPointer(vectorBase + 1, candidate.y)
-            || !TryReadFloatPointer(vectorBase + 2, candidate.z)
-            || !IsFiniteVec3(candidate)) {
-            return;
-        }
-
-        dynamicCandidates[dynamicCandidateCount++] = compat::OffsetCameraVector{
-            offset,
-            compat::CameraVector{ candidate.x, candidate.y, candidate.z }
-        };
-    };
-
-    std::vector<compat::OffsetCameraVector> previousEntityCandidates;
-    std::ptrdiff_t lockedEntityOffset = -1;
-    Vec3 lastOrigin{};
-    unsigned int missedFrames = 0u;
-    bool lastOriginValid = false;
     {
         std::lock_guard lock(g_propOriginHistoryMutex);
-        if (g_propOriginHistory.valid && g_propOriginHistory.propHandle.raw == propHandle.raw) {
-            previousEntityCandidates = g_propOriginHistory.previousEntityCandidates;
-            lockedEntityOffset = g_propOriginHistory.lockedEntityOffset;
-            lastOrigin = g_propOriginHistory.lastOrigin;
-            missedFrames = g_propOriginHistory.missedFrames;
-            lastOriginValid = g_propOriginHistory.lastOriginValid;
-        }
+        g_propOriginHistory.propHandle = propHandle;
+        g_propOriginHistory.lastOrigin = origin;
+        g_propOriginHistory.lastOriginValid = true;
+        g_propOriginHistory.valid = true;
+        g_propOriginHistory.cachedBeforeResolve = sampleRead.cached;
+        g_propOriginHistory.dirtyBeforeResolve = sampleRead.dirty;
+        g_propOriginHistory.engineResolved = sampleRead.engineResolved;
+        g_propOriginHistory.readSequence = g_propOriginReadSequence.fetch_add(1u, std::memory_order_relaxed) + 1u;
     }
+    failure.clear();
+    return true;
+}
 
-    const auto updateEntityHistory = [&](const compat::OffsetCameraVector* selectedOrigin, bool lockSelectedOffset, bool incrementMiss) {
-        std::lock_guard lock(g_propOriginHistoryMutex);
-        if (!g_propOriginHistory.valid || g_propOriginHistory.propHandle.raw != propHandle.raw) {
-            g_propOriginHistory = {};
-            g_propOriginHistory.valid = true;
-            g_propOriginHistory.propHandle = propHandle;
-            g_propOriginHistory.lockedEntityOffset = -1;
-        }
-        g_propOriginHistory.previousEntityCandidates.assign(
-            dynamicCandidates.data(),
-            dynamicCandidates.data() + dynamicCandidateCount
-        );
-        if (selectedOrigin != nullptr) {
-            if (lockSelectedOffset) {
-                g_propOriginHistory.lockedEntityOffset = selectedOrigin->offset;
-            }
-            g_propOriginHistory.lastOrigin = Vec3{ selectedOrigin->value.x, selectedOrigin->value.y, selectedOrigin->value.z };
-            g_propOriginHistory.lastOriginValid = true;
-            g_propOriginHistory.missedFrames = 0u;
-            return;
-        }
-        if (incrementMiss) {
-            ++g_propOriginHistory.missedFrames;
-        }
-    };
-
-    for (std::ptrdiff_t offset = 0; offset <= 0x1800 && dynamicCandidateCount < dynamicCandidates.size(); offset += sizeof(float)) {
-        addDynamicCandidate(propEntity, offset);
-    }
-
-    compat::OffsetCameraVector dynamicSelected{};
-    if (lockedEntityOffset >= 0) {
-        if (compat::TrySelectLockedProjectileOrigin(
-                dynamicCandidates.data(),
-                dynamicCandidateCount,
-                lockedEntityOffset,
-                compat::CameraVector{ referenceOrigin.x, referenceOrigin.y, referenceOrigin.z },
-                kLockedProjectileOriginMaxDistance,
-                dynamicSelected)) {
-            origin = Vec3{ dynamicSelected.value.x, dynamicSelected.value.y, dynamicSelected.value.z };
-            updateEntityHistory(&dynamicSelected, false, false);
-            static std::atomic<unsigned long long> lockedTraceCounter{0};
-            const unsigned long long lockedTraceIndex = lockedTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
-            if (compat::ShouldEmitSampledTrace(lockedTraceIndex, 5u, 60u)) {
-                TracePrintf(
-                    "prop-origin-dynamic source=entity-locked entity=%p sceneNode=%p offset=0x%llX origin=(%.3f,%.3f,%.3f) ref=(%.3f,%.3f,%.3f) scanned=%u previous=%u",
-                    propEntity,
-                    sceneNode,
-                    static_cast<unsigned long long>(dynamicSelected.offset),
-                    origin.x,
-                    origin.y,
-                    origin.z,
-                    referenceOrigin.x,
-                    referenceOrigin.y,
-                    referenceOrigin.z,
-                    dynamicCandidateCount,
-                    static_cast<unsigned int>(previousEntityCandidates.size())
-                );
-            }
-            failure.clear();
-            return true;
-        }
-
-        if (lastOriginValid && missedFrames < kMaxPropOriginHoldFrames) {
-            origin = lastOrigin;
-            updateEntityHistory(nullptr, false, true);
-            TracePrintf(
-                "prop-origin-hold entity=%p sceneNode=%p offset=0x%llX origin=(%.3f,%.3f,%.3f) ref=(%.3f,%.3f,%.3f) scanned=%u missed=%u",
-                propEntity,
-                sceneNode,
-                static_cast<unsigned long long>(lockedEntityOffset),
-                origin.x,
-                origin.y,
-                origin.z,
-                referenceOrigin.x,
-                referenceOrigin.y,
-                referenceOrigin.z,
-                dynamicCandidateCount,
-                missedFrames + 1u
-            );
-            failure.clear();
-            return true;
-        }
-
-        updateEntityHistory(nullptr, false, true);
-        failure = Texts().reasonWeaponOriginInvalid;
-        static std::atomic<unsigned long long> lockedTraceCounter{0};
-        const unsigned long long lockedTraceIndex = lockedTraceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
-        if (lockedTraceIndex <= 20u || 0u == (lockedTraceIndex % 60u)) {
-            TracePrintf(
-                "prop-origin-failed entity=%p sceneNode=%p ref=(%.3f,%.3f,%.3f) scanned=%u previous=%u lockedOffset=0x%llX lastValid=%d missed=%u",
-                propEntity,
-                sceneNode,
-                referenceOrigin.x,
-                referenceOrigin.y,
-                referenceOrigin.z,
-                dynamicCandidateCount,
-                static_cast<unsigned int>(previousEntityCandidates.size()),
-                static_cast<unsigned long long>(lockedEntityOffset),
-                lastOriginValid ? 1 : 0,
-                missedFrames + 1u
-            );
-        }
+bool ComposePropRigPose(const Vec3& origin, const Vec3& forward,
+    const Vec3& propOffset, const Vec3& propRotation, Vec3& cameraPosition,
+    Vec3& cameraAngles, std::string& failure) {
+    Vec3 basisForward = forward;
+    if (!TryNormalize(basisForward)) {
+        failure = Texts().reasonCombatForwardAxisDegenerate;
         return false;
     }
 
-    if (compat::TrySelectMovingProjectileOrigin(
-            dynamicCandidates.data(),
-            dynamicCandidateCount,
-            previousEntityCandidates.data(),
-            static_cast<unsigned int>(previousEntityCandidates.size()),
-            compat::CameraVector{ referenceOrigin.x, referenceOrigin.y, referenceOrigin.z },
-            1536.0f,
-            0.5f,
-            512.0f,
-            dynamicSelected)) {
-        origin = Vec3{ dynamicSelected.value.x, dynamicSelected.value.y, dynamicSelected.value.z };
-        updateEntityHistory(&dynamicSelected, true, false);
-        TracePrintf(
-            "prop-origin-dynamic source=entity-moving-locked entity=%p sceneNode=%p offset=0x%llX origin=(%.3f,%.3f,%.3f) ref=(%.3f,%.3f,%.3f) scanned=%u previous=%u",
-            propEntity,
-            sceneNode,
-            static_cast<unsigned long long>(dynamicSelected.offset),
-            origin.x,
-            origin.y,
-            origin.z,
-            referenceOrigin.x,
-            referenceOrigin.y,
-            referenceOrigin.z,
-            dynamicCandidateCount,
-            static_cast<unsigned int>(previousEntityCandidates.size())
-        );
-        failure.clear();
-        return true;
+    Vec3 right = Cross(basisForward, kWorldUp);
+    if (!TryNormalize(right)) {
+        right = Vec3{ 1.0f, 0.0f, 0.0f };
     }
 
-    if (previousEntityCandidates.empty() && lockedEntityOffset < 0 && compat::TrySelectDynamicProjectileOrigin(
-            dynamicCandidates.data(),
-            dynamicCandidateCount,
-            compat::CameraVector{ referenceOrigin.x, referenceOrigin.y, referenceOrigin.z },
-            1536.0f,
-            dynamicSelected)) {
-        origin = Vec3{ dynamicSelected.value.x, dynamicSelected.value.y, dynamicSelected.value.z };
-        updateEntityHistory(&dynamicSelected, false, false);
-        TracePrintf(
-            "prop-origin-dynamic source=entity-bootstrap entity=%p sceneNode=%p offset=0x%llX origin=(%.3f,%.3f,%.3f) ref=(%.3f,%.3f,%.3f) scanned=%u",
-            propEntity,
-            sceneNode,
-            static_cast<unsigned long long>(dynamicSelected.offset),
-            origin.x,
-            origin.y,
-            origin.z,
-            referenceOrigin.x,
-            referenceOrigin.y,
-            referenceOrigin.z,
-            dynamicCandidateCount
-        );
-        failure.clear();
-        return true;
+    Vec3 up = Cross(right, basisForward);
+    if (!TryNormalize(up)) {
+        up = kWorldUp;
     }
 
-    updateEntityHistory(nullptr, false, false);
-    failure = Texts().reasonWeaponOriginInvalid;
-    static std::atomic<unsigned long long> traceCounter{0};
-    const unsigned long long traceIndex = traceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
-    if (traceIndex <= 20u || 0u == (traceIndex % 60u)) {
-        TracePrintf(
-            "prop-origin-failed entity=%p sceneNode=%p ref=(%.3f,%.3f,%.3f) scanned=%u previous=%u lockedOffset=0x%llX lastValid=%d missed=%u",
-            propEntity,
-            sceneNode,
-            referenceOrigin.x,
-            referenceOrigin.y,
-            referenceOrigin.z,
-            dynamicCandidateCount,
-            static_cast<unsigned int>(previousEntityCandidates.size()),
-            lockedEntityOffset >= 0 ? static_cast<unsigned long long>(lockedEntityOffset) : 0ull,
-            lastOriginValid ? 1 : 0,
-            missedFrames
-        );
+    cameraPosition = Add(
+        Add(
+            Add(origin, Scale(right, propOffset.x)),
+            Scale(basisForward, propOffset.y)
+        ),
+        Scale(up, propOffset.z)
+    );
+
+    compat::CameraVector centeredDirection{};
+    if (!compat::TryBuildPropCenteredViewDirection(
+            compat::CameraVector{ cameraPosition.x, cameraPosition.y, cameraPosition.z },
+            compat::CameraVector{ origin.x, origin.y, origin.z },
+            compat::CameraVector{ basisForward.x, basisForward.y, basisForward.z },
+            centeredDirection)) {
+        failure = Texts().reasonCameraDirectionDegenerate;
+        return false;
     }
-    return false;
+    const Vec3 direction{ centeredDirection.x, centeredDirection.y, centeredDirection.z };
+
+    float pitch{};
+    float yaw{};
+    VectorToAngles(direction, pitch, yaw);
+    const auto trimmedAngles = compat::ApplyAngleTrim(
+        compat::CameraVector{ pitch, yaw, 0.0f },
+        compat::CameraVector{ propRotation.x, propRotation.y, propRotation.z }
+    );
+    cameraAngles = Vec3{ trimmedAngles.x, trimmedAngles.y, trimmedAngles.z };
+    return IsFiniteVec3(cameraPosition) && IsFiniteVec3(cameraAngles);
 }
 
 bool TryBuildPropCameraPose(
@@ -7409,83 +6976,19 @@ bool TryBuildPropCameraPose(
         return false;
     }
 
-    if (targetPawn == nullptr || !targetHandle.IsValid() || !propHandle.IsValid()) {
+    const auto retained = SnapshotPropView();
+    const bool retainedTarget = retained.valid && retained.handle.raw == propHandle.raw;
+    if ((!retainedTarget && targetPawn == nullptr) || !targetHandle.IsValid() || !propHandle.IsValid()) {
         failure = "prop target missing";
         return false;
     }
 
     void* propEntity = ResolveHandleToEntity(propHandle);
     if (propEntity == nullptr) {
-        PropPostFlightHoldState hold{};
-        {
-            std::lock_guard lock(g_propPostFlightHoldMutex);
-            hold = g_propPostFlightHold;
-        }
-        const double nowSeconds = HighResolutionSeconds();
-        const double secondsSinceLastLive = hold.valid && hold.propHandle.raw == propHandle.raw
-            ? nowSeconds - hold.lastLiveTimeSeconds
-            : std::numeric_limits<double>::infinity();
-        if (hold.valid
-            && hold.propHandle.raw == propHandle.raw
-            && compat::ShouldUsePropPostFlightHold(
-                hold.kind,
-                false,
-                secondsSinceLastLive,
-                kSmokePostFlightHoldSeconds,
-                kShortPropPostFlightHoldSeconds)) {
-            Vec3 basisForward = hold.forward;
-            if (!TryNormalize(basisForward)) {
-                failure = Texts().reasonCombatForwardAxisDegenerate;
-                return false;
-            }
-
-            Vec3 right = Cross(basisForward, kWorldUp);
-            if (!TryNormalize(right)) {
-                right = Vec3{ 1.0f, 0.0f, 0.0f };
-            }
-
-            Vec3 up = Cross(right, basisForward);
-            if (!TryNormalize(up)) {
-                up = kWorldUp;
-            }
-            cameraPosition = Add(
-                Add(
-                    Add(hold.anchor, Scale(right, propOffset.x)),
-                    Scale(basisForward, propOffset.y)
-                ),
-                Scale(up, propOffset.z)
-            );
-
-            compat::CameraVector centeredDirection{};
-            if (!compat::TryBuildPropCenteredViewDirection(
-                    compat::CameraVector{ cameraPosition.x, cameraPosition.y, cameraPosition.z },
-                    compat::CameraVector{ hold.anchor.x, hold.anchor.y, hold.anchor.z },
-                    compat::CameraVector{ basisForward.x, basisForward.y, basisForward.z },
-                    centeredDirection)) {
-                failure = Texts().reasonCameraDirectionDegenerate;
-                return false;
-            }
-
-            float pitch{};
-            float yaw{};
-            VectorToAngles(Vec3{ centeredDirection.x, centeredDirection.y, centeredDirection.z }, pitch, yaw);
-            const auto trimmedAngles = compat::ApplyAngleTrim(
-                compat::CameraVector{ pitch, yaw, 0.0f },
-                compat::CameraVector{ propRotation.x, propRotation.y, propRotation.z }
-            );
-            cameraAngles = Vec3{ trimmedAngles.x, trimmedAngles.y, trimmedAngles.z };
 #if defined(SELFIESTICK_LANG_ZH_CN)
-            failure = "道具飞行结束，短暂保留镜头";
+        failure = "道具已结束，等待下一次投掷";
 #else
-            failure = "prop post-flight hold";
-#endif
-            return IsFiniteVec3(cameraPosition) && IsFiniteVec3(cameraAngles);
-        }
-
-#if defined(SELFIESTICK_LANG_ZH_CN)
-        failure = "道具已结束";
-#else
-        failure = "prop ended";
+        failure = "prop ended, waiting for next throw";
 #endif
         return false;
     }
@@ -7493,7 +6996,7 @@ bool TryBuildPropCameraPose(
     PropCandidate candidate{};
     bool candidateMatches = false;
     if (lockedThrowerHandle.IsValid()) {
-        candidateMatches = IsLockedPropProjectileStillOwnedByThrower(propEntity, lockedThrowerHandle, candidate);
+        candidateMatches = IsLockedPropProjectileStillOwnedByThrower(propEntity, lockedThrowerHandle, candidate, true);
     }
     if (!candidateMatches) {
         candidateMatches = IsPropProjectileForTarget(propEntity, targetHandle, PawnGetControllerHandle(targetPawn), candidate);
@@ -7521,11 +7024,15 @@ bool TryBuildPropCameraPose(
     bool throwerEyeAvailable = false;
     float targetEyeRaw[3]{};
     std::string targetEyeFailure;
-    if (TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, false, targetEyeRaw, targetEyeFailure)) {
+    if (targetPawn != nullptr && TryGetEntityEyeOrigin(targetPawn, viewSetupEyeOrigin, false, targetEyeRaw, targetEyeFailure)) {
         targetEye = Vec3{ targetEyeRaw[0], targetEyeRaw[1], targetEyeRaw[2] };
         referenceOrigin = targetEye;
         referenceAvailable = true;
         targetEyeAvailable = true;
+    }
+    else if (retainedTarget) {
+        referenceOrigin = retained.origin;
+        referenceAvailable = true;
     }
     else if (viewSetupEyeOrigin != nullptr && IsFiniteVec3(*viewSetupEyeOrigin)) {
         referenceOrigin = *viewSetupEyeOrigin;
@@ -7559,16 +7066,17 @@ bool TryBuildPropCameraPose(
     // the thrower's current eye position, so the framing drifted away from the
     // actual release angle as the trajectory advanced.
     Vec3 forward{};
-    bool forwardAvailable = false;
+    bool forwardFromInitialVelocity = false;
+    bool forwardAvailable = TryGetCachedPropForward(propHandle, forward, &forwardFromInitialVelocity)
+        && forwardFromInitialVelocity;
     const Vec3 throwerReference = throwerEyeAvailable
         ? throwerEye
         : (targetEyeAvailable ? targetEye : referenceOrigin);
 
-    // Prefer and continuously re-check the real launch vector. A projectile can
-    // be discovered one network frame before m_vInitialVelocity becomes valid;
-    // caching the temporary thrower fallback first made the wrong direction
-    // permanent for the rest of that throw.
-    if (kinematics.initialVelocityValid) {
+    // Latch the first valid initial launch direction once. A temporary thrower
+    // fallback may be promoted once when launch metadata arrives, but later
+    // velocity updates/bounces must not rotate the established camera rig.
+    if (!forwardAvailable && kinematics.initialVelocityValid) {
         compat::CameraVector launchLookback{};
         if (compat::TryBuildPropLaunchLookbackDirection(
                 compat::CameraVector{
@@ -7581,11 +7089,12 @@ bool TryBuildPropCameraPose(
                 launchLookback)) {
             forward = Vec3{ launchLookback.x, launchLookback.y, launchLookback.z };
             forwardAvailable = TryNormalize(forward);
+            forwardFromInitialVelocity = forwardAvailable;
         }
     }
 
     if (!forwardAvailable) {
-        forwardAvailable = TryGetCachedPropForward(propHandle, forward);
+        forwardAvailable = TryGetCachedPropForward(propHandle, forward, &forwardFromInitialVelocity);
     }
 
     if (!forwardAvailable) {
@@ -7611,7 +7120,7 @@ bool TryBuildPropCameraPose(
     }
 
     if (forwardAvailable) {
-        UpdateCachedPropForward(propHandle, forward);
+        UpdateCachedPropForward(propHandle, forward, forwardFromInitialVelocity);
     }
 
     if (!forwardAvailable) {
@@ -7619,62 +7128,13 @@ bool TryBuildPropCameraPose(
         return false;
     }
 
-    {
-        std::lock_guard lock(g_propPostFlightHoldMutex);
-        g_propPostFlightHold.propHandle = propHandle;
-        g_propPostFlightHold.throwerHandle = candidate.throwerHandle;
-        g_propPostFlightHold.kind = candidate.kind;
-        g_propPostFlightHold.anchor = anchor;
-        g_propPostFlightHold.forward = forward;
-        g_propPostFlightHold.lastLiveTimeSeconds = HighResolutionSeconds();
-        g_propPostFlightHold.valid = true;
-    }
-
-    Vec3 basisForward = forward;
-    if (!TryNormalize(basisForward)) {
-        failure = Texts().reasonCombatForwardAxisDegenerate;
-        return false;
-    }
-
-    Vec3 right = Cross(basisForward, kWorldUp);
-    if (!TryNormalize(right)) {
-        right = Vec3{ 1.0f, 0.0f, 0.0f };
-    }
-
-    Vec3 up = Cross(right, basisForward);
-    if (!TryNormalize(up)) {
-        up = kWorldUp;
-    }
-
-    cameraPosition = Add(
-        Add(
-            Add(anchor, Scale(right, propOffset.x)),
-            Scale(basisForward, propOffset.y)
-        ),
-        Scale(up, propOffset.z)
-    );
-
-    compat::CameraVector centeredDirection{};
-    if (!compat::TryBuildPropCenteredViewDirection(
-            compat::CameraVector{ cameraPosition.x, cameraPosition.y, cameraPosition.z },
-            compat::CameraVector{ propOrigin.x, propOrigin.y, propOrigin.z },
-            compat::CameraVector{ basisForward.x, basisForward.y, basisForward.z },
-            centeredDirection)) {
-        failure = Texts().reasonCameraDirectionDegenerate;
-        return false;
-    }
-    const Vec3 direction{ centeredDirection.x, centeredDirection.y, centeredDirection.z };
-
-    float pitch{};
-    float yaw{};
-    VectorToAngles(direction, pitch, yaw);
-    const auto trimmedAngles = compat::ApplyAngleTrim(
-        compat::CameraVector{ pitch, yaw, 0.0f },
-        compat::CameraVector{ propRotation.x, propRotation.y, propRotation.z }
-    );
-    cameraAngles = Vec3{ trimmedAngles.x, trimmedAngles.y, trimmedAngles.z };
-    return IsFiniteVec3(cameraPosition) && IsFiniteVec3(cameraAngles);
+    return ComposePropRigPose(anchor, forward, propOffset, propRotation,
+        cameraPosition, cameraAngles, failure);
 }
+
+#include "prop_demo_clock.inl"
+#include "prop_view.inl"
+#include "prop_motion_diagnostics.inl"
 
 void OverrideScopedAwpFov(void* viewSetup, EntityHandle targetHandle, const WeaponFrameBasis& basis) {
     if (viewSetup == nullptr || !targetHandle.IsValid() || !basis.weaponHandle.IsValid()) {
@@ -7898,7 +7358,12 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         SetCurrentFollowHandle(resolution.handle);
     }
 
-    if (resolution.entity == nullptr) {
+    const auto retainedPropView = config.cameraMode == CameraMode::PropSelfie ? SnapshotPropView() : PropViewCache{};
+    const bool retainPropTarget = retainedPropView.valid && GetPropSelection().handle.IsValid();
+    if (resolution.entity == nullptr && config.cameraMode == CameraMode::PropSelfie && retainPropTarget) {
+        resolution.handle = retainedPropView.targetHandle;
+    }
+    if (resolution.entity == nullptr && !retainPropTarget) {
         if (traceFrame) {
             TracePrintf("frame-resolve-failed idx=%llu reason=%s", frameIndex, resolution.failure.c_str());
         }
@@ -7934,13 +7399,12 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     }
 
     if (config.cameraMode == CameraMode::PropSelfie) {
-        EntityHandle lockedPropHandle = config.lockedPropHandle;
-        if (ShouldRefreshPropCandidates(lockedPropHandle.IsValid())) {
-            UpdatePropCandidatesForTarget(resolution.entity, resolution.handle);
-            if (!lockedPropHandle.IsValid()) {
-                lockedPropHandle = GetLockedPropHandle();
-            }
-        }
+        EnsurePropLifecycleObserver();
+        if (resolution.entity != nullptr) UpdatePropCandidatesForTarget(resolution.entity, resolution.handle);
+        // Read handle, owner and kind together AFTER discovery so the first
+        // visible frame of a short throw does not use the previous prop's data.
+        const PropSelection propSelection = GetPropSelection();
+        const EntityHandle lockedPropHandle = propSelection.handle;
 
         if (!lockedPropHandle.IsValid()) {
 #if defined(SELFIESTICK_LANG_ZH_CN)
@@ -7956,12 +7420,13 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         Vec3 propCameraPosition{};
         Vec3 propCameraAngles{};
         std::string propFailure;
-        if (!TryBuildPropCameraPose(
-                resolution.entity,
-                resolution.handle,
-                lockedPropHandle,
-                config.lockedPropThrowerHandle,
-                config.lockedPropKind,
+        const bool pinnedTarget = propSelection.manual && retainPropTarget;
+        const auto viewTarget = pinnedTarget ? retainedPropView.targetHandle : resolution.handle;
+        void* viewPawn = pinnedTarget ? ResolveHandleToEntity(viewTarget) : resolution.entity;
+        if (!TryBuildStablePropView(
+                viewPawn,
+                viewTarget,
+                propSelection,
                 viewSetupEyeOriginAvailable ? &viewSetupEyeOrigin : nullptr,
                 config.propOffset,
                 config.propRotation,
@@ -7986,6 +7451,8 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         }
 
         RestoreSuppressedRenderWithViewModels();
+        ApplyPropViewFov(viewSetup, lockedPropHandle);
+        RecordPropMotionFrame(propSelection, propCameraPosition, propCameraAngles);
         UpdateOverrideSuccess(resolution.handle);
         return;
     }
@@ -8999,6 +8466,12 @@ std::wstring BuildOverlayStatusText(const RuntimeState& state) {
     AppendWideToWide(result, state.enabled ? Texts().uiStatusOn : Texts().uiStatusOff);
     AppendWideToWide(result, L"\r\n");
 
+    if (state.cameraMode == CameraMode::PropSelfie) {
+        AppendUtf8ToWide(result, PropViewPhaseText(state.propViewPhase));
+        AppendWideToWide(result, state.manualPropLock ? L" [PIN]" : L" [AUTO]");
+        AppendWideToWide(result, L"\r\n");
+    }
+
     AppendWideToWide(result, Texts().uiCameraModeSection);
     AppendWideToWide(result, L": ");
     AppendWideToWide(result, CameraModeToWide(state.cameraMode));
@@ -9169,6 +8642,8 @@ bool OverlayStateAffectsView(const RuntimeState& left, const RuntimeState& right
         && left.lockedPropHandle.raw == right.lockedPropHandle.raw
         && left.lockedPropThrowerHandle.raw == right.lockedPropThrowerHandle.raw
         && left.lockedPropKind == right.lockedPropKind
+        && left.manualPropLock == right.manualPropLock
+        && left.propViewPhase == right.propViewPhase
         && left.currentTargetHandle.raw == right.currentTargetHandle.raw
         && left.attachmentAvailable == right.attachmentAvailable
         && left.lastOverrideSucceeded == right.lastOverrideSucceeded
@@ -9597,6 +9072,27 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
         WideToUtf8(PropProjectileKindToWide(state.lockedPropKind)).c_str()
     );
 
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    constexpr const char* autoLabel = "自动接续";
+    constexpr const char* pinLabel = "锁定当前道具";
+    constexpr const char* autoHint = "新道具立即接管；爆开后定格 Demo 时间 2 秒，再返回探员主视角。暂停时停止计时。";
+    constexpr const char* pinHint = "一直跟到当前道具爆开并保留最终视角；其它道具不会打断。";
+#else
+    constexpr const char* autoLabel = "AUTO HANDOFF";
+    constexpr const char* pinLabel = "PIN CURRENT PROP";
+    constexpr const char* autoHint = "New throws take over immediately; hold detonation for 2 demo seconds, then return to the agent. Pausing stops the timer.";
+    constexpr const char* pinHint = "Track through detonation and keep the final view; ignore other throws.";
+#endif
+    const float modeWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    if (ImGuiModeButton(autoLabel, !state.manualPropLock, ImVec2(modeWidth, 0), kColorPropAccent, kColorPropAccentStrong)) SetPropPinned(false);
+    ImGui::SetItemTooltip("%s", autoHint);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.lockedPropHandle.IsValid());
+    if (ImGuiModeButton(pinLabel, state.manualPropLock, ImVec2(modeWidth, 0), kColorPropAccent, kColorPropAccentStrong)) SetPropPinned(true);
+    ImGui::SetItemTooltip("%s", pinHint);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("%s", PropViewPhaseText(state.propViewPhase));
+
     Vec3 offset = state.propOffset;
     bool offsetChanged = false;
     bool offsetCommit = false;
@@ -9657,7 +9153,7 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
     ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 20.0f);
     ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("Lock", ImGuiTableColumnFlags_WidthFixed, 78.0f);
+    ImGui::TableSetupColumn("Lock", ImGuiTableColumnFlags_WidthFixed, 100.0f);
     for (std::size_t index = 0u; index < state.propCandidates.size(); ++index) {
         const PropCandidate& candidate = state.propCandidates[index];
         ImGui::PushID(static_cast<int>(index));
@@ -9683,9 +9179,14 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
         if (!candidate.valid || !candidate.handle.IsValid()) {
             ImGui::BeginDisabled();
         }
-        if (ImGuiModeButton(WideToUtf8(active ? Texts().uiButtonPropLocked : Texts().uiButtonPropLock).c_str(), active, ImVec2(78.0f, 0.0f), kColorPropAccent, kColorPropAccentStrong)) {
+        if (ImGuiModeButton(WideToUtf8(active && state.manualPropLock ? Texts().uiButtonPropLocked : Texts().uiButtonPropLock).c_str(), active && state.manualPropLock, ImVec2(100.0f, 0.0f), kColorPropAccent, kColorPropAccentStrong)) {
             SetLockedProp(candidate);
         }
+#if defined(SELFIESTICK_LANG_ZH_CN)
+        ImGui::SetItemTooltip("切换到这一颗道具并锁定，爆开后一直保留最终机位。已结束且没有缓存机位的道具无法重新锁定。\n上方按钮则锁定正在显示的道具；两者使用相同的锁定规则。");
+#else
+        ImGui::SetItemTooltip("Select this prop and pin its shot through detonation indefinitely. Ended props without a cached view cannot be selected.\nThe top button pins the current shot; both use the same pin policy.");
+#endif
         if (!candidate.valid || !candidate.handle.IsValid()) {
             ImGui::EndDisabled();
         }
@@ -9697,6 +9198,11 @@ void RenderImGuiPropSelfie(const RuntimeState& state) {
     if (ImGuiModeButton(WideToUtf8(Texts().uiButtonPropClear).c_str(), state.lockedPropHandle.IsValid(), ImVec2(-1.0f, 0.0f), kColorWarn, BlendColor(kColorWarn, kColorText, 0.24f))) {
         ClearLockedProp();
     }
+#if defined(SELFIESTICK_LANG_ZH_CN)
+    ImGui::SetItemTooltip("立即释放当前机位并返回探员主视角；不会再次自动抓取已清除的道具，后续新出手仍会自动接续。");
+#else
+    ImGui::SetItemTooltip("Release the shot and return to the agent immediately. Cleared props stay released; new throws still trigger automatic capture.");
+#endif
     EndImGuiCard();
 }
 
@@ -9746,8 +9252,18 @@ void RenderImGuiStatus(const RuntimeState& state) {
         SetRuntimeStatusExpanded(expanded);
     }
     if (expanded) {
+#if defined(SELFIESTICK_LANG_ZH_CN)
+        constexpr const char* exportLabel = "导出抖动诊断";
+#else
+        constexpr const char* exportLabel = "EXPORT MOTION DIAGNOSTICS";
+#endif
+        ImGui::BeginDisabled(PropMotionSampleCount() == 0u || g_propMotionExportBusy.load(std::memory_order_acquire));
+        if (ImGuiModeButton(exportLabel, false, ImVec2(-1.0f, 0.0f))) StartPropMotionExport();
+        ImGui::EndDisabled();
+        const auto exportMessage = PropMotionExportMessage();
+        if (!exportMessage.empty()) ImGui::TextWrapped("%s", WideToUtf8(exportMessage).c_str());
         const std::string status = WideToUtf8(BuildOverlayStatusText(state));
-        ImGui::BeginChild("RuntimeStatusText", ImVec2(0.0f, 150.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+        ImGui::BeginChild("RuntimeStatusText", ImVec2(0.0f, 125.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
         ImGui::TextUnformatted(status.c_str());
         ImGui::EndChild();
     }

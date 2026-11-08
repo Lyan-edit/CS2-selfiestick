@@ -103,6 +103,13 @@ ClientEntityKind ClassifyEntityClassName(std::string_view className) {
 }
 
 PropProjectileKind ClassifyPropProjectileClassName(std::string_view className) {
+    // Source 2 can expose a generic grenade RTTI class. HLAE's entity class
+    // accessor uses CEntityIdentity::m_designerName for the concrete kind.
+    if (className == "smokegrenade_projectile") return PropProjectileKind::Smoke;
+    if (className == "molotov_projectile" || className == "incgrenade_projectile") return PropProjectileKind::Fire;
+    if (className == "hegrenade_projectile") return PropProjectileKind::Explosive;
+    if (className == "flashbang_projectile") return PropProjectileKind::Flash;
+    if (className == "decoy_projectile") return PropProjectileKind::Decoy;
     if (!Contains(className, "Projectile")) {
         return PropProjectileKind::Unknown;
     }

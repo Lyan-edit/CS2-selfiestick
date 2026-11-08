@@ -236,6 +236,30 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
     else if (matches("C_BaseCSGrenadeProjectile", "m_vInitialVelocity")) {
         target = 0x12BC;
     }
+    else if (matches("C_BaseCSGrenadeProjectile", "m_flSpawnTime")) {
+        target = 0x12E8;
+    }
+    else if (matches("C_BaseCSGrenadeProjectile", "m_nExplodeEffectTickBegin")) {
+        target = 0x12D8;
+    }
+    else if (matches("C_BaseCSGrenadeProjectile", "m_bExplodeEffectBegan")) {
+        target = 0x12FC;
+    }
+    else if (matches("C_SmokeGrenadeProjectile", "m_nSmokeEffectTickBegin")) {
+        target = 0x1360;
+    }
+    else if (matches("C_SmokeGrenadeProjectile", "m_bDidSmokeEffect")) {
+        target = 0x1364;
+    }
+    else if (matches("C_DecoyProjectile", "m_nDecoyShotTick")) {
+        target = 0x1348;
+    }
+    else if (matches("CEntityIdentity", "m_designerName")) {
+        target = 0x20;
+    }
+    else if (matches("C_BaseEntity", "m_flSimulationTime")) {
+        target = 0x3B8;
+    }
 
     return target != 0;
 }

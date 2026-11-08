@@ -1,6 +1,6 @@
 # CS2 Selfiestick Manual
 
-Version v0.4.5 is a regular release. The player camera uses the agent skeleton's `weapon_hand_r` attachment; the gun/knife entity is no longer the primary anchor. The render-eye call uses verified vtable slot 173. Missing hand transforms use a short pawn-local cache and then a body-relative fallback. Framing v6 backs up older settings as `selfiestick.ini.pre-hand-anchor.bak` before resetting player trim once; prop settings remain. Validation is background/offline only; no in-demo test or automatic map collision avoidance is included.
+Version v0.4.6 is a regular release. The player camera uses the agent skeleton's `weapon_hand_r` attachment; the gun/knife entity is no longer the primary anchor. The render-eye call uses verified vtable slot 173. Missing hand transforms use a short pawn-local cache and then a body-relative fallback. Framing v6 backs up older settings as `selfiestick.ini.pre-hand-anchor.bak` before resetting player trim once; prop settings remain. The user confirmed that the fix5 prop-origin update resolved shaking; v0.4.6 retains that implementation. The new view lifecycle has background/offline validation only. Automatic map collision avoidance is not implemented.
 
 ## Package Contents
 
@@ -47,7 +47,7 @@ Current release DLLs also avoid heavy startup schema resolving and no longer ins
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 
-The current v0.4.5 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.5, then inspect the remaining graphics injectors independently.
+The current v0.4.6 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.6, then inspect the remaining graphics injectors independently.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
@@ -88,7 +88,7 @@ The default selfie uses the agent's right-hand skeleton attachment and looks bac
 
 Select `Prop Selfie` in Camera Mode to follow a projectile thrown by the current target agent.
 
-Recommended workflow: set demo playback to `0.1x`, lock or follow the target agent, wait for the projectile candidate to appear, use auto-lock for a single projectile or `LOCK` for one candidate, then tune `X / Y / Z` and `Pitch / Yaw / Roll`. After framing is stable, raise demo speed as needed.
+Recommended workflow: enable Prop Selfie before the throw and follow or lock the target agent. New throws are captured automatically; use `LOCK` in Recent Props to pin one projectile. Tune `X / Y / Z` and `Pitch / Yaw / Roll` at `0.1x`, then raise demo speed after framing is stable.
 
 Supported projectiles:
 
@@ -102,15 +102,18 @@ Behavior:
 
 - The target agent is still controlled by `Follow` / `Lock Current`.
 - The prop scanner only accepts projectiles thrown or owned by the current target.
-- If there is exactly one valid flying projectile and no prop lock, it auto-locks.
-- If multiple valid projectiles exist, choose one manually from Recent Props with `LOCK`.
-- `CLEAR PROP` clears the current prop lock.
-- The camera caches the inverse horizontal launch yaw, keeping the cinematic horizon level instead of following the grenade's steep ballistic pitch or drifting toward the thrower's later position.
-- Unlocked discovery checks the newest entity tail at roughly 30 Hz so short-lived projectiles can be captured before a full scan finishes.
-- Flash, HE, fire, and decoy shots keep the last valid pose for 0.45 seconds after the flying entity disappears. Smoke keeps a longer 1.2-second hold.
-- The camera carrier uses smoothed prediction, but its view direction always targets the projectile's current raw origin. This keeps the prop centered even when its predicted carrier leads the rendered entity.
-- Tracking combines the projectile's schema velocity direction with its observed movement rate, so slow motion and normal playback use the correct prediction speed. It stops extrapolating when playback pauses and resets prediction when the bounce counter changes; the guarded measured-motion fallback remains active if either field is unavailable.
-- Projectile discovery is split into bounded batches, while the locked projectile's position uses the direct scene-node origin path on the supported build to avoid a full dynamic-origin search on every camera callback.
+- The `v0.4.6` release retains the user-confirmed fix5 origin/rig implementation and orders throws by schema spawn time and persistent eligibility. Ownership arriving after 100 ms can still replace the previous automatic shot.
+- AUTO HANDOFF follows through detonation, holds the final camera for 2 demo seconds, then returns to the agent's native view while awaiting future throws. Pause stops the timer; slow playback extends the wall-clock duration. New valid throws take over immediately without waiting for the hold to finish.
+- PIN CURRENT PROP protects the current shot and final view indefinitely. Row SELECT + PIN chooses a specific live candidate and uses the same pin policy. AUTO HANDOFF unpins; an elapsed effect hold returns immediately unless another shot takes over.
+- CLEAR LOCK / RETURN TO AGENT releases the view immediately without recapturing cleared/existing candidates. Future throws still auto-capture; explicit row selection can reopen a live cleared candidate. The lower target Clear Lock also releases the prop camera and restores Follow target selection.
+- The camera latches its first valid inverse horizontal launch yaw. A temporary fallback can be promoted once when initial velocity arrives; later data changes/bounces cannot rotate the established rig.
+- Entity-birth observation takes priority (up to 64 queued notifications per callback), preserving the original engine/HLAE chain. The fallback covers all slots 0..32767 under a resumable 0.5 ms soft scan budget. The old query returns population count, so it cannot be used as the highest occupied slot. Observation failure leaves the complete sweep available.
+- Up to 128 known or pending projectile slots are revisited first every callback. Base grenade RTTI resolves its concrete type through HLAE-style `m_designerName`.
+- New entities get a 100 ms initial-velocity grace, supplemented by newer spawn time and observed scene movement. Eligibility does not expire with this grace. Stationary baseline smoke/decoys cannot capture the camera through stale initial velocity.
+- Landing, stopped motion and scheduled effect ticks do not end tracking. Actual client effect flags or removal start the final-view hold while game effects continue. One-tick time jitter is ignored; rewinds over 0.25 seconds reset chronology. Clear releases the view and preserves capture order; seek back before a throw to replay it.
+- Position and aim share the same current render-scene sample. The relative distance remains `sqrt(X*X + Y*Y + Z*Z)` without independent velocity integration, prediction drift or a refresh-based correction. Legacy `PropFollowSpeed` is retained for configuration compatibility but no longer limits following speed.
+- Origin sampling uses the verified engine accessor, resolving dirty scene transforms before returning absolute position. It does not directly trust the cached field or scan arbitrary vectors. Scene/owner gaps retain the validated view; pending throws keep the displayed view until ready. Per-shot FOV remains stable.
+- If a projectile is born and destroyed entirely between camera frames, flight images cannot be reconstructed; slow the demo or seek back before the throw. Restart HLAE/CS2, load one DLL, and enable Prop Selfie before the throw so creation notifications are active.
 
 Prop controls:
 
@@ -120,6 +123,8 @@ Prop controls:
 - `Recent Props`: candidate list with validity, handle, thrower handle, age, type, and lock state
 
 ## Failure States
+
+For same-shot prop/background motion issues, expand Runtime and click `EXPORT MOTION DIAGNOSTICS`. It exports up to 1,024 recent callback samples to `selfiestick_prop_motion.csv` beside the loaded DLL, including build, handles, source origins, camera pose, phase and FOV. Normal capture writes only a bounded memory buffer; explicit export writes the file on a worker. Per-frame trace logging is not required.
 
 The Runtime diagnostics bar is collapsed by default. Click it to expand the live state when the camera is blocked. Common examples:
 

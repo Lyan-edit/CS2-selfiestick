@@ -217,6 +217,84 @@ def check_player_eye_virtual(image: PeImage, source: str, failures: list[str]) -
     print(f"pawn RenderEyeOrigin: slot={slot} RVA=0x{target:X}, output/camera-service path verified")
 
 
+def check_prop_lifecycle_virtuals(image: PeImage, source: str, failures: list[str]) -> None:
+    """Read primary CGameEntitySystem RTTI/vtable and prove the count accessor."""
+    data = image.data
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    base = struct.unpack_from("<Q", data, pe + 48)[0]
+    descriptor = data.find(b".?AVCGameEntitySystem@@\0")
+    if descriptor < 16:
+        failures.append("CGameEntitySystem RTTI missing")
+        return
+    type_rva = image.raw_to_rva(descriptor - 16)
+    wanted = tuple(parse_hex_constant(source, name) for name in (
+        "kPropLifecycleVtableRva", "kPropLifecycleAddRva", "kPropLifecycleRemoveRva"))
+    candidates: set[tuple[int, int, int]] = set()
+    cursor = 0
+    while (reference := data.find(struct.pack("<I", type_rva), cursor)) >= 0:
+        cursor = reference + 1
+        col = reference - 12
+        if col < 0:
+            continue
+        try:
+            values = struct.unpack_from("<6I", data, col)
+            if values[:3] != (1, 0, 0) or values[5] != image.raw_to_rva(col):
+                continue
+            vcursor = 0
+            while (vref := data.find(struct.pack("<Q", base + values[5]), vcursor)) >= 0:
+                vcursor = vref + 8
+                add, remove = struct.unpack_from("<QQ", data, vref + 8 + 15 * 8)
+                if image.is_executable_rva(add - base) and image.is_executable_rva(remove - base):
+                    candidates.add((image.raw_to_rva(vref + 8), add - base, remove - base))
+        except (ValueError, struct.error):
+            continue
+    if candidates != {wanted}:
+        failures.append(f"entity lifecycle primary vtable mismatch: {candidates}, expected {wanted}")
+        return
+    matches = find_pattern(data, parse_patterns(source)["kPatternEntityList"])
+    if len(matches) != 1:
+        failures.append("entity-count accessor cannot be verified")
+        return
+    count_rva = relative_call_target_rva(image, matches[0], 27)
+    for section in image.sections:
+        if section.virtual_address <= count_rva < section.virtual_address + section.raw_size:
+            raw = section.raw_offset + count_rva - section.virtual_address
+            # mov eax,[rcx+2124]; add eax,[rcx+2120]; ret. It returns a
+            # population count, not the last occupied slot in a sparse list.
+            if data[raw:raw + 18] != bytes.fromhex("80 fa 01 75 0d 8b 81 24 21 00 00 03 81 20 21 00 00 c3"):
+                failures.append("entity-count accessor semantics changed")
+                return
+            print(f"entity lifecycle: vtable=0x{wanted[0]:X} add[15]=0x{wanted[1]:X} remove[16]=0x{wanted[2]:X}; count accessor 0x{count_rva:X} is not an index bound")
+            return
+    failures.append("entity-count accessor is outside file-backed code")
+
+
+def check_resolved_origin_accessor(image: PeImage, source: str, failures: list[str]) -> None:
+    """Prove the resolver checks dirty transforms before returning the cached vector."""
+    getter = parse_hex_constant(source, "kEntityAbsOriginRva")
+    resolver = parse_hex_constant(source, "kSceneTransformResolveRva")
+    for section in image.sections:
+        if section.virtual_address <= getter < section.virtual_address + section.raw_size:
+            raw = section.raw_offset + getter - section.virtual_address
+            code = image.data[raw:raw + 48]
+            checks = (
+                bytes.fromhex("48 8b 99 30 03 00 00"),  # entity -> scene node
+                bytes.fromhex("80 bb 10 01 00 00 00 74 08 48 8b cb e8"),  # dirty branch -> recalculate
+                bytes.fromhex("48 8d 83 c8 00 00 00"),  # return scene absolute origin
+            )
+            if not all(pattern in code for pattern in checks):
+                failures.append("resolved absolute-origin accessor no longer proves dirty-transform handling")
+                return
+            call = code.index(checks[1]) + len(checks[1]) - 1
+            target = relative_call_target_rva(image, raw, call)
+            if target != resolver or not image.is_executable_rva(target):
+                failures.append("absolute-origin dirty-transform resolver target changed")
+                return
+            print(f"resolved prop origin: getter=0x{getter:X}, dirty scene+0x110 -> resolver=0x{resolver:X}, then scene+0xC8")
+            return
+    failures.append("absolute-origin accessor outside file-backed sections")
+
+
 def find_pattern(data: bytes, pattern: tuple[int | None, ...], limit: int = 3) -> list[int]:
     matches: list[int] = []
     concrete = next((index for index, value in enumerate(pattern) if value is not None), None)
@@ -332,6 +410,8 @@ def main() -> int:
 
     check_static_schema(client, args.source.with_name("schema_probe.cpp"), failures)
     check_player_eye_virtual(client, source, failures)
+    check_prop_lifecycle_virtuals(client, source, failures)
+    check_resolved_origin_accessor(client, source, failures)
 
     if failures:
         for failure in failures:

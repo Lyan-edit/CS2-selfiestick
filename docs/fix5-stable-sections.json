@@ -1,0 +1,19 @@
+{
+  "build": "v0.4.5 prop-origin-fix5",
+  "user_confirmation": "2026-11-08: twitching/shaking perfectly resolved; preserve this origin path",
+  "source_archive_sha256": "A8340A74AB4AE094757D0EAFFB7668ECA14348416080D581F2CEBFD922424241",
+  "protected_origin_functions": {
+    "bool TryInvokeEntityAbsOrigin(": "82acd8f36e3ec773bde027bb2ee193240747257a9588bd54f18ea9a342c3a19c",
+    "bool TryGetResolvedPropOrigin(": "52b88c30b668e6b2e98d06b3ec57660d245d774b8d990f86398edd9823df227c",
+    "bool TryGetProjectileOriginWithFallback(": "a76ed5bb2ba46943a0221da62b637f3f6d6540dcba4355dbeb466a1c8d76a5ef",
+    "Vec3 SmoothPropAnchor(": "0a87c350763ac0234d3f966041acf7012a0d2368b0ac0bd5869e325c8fba7741",
+    "bool ComposePropRigPose(": "c8e5437a2019b3308309403da74e216776a0064cc8cb8afcd638b726890c0553",
+    "bool TryBuildPropCameraPose(": "7a8fa68b03ebe6696f485b09b9301e9af7b68cde41e007d16448136992a26db7",
+    "bool TryGetCachedPropForward(": "8b9182c7e99fd8db4df25a89bbf083a80a774bf2e48774f11089ab3f5de1b99a",
+    "void UpdateCachedPropForward(": "7aa18652dc396a4a6ed67cd4c964bc21399007249e243ed6b90e1103d8088a52",
+    "bool ResolveEntityAccess(": "70595d44067193f8dd82adb400b6854209763b14344ab25847a8452d582343b7",
+    "ApplyPropViewFov": "d2123de43a70d5b37085ab153e0a9e396315c966443685ae59ed122d9eec37dd",
+    "prop_lifecycle.inl": "cb1af36a11781dea9a4db874907c914e42dcbc395716fc3c532d1ed3d91521f8",
+    "prop_motion_diagnostics.inl": "6a3b99cee1c5eb0e40466361d09f9b7704ed561e5c433fab209aaa9e97962f3d"
+  }
+}

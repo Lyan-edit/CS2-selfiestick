@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.5',
+    [string]$Version = 'v0.4.6',
     [string]$Cs2Build = '26445667',
     [string]$HlaeVersion = '2.192.10'
 )
@@ -25,7 +25,11 @@ if ([IO.Path]::GetFullPath($outputRoot) -ne $expectedOutputRoot) {
     throw 'Refusing to clean an unexpected release output directory.'
 }
 if (Test-Path -LiteralPath $outputRoot) {
-    Remove-Item -LiteralPath $outputRoot -Recurse -Force
+    $resolvedOutputRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $outputRoot).Path)
+    if ($resolvedOutputRoot -ne $expectedOutputRoot) {
+        throw 'Refusing to clean a redirected release output directory.'
+    }
+    Remove-Item -LiteralPath $resolvedOutputRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
 
@@ -101,7 +105,11 @@ $checksumLines = foreach ($asset in $assetsToHash) {
 }
 [IO.File]::WriteAllLines($checksumFile, $checksumLines, [Text.UTF8Encoding]::new($false))
 
-Remove-Item -LiteralPath $stageRoot -Recurse -Force
+$resolvedStageRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $stageRoot).Path)
+if ($resolvedStageRoot -ne [IO.Path]::GetFullPath((Join-Path $expectedOutputRoot '_stage'))) {
+    throw 'Refusing to clean an unexpected release staging directory.'
+}
+Remove-Item -LiteralPath $resolvedStageRoot -Recurse -Force
 
 Write-Host "Release package ready: $outputRoot"
 Get-ChildItem -LiteralPath $outputRoot -File |

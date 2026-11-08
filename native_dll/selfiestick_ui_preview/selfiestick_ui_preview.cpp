@@ -4,6 +4,11 @@
 #include <cstdio>
 #include <vector>
 #include "player_hand_checks.h"
+#include "prop_follow_checks.h"
+#include "prop_rig_checks.h"
+#include "prop_lifecycle_checks.h"
+#include "prop_origin_checks.h"
+#include "prop_motion_checks.h"
 
 namespace {
 LRESULT CALLBACK PreviewProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -63,6 +68,11 @@ bool SaveFrame(HWND window, const wchar_t* path) {
 int wmain() {
     using namespace selfiestick;
     if (!hand_checks::Run()) return 20;
+    if (!prop_origin_checks::Run()) return 24;
+    if (!prop_rig_checks::Run()) return 22;
+    if (!prop_lifecycle_checks::Run()) return 23;
+    if (!prop_checks::Run()) return 21;
+    if (!prop_motion_checks::Run()) return 25;
     WNDCLASSW wc{};
     wc.lpfnWndProc = PreviewProc;
     wc.hInstance = GetModuleHandleW(nullptr);
