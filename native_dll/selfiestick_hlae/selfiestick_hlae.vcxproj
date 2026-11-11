@@ -104,6 +104,12 @@
     <ClInclude Include="prop_lifecycle.inl" />
     <ClInclude Include="prop_view.inl" />
     <ClInclude Include="prop_demo_clock.inl" />
+    <ClInclude Include="player_frame.inl" />
+    <ClInclude Include="player_view.inl" />
+    <ClInclude Include="player_motion_diagnostics.inl" />
+    <ClInclude Include="player_turn_filter.inl" />
+    <ClInclude Include="player_motion_clock.inl" />
+    <ClInclude Include="player_tail_hook.inl" />
     <ClInclude Include="prop_motion_diagnostics.inl" />
     <ClInclude Include="schema_probe.h" />
     <ClInclude Include="setup_view_hook.h" />

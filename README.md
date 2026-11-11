@@ -23,7 +23,7 @@
   [![License](https://img.shields.io/github/license/Lyan-edit/CS2-selfiestick?style=flat-square&labelColor=111827&color=35C5F0)](./LICENSE)
   <br />
   ![Windows x64](https://img.shields.io/badge/Windows-x64-35C5F0?style=flat-square&labelColor=111827&logo=windows11&logoColor=white)
-  ![HLAE](https://img.shields.io/badge/HLAE-2.192.10-35C5F0?style=flat-square&labelColor=111827)
+  ![HLAE](https://img.shields.io/badge/HLAE-2.193.0-35C5F0?style=flat-square&labelColor=111827)
   ![CS2 build](https://img.shields.io/badge/CS2_build-26445667-F2A65A?style=flat-square&labelColor=111827)
   ![ReShade safe](https://img.shields.io/badge/ReShade-safe-35C5F0?style=flat-square&labelColor=111827)
 </div>
@@ -77,14 +77,14 @@ The current release also validates exact entity handles, fails closed on unknown
 ## 📦 Download
 
 > [!IMPORTANT]
-> Current stable release: **[v0.4.6](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.6)** for **CS2 build `26445667`** and **HLAE `2.192.10` / AfxHookSource2 `0.41.9`**.
+> Current stable release: **[v0.4.7](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.7)** for **CS2 build `26445667`** and **HLAE `2.193.0` / AfxHookSource2 `0.42.0`**.
 
 Get the bilingual Windows package from **[GitHub Releases](https://github.com/Lyan-edit/CS2-selfiestick/releases/latest)**. It includes both DLLs, manuals, the default configuration, and the hotkey reference.
 
 | Asset | Use it for |
 | :-- | :-- |
-| `Lyan_selfiestick-v0.4.6-EN.dll` | English interface |
-| `Lyan_selfiestick-v0.4.6-zh-CN.dll` | 中文界面 |
+| `Lyan_selfiestick-v0.4.7-EN.dll` | English interface |
+| `Lyan_selfiestick-v0.4.7-zh-CN.dll` | 中文界面 |
 | `...windows-x64.zip` | Recommended complete bilingual package |
 | `...source.zip` | Reproducible source package and validation tools |
 | `SHA256SUMS.txt` | Release integrity verification |
@@ -95,7 +95,7 @@ The DLLs use the static MSVC runtime, so users do not need to install the Visual
 
 ## 🚀 Quick start
 
-1. Fully restart HLAE/CS2, launch **HLAE 2.192.10**, and open a demo in spectator mode.
+1. Fully restart HLAE/CS2, launch **HLAE 2.193.0**, and open a demo in spectator mode.
 2. Download and extract the latest Windows package.
 3. Load one language DLL from the HLAE console:
 
@@ -122,7 +122,7 @@ The camera hook is installed lazily when Selfiestick is enabled. An incompatible
 
 ### Player Selfie
 
-The player rig binds to the agent's `weapon_hand_r` skeleton attachment, with a short pawn-local cache and body-relative fallback if the attachment is temporarily unavailable. Camera facing comes from the pawn rather than an unrelated observer view.
+The player rig uses a fixed agent-body frame, independent of hand, weapon and render-eye animation. The engine resolves body position before sampling, stance controls camera height, and the final pose is written after native view processing. Local yaw uses a short demo-rate-aware transition; FOV stays fixed for each agent/enable session.
 
 - **Selfie Left / Right** — mirrored front-facing compositions.
 - **Over Shoulder** — forward view with the agent in the left foreground.
@@ -168,7 +168,7 @@ The panel hotkey is configurable and saved to `selfiestick.ini` next to the load
 | Component | Supported target |
 | :-- | :-- |
 | Counter-Strike 2 | Steam app `730`, buildid `26445667` |
-| HLAE | `2.192.10`, AfxHookSource2 `0.41.9` |
+| HLAE | `2.193.0`, AfxHookSource2 `0.42.0` |
 | Platform | Windows x64 |
 | Workflow | HLAE demo playback and cinematic capture |
 
@@ -184,14 +184,14 @@ CS2 and HLAE update frequently. If schema, entity layout, or `SetUpView` changes
 <details>
 <summary><b><code>mirv_loadlibrary failed</code></b></summary>
 
-Fully restart HLAE/CS2 and verify the absolute DLL path. The v0.4.6 release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
+Fully restart HLAE/CS2 and verify the absolute DLL path. The v0.4.7 release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
 
 </details>
 
 <details>
 <summary><b><code>SetUpView hook blocked by compatibility gate</code></b></summary>
 
-The DLL loaded successfully, but the current game/runtime fingerprint was rejected. Use CS2 build `26445667` with HLAE `2.192.10`, or rebuild only after validating the newer binaries.
+The DLL loaded successfully, but the current game/runtime fingerprint was rejected. Use CS2 build `26445667` with HLAE `2.193.0`, or rebuild only after validating the newer binaries.
 
 </details>
 
@@ -212,9 +212,9 @@ Existing INI values override new defaults.
 <details>
 <summary><b>Collect motion diagnostics</b></summary>
 
-Expand **Runtime** and select **EXPORT MOTION DIAGNOSTICS**. The latest 1,024 in-memory camera samples are written to `selfiestick_prop_motion.csv` beside the DLL. For a debug trace, set `TraceEnabled=1`, restart HLAE/CS2, and reproduce the problem; output is written to `selfiestick_trace.log`.
+Expand **Runtime** and select **EXPORT MOTION DIAGNOSTICS**. The latest 1,024 in-memory camera samples are written beside the DLL: `selfiestick_player_motion.csv` in Player mode (34 columns, including early/final callback stage and thread ID), or `selfiestick_prop_motion.csv` in Prop mode. For a debug trace, set `TraceEnabled=1`, restart HLAE/CS2, and reproduce the problem; output is written to `selfiestick_trace.log`.
 
-The expected v0.4.6 trace marker is:
+The expected v0.4.7 trace marker is:
 
 ```text
 schema-probe-v42-prop-origin-cs2-26445667
@@ -222,12 +222,13 @@ schema-probe-v42-prop-origin-cs2-26445667
 
 </details>
 
-### v0.4.6 engineering notes
+### v0.4.7 engineering notes
 
 <details>
 <summary>Show implementation and validation details</summary>
 
-- The pawn render-eye function uses verified vtable slot 173 and validates output against the selected pawn's scene origin.
+- Player framing uses resolved body origin and verified stance fields; camera geometry is independent of active weapons. Render-eye slot 173 remains validated for auxiliary paths.
+- The player pose is applied at the final native SetUpView stage; shared session FOV prevents weapon changes from recapturing it.
 - Exact handle serial validation rejects reused entity slots; weapon restoration never falls back to an unvalidated saved pointer.
 - Prop discovery combines creation observation with a resumable `0..32767` slot sweep and a 0.5 ms soft callback budget.
 - Projectile position is read through the verified engine absolute-origin accessor so dirty scene transforms are resolved before sampling.
@@ -235,7 +236,7 @@ schema-probe-v42-prop-origin-cs2-26445667
 - The production panel renders complete off-screen CPU/GDI frames and never creates a graphics device or Present hook.
 - Compatibility resolution uses the exact supported PE fingerprint and fails closed on unknown builds.
 
-The resolved-origin shake fix was confirmed in a live user test. The v0.4.6 lifecycle update passed background/native regression checks; it was not accompanied by a new live-demo, ReShade-coexistence, or FPS test. See the [stable baseline](./docs/2026-11-08-confirmed-stable-fix5.md), [lifecycle update](./docs/2026-11-08-prop-hold-fix6.md), and [release validation](./docs/2026-11-08-v0.4.6-release-validation.md).
+The prop resolved-origin shake fix was confirmed in a live user test, and the user confirmed that body-fix2 stopped player clipping. The final-view player fix and v0.4.7 release passed background/native regression checks only; remaining real-demo turning/knife jitter has not been confirmed resolved. HLAE 2.193.0 compatibility was checked against its official source and local package, without a new live-demo, ReShade-coexistence, or FPS test. See the [stable baseline](./docs/2026-11-08-confirmed-stable-fix5.md), [lifecycle update](./docs/2026-11-08-prop-hold-fix6.md), and [release validation](./docs/2026-11-11-v0.4.7-release-validation.md).
 
 </details>
 
@@ -272,8 +273,8 @@ The compatibility checker validates the PE fingerprint, signatures, attachment c
 <summary><b>Release packaging</b></summary>
 
 ```powershell
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.6 -Cs2Build 26445667 -HlaeVersion 2.192.10
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.6
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.7 -Cs2Build 26445667 -HlaeVersion 2.193.0
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.7
 ```
 
 The publisher creates a draft release, uploads the bilingual DLLs, Windows bundle, source bundle, and checksum file, then verifies remote sizes and SHA-256 hashes before publication. Authentication comes from Git Credential Manager and is never printed.

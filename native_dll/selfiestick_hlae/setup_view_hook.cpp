@@ -326,4 +326,48 @@ bool BuildSetUpViewEntryPatch(
     return true;
 }
 
+bool BuildPlayerTailDetourStub(std::uintptr_t stubAddress, std::uintptr_t returnAddress,
+    std::uintptr_t callbackAddress, const std::array<std::uint8_t, kPlayerTailPatchSize>& replay,
+    std::vector<std::uint8_t>& out, std::string* errorMessage) {
+    constexpr std::array<std::uint8_t, kPlayerTailPatchSize> expected{
+        0xF2,0x0F,0x10,0x06, 0x4C,0x8D,0x9C,0x24,0xC8,0,0,0,
+        0x8B,0x46,0x08, 0x41,0x0F,0x28,0x73,0xE8};
+    if (!stubAddress || !returnAddress || !callbackAddress || replay != expected) {
+        SetError(errorMessage, "Player tail replay changed or address missing"); return false;
+    }
+    out.clear();
+    const auto bytes = [&](std::initializer_list<std::uint8_t> values) { out.insert(out.end(), values); };
+    const auto value32 = [&](std::uint32_t value) {
+        for (unsigned i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(value >> (i*8)));
+    };
+    // At this verified site RSP is 16-byte aligned. Reserve shadow space plus
+    // seven volatile GPRs and XMM0..5; all nonvolatile registers follow Win64 ABI.
+    bytes({0x48,0x81,0xEC}); value32(0xC0);
+    constexpr unsigned registers[]{0,1,2,8,9,10,11};
+    for (unsigned i = 0; i < 7; ++i) {
+        const auto reg = registers[i];
+        bytes({static_cast<std::uint8_t>(reg >= 8 ? 0x4C : 0x48),0x89,
+            static_cast<std::uint8_t>(0x44 | ((reg & 7) << 3)),0x24,static_cast<std::uint8_t>(0x20+i*8)});
+    }
+    for (unsigned reg = 0; reg < 6; ++reg) {
+        bytes({0xF3,0x0F,0x7F,static_cast<std::uint8_t>(0x84 | (reg << 3)),0x24}); value32(0x60+reg*16);
+    }
+    bytes({0x48,0x89,0xD9,0x48,0xB8}); // RCX = RBX = CViewSetup
+    for (unsigned i = 0; i < 8; ++i) out.push_back(static_cast<std::uint8_t>(callbackAddress >> (i*8)));
+    bytes({0xFF,0xD0});
+    for (unsigned reg = 0; reg < 6; ++reg) {
+        bytes({0xF3,0x0F,0x6F,static_cast<std::uint8_t>(0x84 | (reg << 3)),0x24}); value32(0x60+reg*16);
+    }
+    for (unsigned i = 0; i < 7; ++i) {
+        const auto reg = registers[i];
+        bytes({static_cast<std::uint8_t>(reg >= 8 ? 0x4C : 0x48),0x8B,
+            static_cast<std::uint8_t>(0x44 | ((reg & 7) << 3)),0x24,static_cast<std::uint8_t>(0x20+i*8)});
+    }
+    bytes({0x48,0x81,0xC4}); value32(0xC0);
+    out.insert(out.end(), replay.begin(), replay.end());
+    const auto jump = out.size(); bytes({0xE9,0,0,0,0});
+    return PatchRel32(out, jump+1, stubAddress+jump+5, returnAddress,
+        errorMessage, "Player tail return out of rel32 range");
+}
+
 } // namespace selfiestick::hook

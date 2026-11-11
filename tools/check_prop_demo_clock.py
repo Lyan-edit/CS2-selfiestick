@@ -56,6 +56,17 @@ def check(engine: Path, source: Path):
                 and body[19:32] == bytes.fromhex("ff 90 c0 01 00 00 2b 83 04 02 00 00 48")):
             raise ValueError("GetDemoTick no longer calls the tick clock and subtracts the demo start tick")
         print(f"{constant}: primary RTTI slot {slot}, executable RVA 0x{function:X}, body verified")
+    player_source = source.with_name("player_motion_clock.inl")
+    if player_source.exists():
+        pause_rva = parse_hex_constant(player_source.read_text(encoding="utf-8"), "kPlayerDemoPauseRva")
+        table = primary_vtable(b".?AVCDemoPlayer@@\0")
+        actual = struct.unpack_from("<Q", image.data, table + 12 * 8)[0] - base
+        if actual != pause_rva or not image.is_executable_rva(actual):
+            raise ValueError("player pause-query slot 12 does not match executable target")
+        body = image.data[raw(actual):raw(actual) + 40]
+        if body[:8] != bytes.fromhex("80 b9 30 12 00 00 00 74") or bytes.fromhex("0f b6 81 31 12 00 00 c3") not in body:
+            raise ValueError("IsDemoPaused no longer matches the verified read-only query")
+        print(f"player IsDemoPaused: slot 12, executable RVA 0x{actual:X}, read-only body verified")
     print("Demo clock compatibility passed (HLAE SDK slots 69/3, 64 demo ticks per second)")
 
 

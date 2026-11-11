@@ -188,6 +188,12 @@ bool TryGetKnownClientSchemaFieldOffsetFallback(
     else if (matches("C_BasePlayerPawn", "m_pCameraServices")) {
         target = 0x1328;
     }
+    else if (matches("C_BasePlayerPawn", "m_pMovementServices")) {
+        target = 0x1330;
+    }
+    else if (matches("CCSPlayer_MovementServices", "m_flDuckAmount")) {
+        target = 0x40C;
+    }
     else if (matches("C_BasePlayerPawn", "m_hController")) {
         target = 0x14BC;
     }

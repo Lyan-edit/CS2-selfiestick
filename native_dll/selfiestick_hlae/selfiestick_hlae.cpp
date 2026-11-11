@@ -46,7 +46,7 @@ constexpr wchar_t kTier0ModuleName[] = L"tier0.dll";
 constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
-constexpr char kBuildTag[] = "v0.4.6 " __DATE__ " " __TIME__;
+constexpr char kBuildTag[] = "v0.4.7 " __DATE__ " " __TIME__;
 constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v42-prop-origin-cs2-26445667";
 constexpr std::uint32_t kEntityAbsOriginRva = 0x00219BC0u;
 constexpr std::uint32_t kSceneTransformResolveRva = 0x009D2280u;
@@ -264,6 +264,7 @@ struct EntityHandle {
 };
 
 struct WeaponFrameBasis {
+    Vec3 bodyOrigin{};
     Vec3 anchorOrigin{};
     Vec3 upperBodyTarget{};
     Vec3 right{};
@@ -1264,6 +1265,9 @@ std::atomic<bool> g_setupViewCallbackObserved{false};
 std::atomic<bool> g_enabledSetUpViewObserved{false};
 std::atomic<bool> g_propDiscoveryCaptureActive{false};
 std::atomic<bool> g_propDiscoveryResetRequested{false};
+std::atomic<std::uint64_t> g_playerCameraGeneration{1u};
+std::atomic<bool> g_playerTailHookInstalled{false};
+thread_local int g_playerCallbackStage{};
 std::atomic<std::uint32_t> g_propAutoReleasedHandle{0xFFFFFFFFu};
 std::atomic<bool> g_setupViewHookInstallInProgress{false};
 std::atomic<unsigned long long> g_setupViewBridgeCounter{0};
@@ -1982,9 +1986,11 @@ bool IsSetUpViewHookInstalled() {
 
 bool HookSetUpView();
 bool EnsureSetUpViewHookInstalled();
+bool EnsurePlayerTailHookInstalled();
 
 void SetEnabled(bool enabled) {
-    if (enabled && !EnsureSetUpViewHookInstalled()) {
+    if (enabled && (!EnsureSetUpViewHookInstalled()
+        || (SnapshotState().cameraMode == CameraMode::PlayerSelfie && !EnsurePlayerTailHookInstalled()))) {
         bool changed = false;
         {
             std::lock_guard lock(g_stateMutex);
@@ -2010,6 +2016,7 @@ void SetEnabled(bool enabled) {
         MarkOverlayDirty();
     }
     if (changed) {
+        g_playerCameraGeneration.fetch_add(1u, std::memory_order_relaxed);
         if (enabled) {
             g_enabledSetUpViewObserved.store(false, std::memory_order_relaxed);
         }
@@ -2039,6 +2046,9 @@ void SetLookMode(LookMode lookMode) {
 }
 
 void SetCameraMode(CameraMode cameraMode) {
+    if (cameraMode == CameraMode::PlayerSelfie && IsSetUpViewHookInstalled() && !EnsurePlayerTailHookInstalled()) {
+        SetEnabled(false); return;
+    }
     bool changed = false;
     RuntimeState snapshot{};
     {
@@ -2057,6 +2067,7 @@ void SetCameraMode(CameraMode cameraMode) {
     }
     MarkOverlayDirty();
     if (changed) {
+        g_playerCameraGeneration.fetch_add(1u, std::memory_order_relaxed);
         PersistCameraSettingsSnapshot(snapshot);
         TracePrintf("camera-mode mode=%s", CameraModeToString(cameraMode));
     }
@@ -2204,6 +2215,7 @@ void SetTargetMode(TargetMode targetMode) {
     RefreshStatusTextLocked();
     MarkOverlayDirty();
     if (changed) {
+        g_playerCameraGeneration.fetch_add(1u, std::memory_order_relaxed);
         ConsolePrintf(Texts().logTargetMode, TargetModeToString(targetMode));
     }
 }
@@ -2287,6 +2299,7 @@ void SetLockedProp(const PropCandidate& candidate) {
 }
 
 void ClearLockedTarget() {
+    g_playerCameraGeneration.fetch_add(1u, std::memory_order_relaxed);
     bool propMode{};
     { std::lock_guard lock(g_stateMutex); propMode = g_state.cameraMode == CameraMode::PropSelfie; }
     if (propMode) ClearLockedProp();
@@ -2299,6 +2312,7 @@ void ClearLockedTarget() {
 }
 
 void SetLockedTarget(EntityHandle handle) {
+    g_playerCameraGeneration.fetch_add(1u, std::memory_order_relaxed);
     std::lock_guard lock(g_stateMutex);
     g_state.lockedHandle = handle;
     g_state.targetMode = TargetMode::Locked;
@@ -2351,7 +2365,10 @@ void UpdateOverrideSuccess(EntityHandle handle) {
     bool shouldRefresh = false;
     std::lock_guard lock(g_stateMutex);
     shouldLog = !g_state.lastOverrideSucceeded || g_state.currentTargetHandle.raw != handle.raw;
-    shouldRefresh = shouldLog || !g_state.attachmentAvailable || !g_state.lastFailureReason.empty();
+    const char* anchorName = g_state.cameraMode == CameraMode::PlayerSelfie ? "pawn_body" : kAnchorAttachmentName;
+    shouldRefresh = shouldLog || !g_state.attachmentAvailable || !g_state.lastFailureReason.empty()
+        || g_state.attachmentName != anchorName;
+    g_state.attachmentName = anchorName;
     g_state.currentTargetHandle = handle;
     g_state.lastOverrideSucceeded = true;
     g_state.attachmentAvailable = true;
@@ -2361,7 +2378,7 @@ void UpdateOverrideSuccess(EntityHandle handle) {
         MarkOverlayDirty();
     }
     if (shouldLog) {
-        ConsolePrintf(Texts().logLive, handle.raw, kAnchorAttachmentName);
+        ConsolePrintf(Texts().logLive, handle.raw, anchorName);
     }
 }
 
@@ -5741,6 +5758,19 @@ void UpdateRenderWithViewModelsSuppression(
         basis.heldItemKind != HeldItemKind::Unknown
     );
     if (!shouldSuppress) {
+        // Optional weapon metadata can disappear for one animation/network
+        // sample while the player camera is still valid. Do not undo hiding
+        // and then reapply it next frame just because metadata is missing.
+        if (overrideSucceeded && basis.pawnHandAnchor) {
+            std::lock_guard lock(g_viewModelSuppressionMutex);
+            if (g_viewModelSuppression.active) {
+                void* retained = ResolveHandleToEntity(g_viewModelSuppression.weaponHandle);
+                if (retained != nullptr) {
+                    TryWriteOffsetValue(retained, g_offsets.renderWithViewModels, std::uint8_t{0});
+                }
+            }
+            return;
+        }
         RestoreSuppressedRenderWithViewModels();
         return;
     }
@@ -5750,7 +5780,7 @@ void UpdateRenderWithViewModelsSuppression(
         if (traceFrame) {
             TracePrintf("viewmodel-suppress-skip idx=%llu reason=weapon-unresolved weapon=%u", frameIndex, basis.weaponHandle.raw);
         }
-        RestoreSuppressedRenderWithViewModels();
+        if (!(overrideSucceeded && basis.pawnHandAnchor)) RestoreSuppressedRenderWithViewModels();
         return;
     }
 
@@ -5765,7 +5795,7 @@ void UpdateRenderWithViewModelsSuppression(
                 static_cast<unsigned long long>(g_offsets.renderWithViewModels)
             );
         }
-        RestoreSuppressedRenderWithViewModels();
+        if (!(overrideSucceeded && basis.pawnHandAnchor)) RestoreSuppressedRenderWithViewModels();
         return;
     }
 
@@ -5935,6 +5965,7 @@ float GetUpperBodyTargetBlendForHeldItem(HeldItemKind kind) {
 }
 
 Vec3 GetLookTargetForBasis(const WeaponFrameBasis& basis, LookMode lookMode) {
+    if (basis.pawnHandAnchor) return basis.upperBodyTarget;
     if (basis.heldItemKind == HeldItemKind::Gun) {
         if (lookMode == LookMode::SelfieLeft) {
             return Add(
@@ -5955,6 +5986,7 @@ Vec3 GetLookTargetForBasis(const WeaponFrameBasis& basis, LookMode lookMode) {
 }
 
 float GetCameraRightOffsetForBasis(const WeaponFrameBasis& basis, LookMode lookMode, float magnitude) {
+    if (basis.pawnHandAnchor) return GetLookModeBaseRightOffset(lookMode, magnitude);
     if (basis.heldItemKind == HeldItemKind::Gun) {
         if (lookMode == LookMode::SelfieRight) {
             return magnitude;
@@ -6223,6 +6255,7 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
     }
 
     alignas(16) float data[8]{};
+    std::fill(std::begin(data), std::end(data), std::numeric_limits<float>::quiet_NaN());
     bool gotAttachment = false;
     if (!TryInvokeGetAttachment(entity, g_getAttachment, attachmentIndex, data, gotAttachment)) {
         cachedEntry->valid = false;
@@ -6239,10 +6272,17 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
     origin.x = data[0];
     origin.y = data[1];
     origin.z = data[2];
+    if (!IsFiniteVec3(origin)) {
+        cachedEntry->valid = false;
+        failure = FormatText(Texts().reasonAttachmentMissingFormat, attachmentName);
+        return false;
+    }
     return true;
 }
 
 Vec3 AnglesToForward(const Vec3& angles);
+
+#include "player_frame.inl"
 
 bool TryBuildHumanFrameBasis(
     void* targetPawn,
@@ -6252,44 +6292,24 @@ bool TryBuildHumanFrameBasis(
     WeaponFrameBasis& basis,
     std::string& failure
 ) {
-    // This attachment belongs to the pawn skeleton, not to its active weapon.
-    // Keep cached fallback data in pawn-local coordinates so the camera still
-    // follows the agent during a short attachment/animation transition.
-    struct HandCache {
-        EntityHandle pawn{};
-        Vec3 local{10.0f, 12.0f, -18.0f};
-        Vec3 angles{};
-        double handTime{};
-        double angleTime{};
-        bool hasHand{};
-        bool hasAngles{};
-    };
-    static thread_local HandCache cache{};
+    // Body-mounted rig: hand/viewmodel animation must never move the camera.
     const EntityHandle pawnHandle = EntityGetHandle(targetPawn);
     if (!pawnHandle.IsValid()) {
         failure = Texts().reasonTargetEntityMissing;
         return false;
     }
-    if (cache.pawn.raw != pawnHandle.raw) {
-        cache = {};
-        cache.pawn = pawnHandle;
-    }
+    auto& cache = PreparePlayerFrameCache(targetPawn, pawnHandle);
 
-    float eyeRaw[3]{};
-    // A locked agent's eye must come from that agent. CViewSetup may already
-    // contain an unrelated observer/HLAE camera and is not a safe fallback.
-    if (!TryGetEntityEyeOrigin(targetPawn, nullptr, false, eyeRaw, failure)) {
+    Vec3 eye{};
+    if (!TryGetStablePlayerBodyOrigin(targetPawn, cache, eye, failure)) {
         return false;
     }
-    const Vec3 eye{eyeRaw[0], eyeRaw[1], eyeRaw[2]};
-    const double now = HighResolutionSeconds();
     Vec3 facing{};
     if (TryGetPawnEyeAngles(targetPawn, facing, failure)) {
         cache.angles = facing;
-        cache.angleTime = now;
         cache.hasAngles = true;
     }
-    else if (cache.hasAngles && now - cache.angleTime >= 0.0 && now - cache.angleTime <= 0.25) {
+    else if (cache.hasAngles) {
         facing = cache.angles;
     }
     else {
@@ -6298,34 +6318,23 @@ bool TryBuildHumanFrameBasis(
 
     // Build a yaw-only frame. Even a vertical look or 180-degree turn preserves
     // world-up; no previous-world-right sign correction is applied.
+    facing.y = SampleStablePlayerYaw(cache.turn, facing.y);
     const float yaw = facing.y * 3.14159265358979323846f / 180.0f;
     const Vec3 forward{std::cos(yaw), std::sin(yaw), 0.0f};
     const Vec3 right{forward.y, -forward.x, 0.0f};
-    Vec3 hand{};
-    std::string handFailure;
-    bool liveHand = TryGetAttachmentOrigin(targetPawn, kAnchorAttachmentName, hand, handFailure)
-        && IsFiniteVec3(hand) && Length(Subtract(hand, eye)) <= 128.0f;
-    if (liveHand) {
-        const Vec3 relative = Subtract(hand, eye);
-        cache.local = {Dot(relative, right), Dot(relative, forward), relative.z};
-        cache.handTime = now;
-        cache.hasHand = true;
-    }
-    else {
-        const bool recentHand = cache.hasHand && now - cache.handTime >= 0.0 && now - cache.handTime <= 0.25;
-        const Vec3 local = recentHand ? cache.local : kKnifeFallbackHandAnchorOffset;
-        hand = ComposeBasisPoint(eye, right, forward, kWorldUp, local.x, local.y, local.z);
-    }
+    const Vec3 local = kKnifeFallbackHandAnchorOffset;
+    const Vec3 hand = ComposeBasisPoint(eye, right, forward, kWorldUp, local.x, local.y, local.z);
 
     basis = {};
     basis.anchorOrigin = hand;
+    basis.bodyOrigin = cache.bodyOrigin;
     // Keep the look-at target independent of the current item and hand animation.
     basis.upperBodyTarget = Add(eye, Vec3{0.0f, 0.0f, -6.0f});
     basis.right = right;
     basis.forward = forward;
     basis.up = kWorldUp;
-    basis.syntheticFallbackHandAnchor = !liveHand;
-    basis.pawnHandAnchor = true;
+    basis.syntheticFallbackHandAnchor = true;
+    basis.pawnHandAnchor = true; // retained framing-profile flag; anchor is body-local
     failure.clear();
     return true;
 }
@@ -7133,6 +7142,7 @@ bool TryBuildPropCameraPose(
 }
 
 #include "prop_demo_clock.inl"
+#include "player_motion_clock.inl"
 #include "prop_view.inl"
 #include "prop_motion_diagnostics.inl"
 
@@ -7182,6 +7192,9 @@ void OverrideScopedAwpFov(void* viewSetup, EntityHandle targetHandle, const Weap
 
     *viewFov = g_scopedFovOverride.unzoomedFov;
 }
+
+#include "player_view.inl"
+#include "player_motion_diagnostics.inl"
 
 void RefreshFollowSnapshot() {
     const auto follow = ResolveFollowTarget();
@@ -7290,7 +7303,7 @@ DWORD __fastcall RunSelfieStickSetUpViewGuarded(void* viewSetup) {
     }
 }
 
-void __fastcall SelfieStickSetUpViewBridge(void* viewSetup) {
+void __fastcall SelfieStickGuardedViewCallback(void* viewSetup) {
     const unsigned long long bridgeIndex = g_setupViewBridgeCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
     const bool traceBridge = g_debugOptions.traceEnabled && (bridgeIndex <= 20u || 0u == (bridgeIndex % 30u));
     if (traceBridge) {
@@ -7306,6 +7319,25 @@ void __fastcall SelfieStickSetUpViewBridge(void* viewSetup) {
     }
 }
 
+void __fastcall SelfieStickSetUpViewBridge(void* viewSetup) {
+    const auto config = GetOverrideConfig();
+    g_playerCallbackStage = 1;
+    if (config.cameraMode == CameraMode::PlayerSelfie && g_playerTailHookInstalled.load(std::memory_order_acquire)) {
+        if (config.enabled) RecordPlayerMotionFrame(viewSetup, config, {}, nullptr, 3, false);
+    } else {
+        SelfieStickGuardedViewCallback(viewSetup);
+    }
+    g_playerCallbackStage = 0;
+}
+
+void __fastcall SelfieStickSetUpViewTailBridge(void* viewSetup) {
+    if (!g_playerTailHookInstalled.load(std::memory_order_acquire) || !IsSetUpViewHookInstalled()
+        || GetOverrideConfig().cameraMode != CameraMode::PlayerSelfie) return;
+    g_playerCallbackStage = 2;
+    SelfieStickGuardedViewCallback(viewSetup);
+    g_playerCallbackStage = 0;
+}
+
 void __fastcall SelfieStickSetUpView(void* viewSetup) {
     if (viewSetup == nullptr) {
         return;
@@ -7317,6 +7349,7 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
 
     const OverrideConfig config = GetOverrideConfig();
     if (!config.enabled) {
+        g_playerView = {};
         RestoreSuppressedRenderWithViewModels();
         return;
     }
@@ -7344,7 +7377,11 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     }
 
     TargetResolution resolution{};
-    if (config.targetMode == TargetMode::Locked) {
+    if (config.cameraMode == CameraMode::PlayerSelfie) {
+        resolution = ResolvePlayerTargetForView(config, ShouldRefreshFollowTargetSnapshot());
+        if (config.targetMode == TargetMode::Follow) SetCurrentFollowHandle(resolution.handle);
+    }
+    else if (config.targetMode == TargetMode::Locked) {
         resolution = ResolveLockedTarget(config.lockedHandle);
     }
     else {
@@ -7364,6 +7401,8 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         resolution.handle = retainedPropView.targetHandle;
     }
     if (resolution.entity == nullptr && !retainPropTarget) {
+        if (config.cameraMode == CameraMode::PlayerSelfie)
+            RecordPlayerMotionFrame(viewSetup, config, resolution.handle, nullptr, 0, false);
         if (traceFrame) {
             TracePrintf("frame-resolve-failed idx=%llu reason=%s", frameIndex, resolution.failure.c_str());
         }
@@ -7459,12 +7498,16 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
 
     WeaponFrameBasis basis{};
     std::string failure;
-    if (!TryBuildWeaponFrameBasis(
+    bool playerRecovering = false;
+    if (!TryBuildStablePlayerFrame(
             resolution.entity,
+            resolution.handle,
             viewSetupEyeOriginAvailable ? &viewSetupEyeOrigin : nullptr,
             viewSetupEyeAnglesAvailable ? &viewSetupEyeAngles : nullptr,
             basis,
+            playerRecovering,
             failure)) {
+        RecordPlayerMotionFrame(viewSetup, config, resolution.handle, nullptr, 1, false);
         if (traceFrame) {
             TracePrintf("frame-basis-failed idx=%llu reason=%s", frameIndex, failure.c_str());
         }
@@ -7540,6 +7583,10 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         direction = basis.forward;
     }
 
+    if (ConstrainPlayerBodyCamera(basis, IsSelfieLookMode(config.lookMode), cameraPosition)
+        && IsSelfieLookMode(config.lookMode)) {
+        direction = Subtract(GetLookTargetForBasis(basis, config.lookMode), cameraPosition);
+    }
     if (!TryNormalize(direction)) {
         RestoreSuppressedRenderWithViewModels();
         UpdateFailureReason(Texts().reasonCameraDirectionDegenerate, true);
@@ -7578,7 +7625,7 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
             config.playerRotation.z
         );
     }
-    OverrideScopedAwpFov(viewSetup, resolution.handle, basis);
+    ApplyPlayerViewFov(viewSetup, resolution.handle, basis, playerRecovering);
 
     auto* viewOrigin = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupOriginOffset);
     auto* viewAngles = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(viewSetup) + kViewSetupAnglesOffset);
@@ -7610,8 +7657,11 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
     }
 
     UpdateRenderWithViewModelsSuppression(basis, true, traceFrame, frameIndex);
+    RecordPlayerMotionFrame(viewSetup, config, resolution.handle, &basis, 2, playerRecovering);
     UpdateOverrideSuccess(resolution.handle);
 }
+
+#include "player_tail_hook.inl"
 
 bool HookSetUpView() {
     g_runtimeCompatibility.setUpViewPatchReady = false;
@@ -7632,6 +7682,7 @@ bool HookSetUpView() {
         return false;
     }
 
+    if (SnapshotState().cameraMode == CameraMode::PlayerSelfie && !EnsurePlayerTailHookInstalled()) return false;
     auto patchMatches = FindPatterns(g_clientModule, kPatternSetupViewPatch, 2u);
     bool foundHlaePatchedSite = false;
     if (patchMatches.empty()) {
@@ -9257,10 +9308,14 @@ void RenderImGuiStatus(const RuntimeState& state) {
 #else
         constexpr const char* exportLabel = "EXPORT MOTION DIAGNOSTICS";
 #endif
-        ImGui::BeginDisabled(PropMotionSampleCount() == 0u || g_propMotionExportBusy.load(std::memory_order_acquire));
-        if (ImGuiModeButton(exportLabel, false, ImVec2(-1.0f, 0.0f))) StartPropMotionExport();
+        const bool player = state.cameraMode == CameraMode::PlayerSelfie;
+        ImGui::BeginDisabled(player ? (PlayerMotionSampleCount() == 0u || g_playerMotionExportBusy.load())
+            : (PropMotionSampleCount() == 0u || g_propMotionExportBusy.load(std::memory_order_acquire)));
+        if (ImGuiModeButton(exportLabel, false, ImVec2(-1.0f, 0.0f))) {
+            if (player) StartPlayerMotionExport(); else StartPropMotionExport();
+        }
         ImGui::EndDisabled();
-        const auto exportMessage = PropMotionExportMessage();
+        const auto exportMessage = player ? PlayerMotionExportMessage() : PropMotionExportMessage();
         if (!exportMessage.empty()) ImGui::TextWrapped("%s", WideToUtf8(exportMessage).c_str());
         const std::string status = WideToUtf8(BuildOverlayStatusText(state));
         ImGui::BeginChild("RuntimeStatusText", ImVec2(0.0f, 125.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);

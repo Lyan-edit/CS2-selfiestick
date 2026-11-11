@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.6',
+    [string]$Version = 'v0.4.7',
     [string]$Cs2Build = '26445667',
-    [string]$HlaeVersion = '2.192.10'
+    [string]$HlaeVersion = '2.193.0'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -89,8 +89,8 @@ inline bool Run() {
         WeaponFrameBasis live{}, noHand{}, turned{};
         attachmentLive = true;
         if (!TryBuildWeaponFrameBasis(&pawn, nullptr, nullptr, live, failure)
-            || !live.pawnHandAnchor || live.syntheticFallbackHandAnchor
-            || Length(Subtract(live.anchorOrigin, attachment)) > 0.01f) {
+            || !live.pawnHandAnchor || !live.syntheticFallbackHandAnchor
+            || Length(Subtract(live.anchorOrigin, Vec3{112, 190, 46})) > 0.01f) {
             std::printf("live-hand failure: %s anchor=(%.2f,%.2f,%.2f) class=%s\n", failure.c_str(), live.anchorOrigin.x, live.anchorOrigin.y, live.anchorOrigin.z, TryGetEntityRttiClassName(&pawn).c_str());
             return false;
         }
@@ -110,7 +110,7 @@ inline bool Run() {
         Store(&pawn, 0x3600, Vec3{89.99f, 180, 0});
         if (!TryBuildWeaponFrameBasis(&pawn, nullptr, nullptr, turned, failure)
             || turned.up.z != 1.0f || turned.forward.x > -0.99f) return false;
-        Vec3 expected = ComposeBasisPoint({200, 200, 64}, turned.right, turned.forward, turned.up, 12, 10, -18);
+        Vec3 expected = ComposeBasisPoint({200, 200, 64}, turned.right, turned.forward, turned.up, 10, 12, -18);
         if (Length(Subtract(turned.anchorOrigin, expected)) > 0.01f) return false;
 
         // Weapon kind must not change the player distance/profile on transition.

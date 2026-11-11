@@ -46,4 +46,9 @@ bool BuildSetUpViewEntryPatch(
     std::string* errorMessage = nullptr
 );
 
+constexpr std::size_t kPlayerTailPatchSize = 20;
+bool BuildPlayerTailDetourStub(std::uintptr_t stubAddress, std::uintptr_t returnAddress,
+    std::uintptr_t callbackAddress, const std::array<std::uint8_t, kPlayerTailPatchSize>& replay,
+    std::vector<std::uint8_t>& outBytes, std::string* errorMessage = nullptr);
+
 } // namespace selfiestick::hook

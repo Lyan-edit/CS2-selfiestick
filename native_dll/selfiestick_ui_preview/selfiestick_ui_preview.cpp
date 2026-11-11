@@ -9,6 +9,9 @@
 #include "prop_lifecycle_checks.h"
 #include "prop_origin_checks.h"
 #include "prop_motion_checks.h"
+#include "player_turn_checks.h"
+#include "player_tail_checks.h"
+#include "player_view_checks.h"
 
 namespace {
 LRESULT CALLBACK PreviewProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -66,9 +69,12 @@ bool SaveFrame(HWND window, const wchar_t* path) {
 }
 
 int wmain() {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     using namespace selfiestick;
     if (!hand_checks::Run()) return 20;
     if (!prop_origin_checks::Run()) return 24;
+    if (!player_view_checks::Run()) return 26;
+    if (!player_turn_checks::Run()) return 27;
     if (!prop_rig_checks::Run()) return 22;
     if (!prop_lifecycle_checks::Run()) return 23;
     if (!prop_checks::Run()) return 21;
