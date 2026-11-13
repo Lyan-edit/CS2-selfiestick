@@ -22,7 +22,7 @@ inline bool Run() {
     const std::string csv(bytes.begin(), bytes.end());
     const auto newlineCount = std::count(csv.begin(), csv.end(), '\n');
     const bool passed = loaded && newlineCount == 1027
-        && csv.find("schema-probe-v42") != std::string::npos
+        && csv.find("schema-probe-v43-prop-origin-cs2-26598758") != std::string::npos
         && csv.find("engine_resolved,dirty_before,total_dirty_resolves") != std::string::npos;
     if (passed) puts("prop motion diagnostics regression passed: bounded 1024-sample ring and explicit CSV export outside camera callbacks");
     return passed;

@@ -18,7 +18,7 @@ inline bool Run() {
     hand_checks::Store(&pawn, 0x330, static_cast<void*>(scene));
     hand_checks::Store(identity, 0x10, EntityHandle{(850u << 15u) | 42u});
     g_offsets.entityInstanceToIdentity = 0x10; g_offsets.sceneNode = 0x330;
-    g_offsets.sceneAbsOrigin = 0xC8; g_offsets.pawnEyeAngles = 0x3600;
+    g_offsets.sceneAbsOrigin = 0xC8; g_offsets.pawnEyeAngles = 0x3630;
     g_offsets.entitySimulationTime = 0;
     g_clientModule = GetModuleHandleW(nullptr);
     g_getEntityAbsOrigin = prop_origin_checks::EngineGetAbsOrigin;
@@ -37,7 +37,7 @@ inline bool Run() {
                     const float rawYaw = static_cast<float>(clock.tick);
                     const Vec3 origin{100 + static_cast<float>(demo) * 10, 200, 0};
                     hand_checks::Store(scene, 0xC8, origin);
-                    hand_checks::Store(&pawn, 0x3600, Vec3{30, rawYaw, 0});
+                    hand_checks::Store(&pawn, 0x3630, Vec3{30, rawYaw, 0});
                     WeaponFrameBasis basis{};
                     if (!TryBuildHumanFrameBasis(&pawn, HeldItemKind::Unknown, nullptr, nullptr, basis, failure)) return false;
                     const double yaw = std::atan2(basis.forward.y, basis.forward.x) * 180 / 3.141592653589793;
@@ -62,12 +62,12 @@ inline bool Run() {
         // Changing pawn lifetime or re-enabling the camera must not inherit
         // the previous subject's filtered heading.
         hand_checks::Store(identity, 0x10, EntityHandle{(851u << 15u) | 42u});
-        hand_checks::Store(&pawn, 0x3600, Vec3{0, 90, 0});
+        hand_checks::Store(&pawn, 0x3630, Vec3{0, 90, 0});
         WeaponFrameBasis changed{};
         if (!TryBuildHumanFrameBasis(&pawn, HeldItemKind::Unknown, nullptr, nullptr, changed, failure)
             || changed.forward.y < 0.9999f) return false;
         g_playerCameraGeneration.fetch_add(1u);
-        hand_checks::Store(&pawn, 0x3600, Vec3{0, -90, 0});
+        hand_checks::Store(&pawn, 0x3630, Vec3{0, -90, 0});
         if (!TryBuildHumanFrameBasis(&pawn, HeldItemKind::Unknown, nullptr, nullptr, changed, failure)
             || changed.forward.y > -0.9999f) return false;
         // Shortest-path wrap, pause/no drift, resume, duplicate callbacks and seeks.

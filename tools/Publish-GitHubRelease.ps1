@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.7',
+    [string]$Version = 'v0.4.8',
     [string]$Repository = 'Lyan-edit/CS2-selfiestick',
     [string]$AssetDirectory,
     [string]$ReleaseNotesPath

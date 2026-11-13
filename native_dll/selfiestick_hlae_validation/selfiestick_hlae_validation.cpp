@@ -748,7 +748,7 @@ int main() {
         { "C_BasePlayerPawn", "m_pObserverServices", 0x1308 },
         { "C_BasePlayerPawn", "m_pCameraServices", 0x1328 },
         { "C_BasePlayerPawn", "m_hController", 0x14BC },
-        { "C_CSPlayerPawn", "m_angEyeAngles", 0x3600 },
+        { "C_CSPlayerPawn", "m_angEyeAngles", 0x3630 },
         { "CPlayer_ObserverServices", "m_iObserverMode", 0x48 },
         { "CPlayer_ObserverServices", "m_hObserverTarget", 0x4C },
         { "CPlayer_CameraServices", "m_hViewEntity", 0xA4 },

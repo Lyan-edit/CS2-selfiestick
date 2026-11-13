@@ -1,5 +1,5 @@
 // Same exact-build demo interface as HLAE, plus its read-only pause query.
-constexpr std::uint32_t kPlayerDemoPauseRva = 0x00035A40u;
+constexpr std::uint32_t kPlayerDemoPauseRva = 0x00035930u;
 bool TryReadPlayerMotionClock(PlayerMotionClock& clock) {
     clock = {};
     clock.wall = HighResolutionSeconds();

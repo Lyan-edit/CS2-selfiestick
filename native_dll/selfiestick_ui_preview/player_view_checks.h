@@ -48,11 +48,11 @@ inline bool Run() {
     hand_checks::Store(&pawn, 0x10, static_cast<void*>(identity));
     hand_checks::Store(&pawn, 0x330, static_cast<void*>(scene));
     hand_checks::Store(identity, 0x10, EntityHandle{(600u << 15u) | 42u});
-    hand_checks::Store(&pawn, 0x3600, Vec3{});
+    hand_checks::Store(&pawn, 0x3630, Vec3{});
     g_offsets.entityInstanceToIdentity = 0x10;
     g_offsets.sceneNode = 0x330;
     g_offsets.sceneAbsOrigin = 0xC8;
-    g_offsets.pawnEyeAngles = 0x3600;
+    g_offsets.pawnEyeAngles = 0x3630;
     g_clientModule = GetModuleHandleW(nullptr);
     g_getEntityAbsOrigin = prop_origin_checks::EngineGetAbsOrigin;
     g_knownClientSchemaFallbackAllowed.store(true);
@@ -105,7 +105,7 @@ inline bool Run() {
             const float duck = (step % 5) * 0.25f;
             hand_checks::Store(scene, 0xC8, root);
             hand_checks::Store(movement, 0x40C, duck);
-            hand_checks::Store(&pawn, 0x3600, Vec3{80, step * 90.0f, 0});
+            hand_checks::Store(&pawn, 0x3630, Vec3{80, step * 90.0f, 0});
             WeaponFrameBasis moving{};
             if (!TryBuildWeaponFrameBasis(&pawn, nullptr, nullptr, moving, failure)
                 || Length(Subtract(moving.bodyOrigin, root)) > 0.001f
@@ -113,7 +113,7 @@ inline bool Run() {
         }
         hand_checks::Store(scene, 0xC8, Vec3{100, 200, 0});
         hand_checks::Store(movement, 0x40C, 0.0f);
-        hand_checks::Store(&pawn, 0x3600, Vec3{});
+        hand_checks::Store(&pawn, 0x3630, Vec3{});
         stage = 2;
         for (const auto getter : {GetAttachmentFn{UnwrittenAttachment}, GetAttachmentFn{PartialAttachment}}) {
             g_getAttachment = getter;
@@ -182,7 +182,7 @@ inline bool Run() {
             const bool noMetadata = sample % 5 == 1;
             hand_checks::Store(&pawn, 0x330, noScene ? nullptr : static_cast<void*>(scene));
             hand_checks::Store(weaponServices, 0x60, noMetadata ? EntityHandle{} : weapon.handle);
-            hand_checks::Store(&pawn, 0x3600, sample % 7 ? Vec3{} : Vec3{NAN, 0, 0});
+            hand_checks::Store(&pawn, 0x3630, sample % 7 ? Vec3{} : Vec3{NAN, 0, 0});
             hand_checks::eyeMode = sample % 2 ? hand_checks::EyeMode::NoWrite : hand_checks::EyeMode::Crouched;
             hand_checks::attachmentLive = sample % 11 != 0;
             const double begin = HighResolutionSeconds();
@@ -205,7 +205,7 @@ inline bool Run() {
         player_tail_checks::Harness engineHarness;
         if (!engineHarness.ready) return false;
         hand_checks::Store(&pawn, 0x330, static_cast<void*>(scene));
-        hand_checks::Store(&pawn, 0x3600, Vec3{});
+        hand_checks::Store(&pawn, 0x3630, Vec3{});
         hand_checks::Store(weaponServices, 0x60, weapon.handle);
         g_state.setUpViewHooked = true;
         g_playerTailHookInstalled.store(false);
@@ -254,7 +254,7 @@ inline bool Run() {
             const double wall = step / 144.0;
             const int ticks = static_cast<int>(std::floor(wall * 0.1 * 64));
             player_turn_checks::clock = {2000 + wall, 1000 + ticks, false};
-            hand_checks::Store(&pawn, 0x3600, Vec3{30, ticks + (step % 2 ? 0.2f : -0.2f), 0});
+            hand_checks::Store(&pawn, 0x3630, Vec3{30, ticks + (step % 2 ? 0.2f : -0.2f), 0});
             hand_checks::Store(weaponServices, 0x60, step % 2 ? weapon.handle : knife.handle);
             if (!engineHarness.Run(view, step % 2 ? 110.0f : 55.0f)) return false;
             TryReadViewSetupOrigin(view, position);
@@ -277,7 +277,7 @@ inline bool Run() {
         g_playerFrame.turn = {};
         // Extreme trims must not place a fixed camera inside the body.
         hand_checks::Store(&pawn, 0x330, static_cast<void*>(scene));
-        hand_checks::Store(&pawn, 0x3600, Vec3{});
+        hand_checks::Store(&pawn, 0x3630, Vec3{});
         g_state.lookMode = LookMode::Forward; g_state.offset = {-17, -18, 0}; frame();
         if (std::hypot(position.x - 100, position.y - 200) < 23.999f) return false;
         g_state.lookMode = LookMode::SelfieRight; g_state.offset = {-15, 100, 0}; frame();
@@ -288,7 +288,7 @@ inline bool Run() {
 
         stage = 3;
         hand_checks::Store(&pawn, 0x330, static_cast<void*>(scene));
-        hand_checks::Store(&pawn, 0x3600, Vec3{});
+        hand_checks::Store(&pawn, 0x3630, Vec3{});
         hand_checks::Store(weaponServices, 0x60, knife.handle); frame();
         std::uint8_t flag{}; TryReadOffsetValue(&weapon.object, 0x56A, flag);
         if (flag != 1 || g_viewModelSuppression.weaponHandle.raw != knife.handle.raw) return false;

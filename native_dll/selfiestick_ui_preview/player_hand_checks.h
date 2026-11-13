@@ -59,7 +59,7 @@ inline bool Run() {
     g_offsets.entityInstanceToIdentity = 0x10;
     g_offsets.sceneNode = 0x330;
     g_offsets.sceneAbsOrigin = 0xC8;
-    g_offsets.pawnEyeAngles = 0x3600;
+    g_offsets.pawnEyeAngles = 0x3630;
     g_offsets.pawnWeaponServices = 0x12F0;
     g_offsets.activeWeapon = 0x60;
     g_offsets.renderWithViewModels = 0x56A;
@@ -70,7 +70,7 @@ inline bool Run() {
     const EntityHandle stale{(5u << 15u) | 42u};
     Store(identity, 0x10, exact.raw);
     Store(scene, 0xC8, Vec3{100, 200, 0});
-    Store(&pawn, 0x3600, Vec3{0, 0, 0});
+    Store(&pawn, 0x3630, Vec3{0, 0, 0});
     Store(services, 0x60, EntityHandle{});
     int stage = 1;
     const bool passed = [&]() {
@@ -107,7 +107,7 @@ inline bool Run() {
             || Length(Subtract(noHand.anchorOrigin, Add(live.anchorOrigin, Vec3{100, 0, 0}))) > 0.01f) return false;
 
         stage = 5;
-        Store(&pawn, 0x3600, Vec3{89.99f, 180, 0});
+        Store(&pawn, 0x3630, Vec3{89.99f, 180, 0});
         if (!TryBuildWeaponFrameBasis(&pawn, nullptr, nullptr, turned, failure)
             || turned.up.z != 1.0f || turned.forward.x > -0.99f) return false;
         Vec3 expected = ComposeBasisPoint({200, 200, 64}, turned.right, turned.forward, turned.up, 10, 12, -18);

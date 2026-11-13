@@ -1,6 +1,6 @@
 // Exact installed build: after native OverrideView, FOV/aspect work and cleanup,
 // immediately before final origin/angle history copies and the epilogue.
-constexpr std::uint32_t kPlayerTailPatchRva = 0x00B9EA60u;
+constexpr std::uint32_t kPlayerTailPatchRva = 0x00B925E0u;
 constexpr std::array<std::uint8_t, hook::kPlayerTailPatchSize> kPlayerTailReplay{
     0xF2,0x0F,0x10,0x06, 0x4C,0x8D,0x9C,0x24,0xC8,0,0,0,
     0x8B,0x46,0x08, 0x41,0x0F,0x28,0x73,0xE8};
