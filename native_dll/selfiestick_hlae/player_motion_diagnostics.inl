@@ -7,15 +7,24 @@ struct PlayerMotionSample {
     float fov{};
     int result{}, look{};
     bool recovering{}, suppressed{};
-    double yawInput{}, yawOutput{}, demoRate{1.0};
-    int demoTick{-1};
+    double yawInput{}, yawOutput{}, demoRate{};
+    int demoTick{};
     bool paused{}, turnFiltered{};
     float sourceFov{};
     DWORD threadId{};
     int callbackStage{};
+    double renderDemoSeconds{};
+    int renderFrame{};
+    bool renderTimeValid{};
+    float renderInterpolation{};
+    Vec3 nativeOrigin{}, nativeAngles{};
+    float duckAmount{}, bodyHeight{};
 };
+thread_local Vec3 g_playerNativeViewOrigin{}, g_playerNativeViewAngles{};
 std::mutex g_playerMotionMutex;
-std::array<PlayerMotionSample, 1024> g_playerMotionSamples{};
+// At 1200 FPS, 8192 early/final records cover about 3.4 seconds. Camera
+// callbacks still perform bounded memory writes only; export alone writes disk.
+std::array<PlayerMotionSample, 8192> g_playerMotionSamples{};
 std::size_t g_playerMotionHead{}, g_playerMotionCount{};
 std::uint64_t g_playerMotionSequence{};
 std::atomic<bool> g_playerMotionExportBusy{false};
@@ -30,12 +39,35 @@ std::wstring PlayerMotionExportMessage() {
 void RecordPlayerMotionFrame(void* viewSetup, const OverrideConfig& config, EntityHandle target,
     const WeaponFrameBasis* basis, int result, bool recovering) {
     PlayerMotionSample sample{};
+    // Keep the large backing array zero-initialized (.bss), while individual
+    // records retain the explicit unavailable-clock sentinels in the CSV.
+    sample.demoRate = 1.0; sample.demoTick = sample.renderFrame = -1;
+    {
+        std::unique_lock suppressionLock(g_viewModelSuppressionMutex, std::try_to_lock);
+        if (!suppressionLock.owns_lock()) return;
+        sample.suppressed = g_viewModelSuppression.active;
+    }
     sample.time = HighResolutionSeconds();
     sample.expected = (config.targetMode == TargetMode::Locked ? config.lockedHandle : config.followHandle).raw;
     sample.target = target.raw; sample.result = result; sample.recovering = recovering;
     sample.look = static_cast<int>(config.lookMode);
     sample.threadId = GetCurrentThreadId();
     sample.callbackStage = g_playerCallbackStage;
+    if (result == 2) {
+        sample.renderDemoSeconds = g_lastPlayerMotionClock.renderDemoSeconds;
+        sample.renderFrame = g_lastPlayerMotionClock.renderFrame;
+        sample.renderTimeValid = g_lastPlayerMotionClock.renderTimeValid;
+        sample.renderInterpolation = g_lastPlayerMotionClock.interpolation;
+        sample.nativeOrigin = g_playerNativeViewOrigin; sample.nativeAngles = g_playerNativeViewAngles;
+        sample.bodyHeight = g_playerFrame.bodyHeight;
+        sample.duckAmount = std::numeric_limits<float>::quiet_NaN();
+        std::ptrdiff_t movementOffset{}, duckOffset{}; void* movement = nullptr;
+        if (g_knownClientSchemaFallbackAllowed.load(std::memory_order_acquire)
+            && schema::TryGetKnownClientSchemaFieldOffsetFallback("C_BasePlayerPawn", "m_pMovementServices", movementOffset)
+            && schema::TryGetKnownClientSchemaFieldOffsetFallback("CCSPlayer_MovementServices", "m_flDuckAmount", duckOffset)
+            && TryReadOffsetPointer(g_playerView.entity, movementOffset, movement))
+            TryReadOffsetValue(movement, duckOffset, sample.duckAmount);
+    }
     sample.yawInput = g_playerFrame.angles.y;
     sample.yawOutput = g_playerFrame.turn.valid ? g_playerFrame.turn.yaw : g_playerFrame.angles.y;
     sample.turnFiltered = g_playerFrame.turn.valid;
@@ -52,7 +84,6 @@ void RecordPlayerMotionFrame(void* viewSetup, const OverrideConfig& config, Enti
     TryReadViewSetupAngles(viewSetup, sample.angles);
     TryReadOffsetValue(viewSetup, kViewSetupFovOffset, sample.fov);
     sample.sourceFov = result == 2 ? g_playerView.sourceFov : sample.fov;
-    { std::lock_guard lock(g_viewModelSuppressionMutex); sample.suppressed = g_viewModelSuppression.active; }
     std::unique_lock lock(g_playerMotionMutex, std::try_to_lock);
     if (!lock.owns_lock()) return;
     sample.sequence = ++g_playerMotionSequence;
@@ -75,10 +106,11 @@ DWORD WINAPI ExportPlayerMotionWorker(LPVOID) {
             samples.push_back(g_playerMotionSamples[(start + i) % g_playerMotionSamples.size()]);
     }
     std::ostringstream csv;
-    csv.imbue(std::locale::classic()); csv.precision(9);
+    csv.imbue(std::locale::classic()); csv.precision(17);
     csv << "# build=" << kBuildTag << "\n# result:0=no_target,1=no_pose,2=overridden,3=pre_native; stage:0=direct_test,1=early,2=final\n"
         << "sequence,time,expected,target,weapon,result,look,recovering,suppressed,body_x,body_y,body_z,anchor_x,anchor_y,anchor_z,"
-        << "aim_x,aim_y,aim_z,camera_x,camera_y,camera_z,pitch,yaw,roll,fov,yaw_input,yaw_output,estimated_demo_rate,demo_tick,demo_paused,turn_filtered,source_fov,thread_id,callback_stage\n";
+        << "aim_x,aim_y,aim_z,camera_x,camera_y,camera_z,pitch,yaw,roll,fov,yaw_input,yaw_output,estimated_demo_rate,demo_tick,demo_paused,turn_filtered,source_fov,thread_id,callback_stage,"
+        << "render_demo_seconds,render_frame,render_time_valid,render_interpolation,native_camera_x,native_camera_y,native_camera_z,native_pitch,native_yaw,native_roll,duck_amount,body_height\n";
     for (const auto& s : samples) {
         csv << s.sequence << ',' << s.time << ',' << s.expected << ',' << s.target << ',' << s.weapon << ','
             << s.result << ',' << s.look << ',' << s.recovering << ',' << s.suppressed << ','
@@ -86,7 +118,10 @@ DWORD WINAPI ExportPlayerMotionWorker(LPVOID) {
             << s.aim.x << ',' << s.aim.y << ',' << s.aim.z << ',' << s.camera.x << ',' << s.camera.y << ',' << s.camera.z << ','
             << s.angles.x << ',' << s.angles.y << ',' << s.angles.z << ',' << s.fov << ','
             << s.yawInput << ',' << s.yawOutput << ',' << s.demoRate << ',' << s.demoTick << ',' << s.paused << ',' << s.turnFiltered << ','
-            << s.sourceFov << ',' << s.threadId << ',' << s.callbackStage << '\n';
+            << s.sourceFov << ',' << s.threadId << ',' << s.callbackStage << ','
+            << s.renderDemoSeconds << ',' << s.renderFrame << ',' << s.renderTimeValid << ',' << s.renderInterpolation << ','
+            << s.nativeOrigin.x << ',' << s.nativeOrigin.y << ',' << s.nativeOrigin.z << ','
+            << s.nativeAngles.x << ',' << s.nativeAngles.y << ',' << s.nativeAngles.z << ',' << s.duckAmount << ',' << s.bodyHeight << '\n';
     }
     const auto bytes = csv.str(); const auto path = PlayerMotionCsvPath();
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);

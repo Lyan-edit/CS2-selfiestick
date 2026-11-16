@@ -26,14 +26,31 @@ inline bool Run() {
     g_playerMotionClockReader = ReadClock;
     std::string failure;
     const bool passed = [&]() {
+        // The recorded demo sequence must be independent of encoder stalls.
+        // Exercise the real filter, with identical 1200 FPS/0.1x inputs and
+        // render time but very different wall-clock delivery schedules.
+        PlayerTurnFilter captureA{}, captureB{};
+        double wallA{}, wallB{}, maximumCaptureError{};
+        for (int frame = 0; frame < 3600; ++frame) {
+            const double demo = frame * 0.1 / 1200;
+            wallA += 1.0 / 1200;
+            wallB += frame % 97 == 0 ? 0.35 : (frame % 2 ? 0.003 : 0.017);
+            const int tick = static_cast<int>(std::floor(demo * 64));
+            const float raw = static_cast<float>(tick * 3);
+            const float a = FilterPlayerTurn(captureA, raw, {wallA, tick, false, demo, frame, true});
+            const float b = FilterPlayerTurn(captureB, raw, {wallB, tick, false, demo, frame, true});
+            maximumCaptureError = std::max(maximumCaptureError, std::fabs(static_cast<double>(a - b)));
+        }
+        std::printf("1200 FPS capture clock: identical recorded frames, different encoder wall times -> maximum yaw difference %.6f deg\n", maximumCaptureError);
+        if (maximumCaptureError > 0.0001) return false;
         for (const double rate : {0.01, 0.1, 1.0, 8.0}) {
-            for (const double fps : {30.0, 60.0, 144.0, 500.0}) {
+            for (const double fps : {30.0, 60.0, 144.0, 500.0, 1200.0}) {
                 g_playerFrame = {};
                 double previousYaw{}, maxStep{}, maxLag{};
                 const int frames = static_cast<int>(std::ceil(0.75 / rate * fps));
                 for (int frame = 0; frame <= frames; ++frame) {
                     const double wall = frame / fps, demo = wall * rate;
-                    clock = {1000 + wall, static_cast<int>(std::floor(demo * 64)), false};
+                    clock = {1000 + wall, static_cast<int>(std::floor(demo * 64)), false, demo, frame, true};
                     const float rawYaw = static_cast<float>(clock.tick);
                     const Vec3 origin{100 + static_cast<float>(demo) * 10, 200, 0};
                     hand_checks::Store(scene, 0xC8, origin);
@@ -72,9 +89,9 @@ inline bool Run() {
             || changed.forward.y > -0.9999f) return false;
         // Shortest-path wrap, pause/no drift, resume, duplicate callbacks and seeks.
         PlayerTurnFilter state{};
-        PlayerMotionClock sample{0, 100, false};
+        PlayerMotionClock sample{0, 100, false, 100.0 / 64, 0, true};
         FilterPlayerTurn(state, 179, sample);
-        sample = {0.016, 101, false};
+        sample = {0.016, 101, false, 101.0 / 64, 1, true};
         const float wrapped = FilterPlayerTurn(state, -179, sample);
         if (std::fabs(std::remainder(wrapped - 179.0f, 360.0f)) > 2.01f) return false;
         sample.paused = true;
@@ -86,24 +103,33 @@ inline bool Run() {
         sample.paused = false; sample.wall += 0.016;
         if (FilterPlayerTurn(state, -179, sample) != held) return false;
         sample.wall += 0.016; ++sample.tick;
+        sample.renderDemoSeconds = sample.tick / 64.0; ++sample.renderFrame;
         const float resumed = FilterPlayerTurn(state, -179, sample);
         if (FilterPlayerTurn(state, 90, sample) != resumed) return false;
         sample.paused = true;
         FilterPlayerTurn(state, -179, sample);
         sample.wall += 0.1; sample.tick += 1000;
+        sample.renderDemoSeconds = sample.tick / 64.0; ++sample.renderFrame;
         if (FilterPlayerTurn(state, 90, sample) != 90) return false;
         sample.paused = false; sample.wall += 0.1; sample.tick = 5;
+        sample.renderDemoSeconds = sample.tick / 64.0; ++sample.renderFrame;
         if (FilterPlayerTurn(state, 25, sample) != 25) return false;
         // Fast alternating sub-degree yaw noise after the rate estimator warms.
         state = {};
         double maxNoise{};
         for (int i = 0; i < 1000; ++i) {
             const double wall = i / 144.0;
-            sample = {wall, static_cast<int>(std::floor(wall * 0.1 * 64)), false};
+            sample = {wall, static_cast<int>(std::floor(wall * 0.1 * 64)), false, wall * 0.1, i, true};
             const float yaw = FilterPlayerTurn(state, i % 2 ? 0.2f : -0.2f, sample);
             if (wall > 2.0) maxNoise = std::max(maxNoise, std::fabs(static_cast<double>(yaw)));
         }
         if (maxNoise > 0.025) return false;
+        PlayerMotionClock decoded{};
+        if (!DecodePlayerRenderTime(640, 42, 42, 0.5f, decoded)
+            || decoded.renderDemoSeconds != 10.0078125 || !decoded.renderTimeValid
+            || DecodePlayerRenderTime(640, 42, 43, 0.5f, decoded)
+            || DecodePlayerRenderTime(640, 42, 42, NAN, decoded)
+            || DecodePlayerRenderTime(640, 42, 42, 2.0f, decoded)) return false;
         std::printf("player 0.1x alternating yaw noise: +/-0.2 deg input -> %.4f deg max residual\n", maxNoise);
         g_playerMotionClockReader = nullptr;
         if (SampleStablePlayerYaw(state, 45) != 45 || state.valid) return false;
@@ -113,7 +139,7 @@ inline bool Run() {
     g_playerMotionClockReader = oldReader; g_playerFrame = oldFrame;
     g_knownClientSchemaFallbackAllowed.store(oldKnown);
     g_playerCameraGeneration.store(oldGeneration);
-    if (passed) puts("player turn regression passed: 0.01/0.1/1/8x at 30/60/144/500 FPS, unchanged body position/radius, angle wrap, pause, resume, repeat callbacks and seek reset");
+    if (passed) puts("player turn regression passed: render Demo time at 0.01/0.1/1/8x and 30/60/144/500/1200 FPS; body position/radius, wrap, pause, resume, duplicate callbacks, seek and invalid-clock guards");
     return passed;
 }
 }

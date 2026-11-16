@@ -46,7 +46,7 @@ constexpr wchar_t kTier0ModuleName[] = L"tier0.dll";
 constexpr char kClientSchemaScopeName[] = "client.dll";
 constexpr wchar_t kOverlayControllerClassName[] = L"SelfiestickControllerWindow";
 constexpr wchar_t kOverlayWindowClassName[] = L"SelfiestickOverlayWindow";
-constexpr char kBuildTag[] = "v0.4.8 " __DATE__ " " __TIME__;
+constexpr char kBuildTag[] = "v0.4.9 " __DATE__ " " __TIME__;
 constexpr char kSchemaProbeTraceVersion[] = "schema-probe-v43-prop-origin-cs2-26598758";
 constexpr std::uint32_t kEntityAbsOriginRva = 0x002199A0u;
 constexpr std::uint32_t kSceneTransformResolveRva = 0x009CB410u;
@@ -2404,38 +2404,54 @@ struct SuspendedThread {
     bool suspended{};
 };
 
-void ClosePatchThreadHandles(std::vector<SuspendedThread>& threads) {
+// All calls use the real Win32 API in production. Passing a table lets the
+// hidden regression executable exercise failure paths without suspending CS2.
+struct PatchThreadApi {
+    decltype(&CreateToolhelp32Snapshot) snapshot = CreateToolhelp32Snapshot;
+    decltype(&Thread32First) first = Thread32First;
+    decltype(&Thread32Next) next = Thread32Next;
+    decltype(&OpenThread) open = OpenThread;
+    decltype(&SuspendThread) suspend = SuspendThread;
+    decltype(&ResumeThread) resume = ResumeThread;
+    decltype(&GetThreadContext) context = GetThreadContext;
+    decltype(&CloseHandle) close = CloseHandle;
+    decltype(&GetLastError) error = GetLastError;
+    decltype(&Sleep) sleep = Sleep;
+    decltype(&WriteProcessMemoryProtected) write = WriteProcessMemoryProtected;
+};
+
+void ClosePatchThreadHandles(std::vector<SuspendedThread>& threads, const PatchThreadApi& api = {}) {
     for (SuspendedThread& thread : threads) {
         if (thread.handle != nullptr) {
-            CloseHandle(thread.handle);
+            api.close(thread.handle);
             thread.handle = nullptr;
         }
     }
     threads.clear();
 }
 
-void ResumeSuspendedThreads(std::vector<SuspendedThread>& threads) {
+void ResumeSuspendedThreads(std::vector<SuspendedThread>& threads, const PatchThreadApi& api = {}) {
     for (auto it = threads.rbegin(); it != threads.rend(); ++it) {
         if (it->handle != nullptr && it->suspended) {
-            ResumeThread(it->handle);
+            api.resume(it->handle);
             it->suspended = false;
         }
     }
 }
 
-bool CollectOtherProcessThreads(std::vector<SuspendedThread>& threads) {
+bool CollectOtherProcessThreads(std::vector<SuspendedThread>& threads, const PatchThreadApi& api = {}) {
     threads.clear();
     const DWORD currentProcessId = GetCurrentProcessId();
     const DWORD currentThreadId = GetCurrentThreadId();
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    HANDLE snapshot = api.snapshot(TH32CS_SNAPTHREAD, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
         return false;
     }
 
     THREADENTRY32 entry{};
     entry.dwSize = sizeof(entry);
-    if (!Thread32First(snapshot, &entry)) {
-        CloseHandle(snapshot);
+    if (!api.first(snapshot, &entry)) {
+        api.close(snapshot);
         return false;
     }
 
@@ -2444,27 +2460,39 @@ bool CollectOtherProcessThreads(std::vector<SuspendedThread>& threads) {
             continue;
         }
 
-        HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID);
+        HANDLE thread = api.open(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID);
         if (thread == nullptr) {
-            continue;
+            // An uninspected thread can still be executing the patch site.
+            ClosePatchThreadHandles(threads, api);
+            api.close(snapshot);
+            return false;
         }
 
-        threads.push_back(SuspendedThread{ thread, entry.th32ThreadID, false });
-    } while (Thread32Next(snapshot, &entry));
+        try {
+            threads.push_back(SuspendedThread{ thread, entry.th32ThreadID, false });
+        } catch (...) {
+            api.close(thread);
+            ClosePatchThreadHandles(threads, api);
+            api.close(snapshot);
+            return false;
+        }
+    } while (api.next(snapshot, &entry));
 
-    CloseHandle(snapshot);
-    return true;
+    const bool complete = api.error() == ERROR_NO_MORE_FILES;
+    api.close(snapshot);
+    if (!complete) ClosePatchThreadHandles(threads, api);
+    return complete;
 }
 
-bool SuspendCollectedThreads(std::vector<SuspendedThread>& threads, std::size_t& suspendedCount) {
+bool SuspendCollectedThreads(std::vector<SuspendedThread>& threads, std::size_t& suspendedCount, const PatchThreadApi& api = {}) {
     suspendedCount = 0u;
     for (SuspendedThread& thread : threads) {
         if (thread.handle == nullptr) {
             continue;
         }
 
-        if (SuspendThread(thread.handle) == static_cast<DWORD>(-1)) {
-            ResumeSuspendedThreads(threads);
+        if (api.suspend(thread.handle) == static_cast<DWORD>(-1)) {
+            ResumeSuspendedThreads(threads, api);
             return false;
         }
 
@@ -2479,7 +2507,8 @@ bool AnySuspendedThreadInsidePatchRange(
     std::uintptr_t patchAddress,
     std::size_t patchSize,
     DWORD& threadId,
-    std::uintptr_t& instructionPointer
+    std::uintptr_t& instructionPointer,
+    const PatchThreadApi& api = {}
 ) {
     threadId = 0;
     instructionPointer = 0u;
@@ -2487,8 +2516,9 @@ bool AnySuspendedThreadInsidePatchRange(
     for (const SuspendedThread& thread : suspendedThreads) {
         CONTEXT context{};
         context.ContextFlags = CONTEXT_CONTROL;
-        if (!GetThreadContext(thread.handle, &context)) {
-            continue;
+        if (!api.context(thread.handle, &context)) {
+            threadId = thread.threadId;
+            return true; // Unknown RIP is unsafe too; resume and retry.
         }
 
 #if defined(_M_X64)
@@ -2506,7 +2536,7 @@ bool AnySuspendedThreadInsidePatchRange(
     return false;
 }
 
-bool WriteHotCodePatchSafely(void* address, const void* bytes, std::size_t size) {
+bool WriteHotCodePatchSafely(void* address, const void* bytes, std::size_t size, const PatchThreadApi& api = {}) {
     constexpr unsigned int kMaxPatchAttempts = 20u;
     constexpr DWORD kPatchRetrySleepMs = 2u;
     if (address == nullptr || bytes == nullptr || size == 0u) {
@@ -2516,24 +2546,24 @@ bool WriteHotCodePatchSafely(void* address, const void* bytes, std::size_t size)
     const std::uintptr_t patchAddress = reinterpret_cast<std::uintptr_t>(address);
     for (unsigned int attempt = 1u; attempt <= kMaxPatchAttempts; ++attempt) {
         std::vector<SuspendedThread> suspendedThreads;
-        if (!CollectOtherProcessThreads(suspendedThreads)) {
+        if (!CollectOtherProcessThreads(suspendedThreads, api)) {
             TracePrintf("hotpatch-fail reason=collect-threads attempt=%u gle=%lu", attempt, GetLastError());
             return false;
         }
 
         std::size_t suspendedCount = 0u;
-        if (!SuspendCollectedThreads(suspendedThreads, suspendedCount)) {
-            ClosePatchThreadHandles(suspendedThreads);
+        if (!SuspendCollectedThreads(suspendedThreads, suspendedCount, api)) {
+            ClosePatchThreadHandles(suspendedThreads, api);
             TracePrintf("hotpatch-retry reason=suspend-failed attempt=%u gle=%lu", attempt, GetLastError());
-            Sleep(kPatchRetrySleepMs);
+            api.sleep(kPatchRetrySleepMs);
             continue;
         }
 
         DWORD activeThreadId = 0;
         std::uintptr_t activeRip = 0u;
-        if (AnySuspendedThreadInsidePatchRange(suspendedThreads, patchAddress, size, activeThreadId, activeRip)) {
-            ResumeSuspendedThreads(suspendedThreads);
-            ClosePatchThreadHandles(suspendedThreads);
+        if (AnySuspendedThreadInsidePatchRange(suspendedThreads, patchAddress, size, activeThreadId, activeRip, api)) {
+            ResumeSuspendedThreads(suspendedThreads, api);
+            ClosePatchThreadHandles(suspendedThreads, api);
             TracePrintf(
                 "hotpatch-retry reason=thread-in-range attempt=%u thread=%lu rip=%p patch=%p size=%llu",
                 attempt,
@@ -2542,13 +2572,13 @@ bool WriteHotCodePatchSafely(void* address, const void* bytes, std::size_t size)
                 address,
                 static_cast<unsigned long long>(size)
             );
-            Sleep(kPatchRetrySleepMs);
+            api.sleep(kPatchRetrySleepMs);
             continue;
         }
 
-        const bool written = WriteProcessMemoryProtected(address, bytes, size);
-        ResumeSuspendedThreads(suspendedThreads);
-        ClosePatchThreadHandles(suspendedThreads);
+        const bool written = api.write(address, bytes, size);
+        ResumeSuspendedThreads(suspendedThreads, api);
+        ClosePatchThreadHandles(suspendedThreads, api);
         return written;
     }
 
@@ -2607,98 +2637,7 @@ void* AllocateExecutableMemoryNearAddress(const void* address, std::size_t size)
     return nullptr;
 }
 
-std::vector<int> ParsePattern(const char* pattern) {
-    std::vector<int> bytes;
-    const char* cursor = pattern;
-
-    while (*cursor != '\0') {
-        if (*cursor == ' ') {
-            ++cursor;
-            continue;
-        }
-
-        if (*cursor == '?') {
-            ++cursor;
-            if (*cursor == '?') {
-                ++cursor;
-            }
-            bytes.push_back(-1);
-            continue;
-        }
-
-        char token[3]{ cursor[0], cursor[1], '\0' };
-        bytes.push_back(std::strtoul(token, nullptr, 16));
-        cursor += 2;
-    }
-
-    return bytes;
-}
-
-std::uintptr_t FindPattern(HMODULE module, const char* pattern) {
-    if (module == nullptr) {
-        return 0;
-    }
-
-    auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(module);
-    auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<std::uint8_t*>(module) + dosHeader->e_lfanew);
-    const std::size_t imageSize = ntHeaders->OptionalHeader.SizeOfImage;
-    const auto signature = ParsePattern(pattern);
-    if (signature.empty() || imageSize < signature.size()) {
-        return 0;
-    }
-
-    auto* imageBytes = reinterpret_cast<std::uint8_t*>(module);
-    for (std::size_t offset = 0; offset <= imageSize - signature.size(); ++offset) {
-        bool matches = true;
-        for (std::size_t i = 0; i < signature.size(); ++i) {
-            if (signature[i] != -1 && imageBytes[offset + i] != static_cast<std::uint8_t>(signature[i])) {
-                matches = false;
-                break;
-            }
-        }
-
-        if (matches) {
-            return reinterpret_cast<std::uintptr_t>(imageBytes + offset);
-        }
-    }
-
-    return 0;
-}
-
-std::vector<std::uintptr_t> FindPatterns(HMODULE module, const char* pattern, std::size_t maxMatches = 8) {
-    std::vector<std::uintptr_t> matches;
-    if (module == nullptr) {
-        return matches;
-    }
-
-    auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(module);
-    auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<std::uint8_t*>(module) + dosHeader->e_lfanew);
-    const std::size_t imageSize = ntHeaders->OptionalHeader.SizeOfImage;
-    const auto signature = ParsePattern(pattern);
-    if (signature.empty() || imageSize < signature.size()) {
-        return matches;
-    }
-
-    auto* imageBytes = reinterpret_cast<std::uint8_t*>(module);
-    for (std::size_t offset = 0; offset <= imageSize - signature.size(); ++offset) {
-        bool matchesPattern = true;
-        for (std::size_t i = 0; i < signature.size(); ++i) {
-            if (signature[i] != -1 && imageBytes[offset + i] != static_cast<std::uint8_t>(signature[i])) {
-                matchesPattern = false;
-                break;
-            }
-        }
-
-        if (matchesPattern) {
-            matches.push_back(reinterpret_cast<std::uintptr_t>(imageBytes + offset));
-            if (matches.size() >= maxMatches) {
-                break;
-            }
-        }
-    }
-
-    return matches;
-}
+#include "pattern_scan.inl"
 
 HMODULE WaitForModule(const wchar_t* moduleName, int timeoutMilliseconds) {
     const int sleepStep = 100;
@@ -6283,6 +6222,7 @@ bool TryGetAttachmentOrigin(void* entity, const char* attachmentName, Vec3& orig
 Vec3 AnglesToForward(const Vec3& angles);
 
 #include "player_frame.inl"
+#include "player_yaw_history.inl"
 
 bool TryBuildHumanFrameBasis(
     void* targetPawn,
@@ -6318,7 +6258,7 @@ bool TryBuildHumanFrameBasis(
 
     // Build a yaw-only frame. Even a vertical look or 180-degree turn preserves
     // world-up; no previous-world-right sign correction is applied.
-    facing.y = SampleStablePlayerYaw(cache.turn, facing.y);
+    facing.y = SampleSharedPlayerYaw(cache, facing.y);
     const float yaw = facing.y * 3.14159265358979323846f / 180.0f;
     const Vec3 forward{std::cos(yaw), std::sin(yaw), 0.0f};
     const Vec3 right{forward.y, -forward.x, 0.0f};
@@ -7352,6 +7292,11 @@ void __fastcall SelfieStickSetUpView(void* viewSetup) {
         g_playerView = {};
         RestoreSuppressedRenderWithViewModels();
         return;
+    }
+
+    if (config.cameraMode == CameraMode::PlayerSelfie) {
+        TryReadViewSetupOrigin(viewSetup, g_playerNativeViewOrigin);
+        TryReadViewSetupAngles(viewSetup, g_playerNativeViewAngles);
     }
 
     const unsigned long long frameIndex = g_traceFrameCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
@@ -11674,6 +11619,11 @@ LRESULT CALLBACK OverlayWindowProc(HWND window, UINT message, WPARAM wParam, LPA
 }
 
 DWORD InitializeSelfieStickImpl() {
+    // The supported camera/UI workflow is process-lifetime. Establish this
+    // before publishing UI callbacks, workers or player code hooks too.
+    HMODULE pinned{};
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCWSTR>(&InitializeSelfieStickImpl), &pinned)) return 0;
     {
         std::lock_guard lock(g_stateMutex);
         RefreshStatusTextLocked();
@@ -11782,7 +11732,11 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     case DLL_PROCESS_ATTACH:
         selfiestick::g_module = module;
         DisableThreadLibraryCalls(module);
-        CreateThread(nullptr, 0, &selfiestick::InitializeSelfieStick, nullptr, 0, nullptr);
+        {
+            const HANDLE initializer = CreateThread(nullptr, 0, &selfiestick::InitializeSelfieStick, nullptr, 0, nullptr);
+            if (initializer == nullptr) return FALSE;
+            CloseHandle(initializer);
+        }
         break;
     case DLL_PROCESS_DETACH:
     default:

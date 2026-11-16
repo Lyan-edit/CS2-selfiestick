@@ -1,3 +1,4 @@
+#include "player_render_clock.inl"
 // Same exact-build demo interface as HLAE, plus its read-only pause query.
 constexpr std::uint32_t kPlayerDemoPauseRva = 0x00035930u;
 bool TryReadPlayerMotionClock(PlayerMotionClock& clock) {
@@ -34,7 +35,7 @@ bool TryReadPlayerMotionClock(PlayerMotionClock& clock) {
         using IsPaused = bool (__fastcall*)(void*);
         clock.tick = reinterpret_cast<GetTick>(vtable[3])(demo);
         clock.paused = reinterpret_cast<IsPaused>(vtable[12])(demo);
-        return clock.tick >= 0 && clock.tick <= 640000000;
+        return clock.tick >= 0 && clock.tick <= 640000000 && TryReadPlayerRenderTime(clock);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { cachedEngine = nullptr; return false; }
 }

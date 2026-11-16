@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = 'v0.4.8',
+    [string]$Version = 'v0.4.9',
     [string]$Cs2Build = '26598758',
     [string]$HlaeVersion = '2.193.0'
 )

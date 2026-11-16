@@ -12,6 +12,7 @@
 #include "player_turn_checks.h"
 #include "player_tail_checks.h"
 #include "player_view_checks.h"
+#include "stability_checks.h"
 
 namespace {
 LRESULT CALLBACK PreviewProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -68,9 +69,12 @@ bool SaveFrame(HWND window, const wchar_t* path) {
 }
 }
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     using namespace selfiestick;
+    if (argc == 4 && std::wcscmp(argv[1], L"--scan-images") == 0)
+        return stability_checks::InstalledImagePatterns(argv[2], argv[3]) ? 0 : 29;
+    if (!stability_checks::Run()) return 28;
     if (!hand_checks::Run()) return 20;
     if (!prop_origin_checks::Run()) return 24;
     if (!player_view_checks::Run()) return 26;

@@ -76,14 +76,14 @@ CS2 自拍杆把 HLAE Demo 播放变成一套轻量的电影镜头系统：既�
 ## 📦 下载
 
 > [!IMPORTANT]
-> 当前正式版为 **[v0.4.8](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.8)**，对应 **CS2 build `26598758`** 与 **HLAE `2.193.0` / AfxHookSource2 `0.42.0`**。
+> 当前正式版为 **[v0.4.9](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.9)**，对应 **CS2 build `26598758`** 与 **HLAE `2.193.0` / AfxHookSource2 `0.42.0`**。
 
 推荐从 **[GitHub Releases](https://github.com/Lyan-edit/CS2-selfiestick/releases/latest)** 下载双语 Windows 完整包，其中包含中英文 DLL、操作手册、默认配置和热键参考。
 
 | 附件 | 用途 |
 | :-- | :-- |
-| `Lyan_selfiestick-v0.4.8-zh-CN.dll` | 中文界面 |
-| `Lyan_selfiestick-v0.4.8-EN.dll` | English interface |
+| `Lyan_selfiestick-v0.4.9-zh-CN.dll` | 中文界面 |
+| `Lyan_selfiestick-v0.4.9-EN.dll` | English interface |
 | `...windows-x64.zip` | 推荐的双语完整包 |
 | `...source.zip` | 完整源码和验证工具 |
 | `SHA256SUMS.txt` | 校验发布附件完整性 |
@@ -181,7 +181,7 @@ CS2 与 HLAE 经常更新。如果 schema、实体布局或 `SetUpView` 发生�
 <details>
 <summary><b><code>mirv_loadlibrary failed</code></b></summary>
 
-完整重启 HLAE/CS2，并检查 DLL 绝对路径。v0.4.8 DLL 不依赖 `MSVCP140.dll`、`VCRUNTIME140.dll`、UCRT `api-ms-win-crt-*`、`D3DCOMPILER_*.dll`、`D3D11.dll` 或 `DXGI.dll`。
+完整重启 HLAE/CS2，并检查 DLL 绝对路径。v0.4.9 DLL 不依赖 `MSVCP140.dll`、`VCRUNTIME140.dll`、UCRT `api-ms-win-crt-*`、`D3DCOMPILER_*.dll`、`D3D11.dll` 或 `DXGI.dll`。
 
 </details>
 
@@ -195,9 +195,9 @@ DLL 已加载，但当前游戏或运行环境的指纹未通过校验。请使�
 <details>
 <summary><b>导出运动诊断</b></summary>
 
-展开“运行状态”，点击“导出运动诊断”。最近 1,024 条内存相机样本会写入 DLL 旁：人物模式为 `selfiestick_player_motion.csv`（34 列，含早期／末尾回调阶段与线程 ID），道具模式为 `selfiestick_prop_motion.csv`。如需调试日志，把 `selfiestick.ini` 中的 `TraceEnabled` 改为 `1`，重启并复现；日志输出到 `selfiestick_trace.log`。
+展开“运行状态”，点击“导出运动诊断”。人物模式导出 `selfiestick_player_motion.csv`（最近 8,192 条、46 列，含 Demo 渲染时间、原生机位、下蹲量和线程 ID），道具模式导出 `selfiestick_prop_motion.csv`（最近 1,024 条）。文件写在 DLL 旁，由工作线程导出；人物诊断争锁时跳过样本，不等待相机回调。如需调试日志，把 `selfiestick.ini` 中的 `TraceEnabled` 改为 `1`，重启并复现；日志输出到 `selfiestick_trace.log`。
 
-v0.4.8 应显示以下追踪标记：
+v0.4.9 应显示以下追踪标记：
 
 ```text
 schema-probe-v43-prop-origin-cs2-26598758
@@ -205,9 +205,9 @@ schema-probe-v43-prop-origin-cs2-26598758
 
 </details>
 
-### v0.4.8 验证说明
+### v0.4.9 验证说明
 
-fix5 的道具坐标无抖动修复，以及 body-fix2 不再穿模的状态已经过用户实机确认。人物末尾覆写修正与 v0.4.8 发布只完成后台／原生回归；尚未收到实机确认转身／切刀残余抖动已消除。HLAE 2.193.0 通过官方源码及本地包静态核查，本次没有追加实机 Demo、ReShade 共存或 FPS 测试。详见[稳定基线](./docs/2026-11-08-confirmed-stable-fix5.md)、[机位生命周期更新](./docs/2026-11-08-prop-hold-fix6.md)和[发布验证](./docs/2026-11-13-v0.4.8-release-validation.md)。
+fix5 道具坐标稳定性与 body-fix2 防穿模状态已有早期用户实机确认。v0.4.9 加入按 Demo 渲染时间推进的录制修正、跨线程偏航历史共享，以及热补丁、扫描器和诊断锁的稳定性加固；后台原生回归及性能对照通过。尚未通过新的 1200 FPS 实录确认探员转身／下蹲／切刀残余抽搐已消除，本次没有追加实机 Demo、ReShade 共存或真实 FPS 测试。详见[稳定基线](./docs/2026-11-08-confirmed-stable-fix5.md)、[稳定性审查](./docs/2026-11-16-stability-audit.md)和[发布验证](./docs/2026-11-16-v0.4.9-release-validation.md)。
 
 ## 🛠️ 从源码构建
 

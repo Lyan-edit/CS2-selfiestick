@@ -1,10 +1,14 @@
 # CS2 Selfiestick Manual
 
-This build adapts CS2 1.41.9.7 / build 26598758: all 32 schema fields were checked, player eye angles moved to 0x3630, and final-view, resolved-origin, lifecycle and Demo-clock targets were relocated. Camera algorithms are retained from v0.4.7.
+The current release is **v0.4.9**, targeting **CS2 1.41.9.7 / build 26598758** and **HLAE 2.193.0 / AfxHookSource2 0.42.0**. All 32 consumed schema fields, the final player callback and Demo render clock were checked against the installed binaries.
 
-This folder contains release `v0.4.8`, including the player-final-view-fix4 implementation. The player camera now uses a fixed agent-body frame, independent of hand, weapon and render-eye animation. The render-eye call uses verified vtable slot 173. The body origin is engine-resolved; verified movement-service duck amount controls stance height. Locomotion and turning still update every callback. Temporary scene/weapon metadata gaps retain validated framing, FOV and model suppression. Local yaw now has a short demo-rate-aware transition that freezes on pause. Body position and clearance remain unchanged. Player motion diagnostics export selfiestick_player_motion.csv with raw/filtered yaw and estimated demo rate. Framing v6 backs up older settings as `selfiestick.ini.pre-hand-anchor.bak` before resetting player trim once; prop settings remain. The user confirmed that the fix5 prop-origin update resolved shaking; v0.4.8 retains that implementation. The new view lifecycle has background/offline validation only. Automatic map collision avoidance is not implemented.
+The player camera uses a fixed agent-body frame with mirrored lookback views and an over-shoulder preset. Hands, weapons and animated render-eye positions do not drive its geometry. Engine-resolved body position and movement-service stance control placement; the final native SetUpView stage applies the pose. FOV stays fixed for each target/enable session. Yaw transitions now advance with Demo render time, freeze on pause and share history across callback threads, reducing dependence on encoder wall time and thread migration.
 
-v0.4.8 applies the player pose at the verified final stage of native SetUpView, after native position/angle/FOV processing. Props retain their previous callback path. Player FOV is captured for each enable/target session and shared across callback threads; gun/knife switches cannot recapture it. Toggle Player Selfie off and on to adopt a new HLAE FOV. The player CSV now has 34 columns, adding native input FOV, thread ID and early/final callback stage. Fully restart HLAE/CS2 and load one updated DLL when upgrading.
+v0.4.9 also hardens hotpatch thread checks, signature scanning over unreadable pages, DLL lifetime and initializer handle management. Player diagnostic contention drops a sample instead of blocking the callback. The player CSV contains up to 8,192 samples and 46 columns, including precise render time, native camera input and stance; the prop CSV retains 1,024 samples. Explicit export workers write the files beside the DLL.
+
+The stable prop rig, short-lived capture, lookback, automatic handoff, two Demo-second effect hold, indefinite pin and manual return remain unchanged. Framing v6 still backs up old settings as `selfiestick.ini.pre-hand-anchor.bak` and resets obsolete player trim once; prop settings are preserved.
+
+Validation is limited to background/native regressions and offline performance comparisons. Remaining actor jitter has not been confirmed resolved in a new 1200 FPS capture. Automatic map collision avoidance is not implemented. Fully exit and restart HLAE/CS2, then load one updated DLL when upgrading.
 
 ## Package Contents
 
@@ -51,7 +55,7 @@ Current release DLLs also avoid heavy startup schema resolving and no longer ins
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 
-The current v0.4.8 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.8, then inspect the remaining graphics injectors independently.
+The current v0.4.9 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.9, then inspect the remaining graphics injectors independently.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
@@ -106,7 +110,7 @@ Behavior:
 
 - The target agent is still controlled by `Follow` / `Lock Current`.
 - The prop scanner only accepts projectiles thrown or owned by the current target.
-- The `v0.4.8` release retains the user-confirmed fix5 origin/rig implementation and orders throws by schema spawn time and persistent eligibility. Ownership arriving after 100 ms can still replace the previous automatic shot.
+- The `v0.4.9` release retains the user-confirmed fix5 origin/rig implementation and orders throws by schema spawn time and persistent eligibility. Ownership arriving after 100 ms can still replace the previous automatic shot.
 - AUTO HANDOFF follows through detonation, holds the final camera for 2 demo seconds, then returns to the agent's native view while awaiting future throws. Pause stops the timer; slow playback extends the wall-clock duration. New valid throws take over immediately without waiting for the hold to finish.
 - PIN CURRENT PROP protects the current shot and final view indefinitely. Row SELECT + PIN chooses a specific live candidate and uses the same pin policy. AUTO HANDOFF unpins; an elapsed effect hold returns immediately unless another shot takes over.
 - CLEAR LOCK / RETURN TO AGENT releases the view immediately without recapturing cleared/existing candidates. Future throws still auto-capture; explicit row selection can reopen a live cleared candidate. The lower target Clear Lock also releases the prop camera and restores Follow target selection.

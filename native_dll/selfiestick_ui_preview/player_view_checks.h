@@ -64,6 +64,9 @@ inline bool Run() {
     int stage = 1;
     std::string failure;
     const bool passed = [&]() {
+        // Pre-fill the larger high-FPS diagnostic window before real camera
+        // cases, so export can still prove its bound without discarding them.
+        for (unsigned i = 0; i < 8192; ++i) RecordPlayerMotionFrame(nullptr, {}, {}, nullptr, 0, false);
         // Eye and hand are current, but the pawn's cached origin is dirty.
         // Production must resolve it BEFORE validation/fallback composition.
         for (int frame = 0; frame < 480; ++frame) {
@@ -185,6 +188,10 @@ inline bool Run() {
             hand_checks::Store(&pawn, 0x3630, sample % 7 ? Vec3{} : Vec3{NAN, 0, 0});
             hand_checks::eyeMode = sample % 2 ? hand_checks::EyeMode::NoWrite : hand_checks::EyeMode::Crouched;
             hand_checks::attachmentLive = sample % 11 != 0;
+            std::array<std::uint8_t, sizeof(pawn)> beforePawn{};
+            std::memcpy(beforePawn.data(), &pawn, sizeof(pawn));
+            std::array<std::uint8_t, sizeof(movement)> beforeMovement{};
+            std::memcpy(beforeMovement.data(), movement, sizeof(movement));
             const double begin = HighResolutionSeconds();
             frame(noScene || noMetadata ? 30.0f : 90.0f);
             times.push_back((HighResolutionSeconds() - begin) * 1000);
@@ -196,6 +203,8 @@ inline bool Run() {
                     sample, Length(Subtract(position, expectedPosition)), fov, flag);
                 return false;
             }
+            if (std::memcmp(beforePawn.data(), &pawn, sizeof(pawn)) != 0
+                || std::memcmp(beforeMovement.data(), movement, sizeof(movement)) != 0) return false;
         }
         std::sort(times.begin(), times.end());
         if (animatedEyeCalls != 0 || animatedHandCalls != 0) return false;
@@ -253,7 +262,7 @@ inline bool Run() {
         for (int step = 0; step < 300; ++step) {
             const double wall = step / 144.0;
             const int ticks = static_cast<int>(std::floor(wall * 0.1 * 64));
-            player_turn_checks::clock = {2000 + wall, 1000 + ticks, false};
+            player_turn_checks::clock = {2000 + wall, 1000 + ticks, false, 1000.0 / 64 + wall * 0.1, step, true};
             hand_checks::Store(&pawn, 0x3630, Vec3{30, ticks + (step % 2 ? 0.2f : -0.2f), 0});
             hand_checks::Store(weaponServices, 0x60, step % 2 ? weapon.handle : knife.handle);
             if (!engineHarness.Run(view, step % 2 ? 110.0f : 55.0f)) return false;
@@ -261,6 +270,25 @@ inline bool Run() {
             TryReadOffsetValue(view, kViewSetupFovOffset, fov);
             if (!g_state.lastOverrideSucceeded || !g_playerFrame.turn.valid
                 || fov != 90 || std::hypot(position.x - 100, position.y - 200) < 31.999f) return false;
+            if (step == 194) {
+                Vec3 otherPosition{}, otherAngles{};
+                bool otherPassed = false;
+                std::thread renderWorker([&] {
+                    unsigned char workerView[0x900]{};
+                    otherPassed = engineHarness.Run(workerView, 77);
+                    TryReadViewSetupOrigin(workerView, otherPosition);
+                    TryReadViewSetupAngles(workerView, otherAngles);
+                });
+                TryReadViewSetupAngles(view, angles);
+                renderWorker.join();
+                if (!otherPassed || Length(Subtract(otherPosition, position)) > 0.0001f
+                    || Length(Subtract(otherAngles, angles)) > 0.0001f) {
+                    std::printf("same-frame thread migration FAILED: position %.6f, angles %.6f\n",
+                        Length(Subtract(otherPosition, position)), Length(Subtract(otherAngles, angles)));
+                    return false;
+                }
+                puts("same-frame thread migration passed: position/angles match within 0.0001");
+            }
         }
         g_state.enabled = false;
         if (!engineHarness.Run(view, 70)) return false;
@@ -331,7 +359,7 @@ inline bool Run() {
         hand_checks::Store(observerServices, 0x4C, EntityHandle{});
         if (ResolvePlayerTargetForView(config, true, 101.251).entity != nullptr) return false;
         g_state.enabled = false; frame();
-        if (PlayerMotionSampleCount() != 1024u || ExportPlayerMotionWorker(nullptr) != 0u) return false;
+        if (PlayerMotionSampleCount() != 8192u || ExportPlayerMotionWorker(nullptr) != 0u) return false;
         return true;
     }();
     *reinterpret_cast<void***>(&pawn) = originalVtable;
