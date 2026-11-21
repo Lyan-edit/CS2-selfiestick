@@ -23,8 +23,8 @@
   [![许可证](https://img.shields.io/github/license/Lyan-edit/CS2-selfiestick?style=flat-square&labelColor=111827&color=35C5F0)](./LICENSE)
   <br />
   ![Windows x64](https://img.shields.io/badge/Windows-x64-35C5F0?style=flat-square&labelColor=111827&logo=windows11&logoColor=white)
-  ![HLAE](https://img.shields.io/badge/HLAE-2.193.0-35C5F0?style=flat-square&labelColor=111827)
-  ![CS2 build](https://img.shields.io/badge/CS2_build-26598758-F2A65A?style=flat-square&labelColor=111827)
+  ![HLAE](https://img.shields.io/badge/HLAE-2.193.1-35C5F0?style=flat-square&labelColor=111827)
+  ![CS2 build](https://img.shields.io/badge/CS2_build-26798866-F2A65A?style=flat-square&labelColor=111827)
   ![ReShade 安全](https://img.shields.io/badge/ReShade-安全-35C5F0?style=flat-square&labelColor=111827)
 </div>
 
@@ -76,14 +76,14 @@ CS2 自拍杆把 HLAE Demo 播放变成一套轻量的电影镜头系统：既�
 ## 📦 下载
 
 > [!IMPORTANT]
-> 当前正式版为 **[v0.4.9](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.9)**，对应 **CS2 build `26598758`** 与 **HLAE `2.193.0` / AfxHookSource2 `0.42.0`**。
+> 当前正式版为 **[v0.5.0](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.5.0)**，对应 **CS2 build `26798866`** 与 **HLAE `2.193.1` / AfxHookSource2 `0.42.1`**。
 
 推荐从 **[GitHub Releases](https://github.com/Lyan-edit/CS2-selfiestick/releases/latest)** 下载双语 Windows 完整包，其中包含中英文 DLL、操作手册、默认配置和热键参考。
 
 | 附件 | 用途 |
 | :-- | :-- |
-| `Lyan_selfiestick-v0.4.9-zh-CN.dll` | 中文界面 |
-| `Lyan_selfiestick-v0.4.9-EN.dll` | English interface |
+| `Lyan_selfiestick-v0.5.0-zh-CN.dll` | 中文界面 |
+| `Lyan_selfiestick-v0.5.0-EN.dll` | English interface |
 | `...windows-x64.zip` | 推荐的双语完整包 |
 | `...source.zip` | 完整源码和验证工具 |
 | `SHA256SUMS.txt` | 校验发布附件完整性 |
@@ -92,7 +92,7 @@ DLL 已静态链接 MSVC 运行库，仅为通过 HLAE 加载本项目，无需�
 
 ## 🚀 快速开始
 
-1. 完整重启 HLAE/CS2，使用 **HLAE 2.193.0** 启动游戏并打开 Demo 观战。
+1. 完整重启 HLAE/CS2，使用 **HLAE 2.193.1** 启动游戏并打开 Demo 观战。
 2. 下载并解压最新 Windows 完整包。
 3. 在 HLAE 控制台加载中文 DLL：
 
@@ -164,8 +164,8 @@ DLL 已静态链接 MSVC 运行库，仅为通过 HLAE 加载本项目，无需�
 
 | 组件 | 已支持目标 |
 | :-- | :-- |
-| Counter-Strike 2 | Steam app `730`，buildid `26598758` |
-| HLAE | `2.193.0`，AfxHookSource2 `0.42.0` |
+| Counter-Strike 2 | Steam app `730`，buildid `26798866` |
+| HLAE | `2.193.1`，AfxHookSource2 `0.42.1` |
 | 平台 | Windows x64 |
 | 用途 | HLAE Demo 播放与影视镜头制作 |
 
@@ -181,14 +181,14 @@ CS2 与 HLAE 经常更新。如果 schema、实体布局或 `SetUpView` 发生�
 <details>
 <summary><b><code>mirv_loadlibrary failed</code></b></summary>
 
-完整重启 HLAE/CS2，并检查 DLL 绝对路径。v0.4.9 DLL 不依赖 `MSVCP140.dll`、`VCRUNTIME140.dll`、UCRT `api-ms-win-crt-*`、`D3DCOMPILER_*.dll`、`D3D11.dll` 或 `DXGI.dll`。
+完整重启 HLAE/CS2，并检查 DLL 绝对路径。v0.5.0 DLL 不依赖 `MSVCP140.dll`、`VCRUNTIME140.dll`、UCRT `api-ms-win-crt-*`、`D3DCOMPILER_*.dll`、`D3D11.dll` 或 `DXGI.dll`。
 
 </details>
 
 <details>
 <summary><b><code>SetUpView hook blocked by compatibility gate</code></b></summary>
 
-DLL 已加载，但当前游戏或运行环境的指纹未通过校验。请使用 CS2 build `26598758` 与 HLAE `2.193.0`，或在验证新二进制后重新构建。
+DLL 已加载，但当前游戏或运行环境的指纹未通过校验。请使用 CS2 build `26798866` 与 HLAE `2.193.1`，或在验证新二进制后重新构建。
 
 </details>
 
@@ -197,17 +197,17 @@ DLL 已加载，但当前游戏或运行环境的指纹未通过校验。请使�
 
 展开“运行状态”，点击“导出运动诊断”。人物模式导出 `selfiestick_player_motion.csv`（最近 8,192 条、46 列，含 Demo 渲染时间、原生机位、下蹲量和线程 ID），道具模式导出 `selfiestick_prop_motion.csv`（最近 1,024 条）。文件写在 DLL 旁，由工作线程导出；人物诊断争锁时跳过样本，不等待相机回调。如需调试日志，把 `selfiestick.ini` 中的 `TraceEnabled` 改为 `1`，重启并复现；日志输出到 `selfiestick_trace.log`。
 
-v0.4.9 应显示以下追踪标记：
+v0.5.0 应显示以下追踪标记：
 
 ```text
-schema-probe-v43-prop-origin-cs2-26598758
+schema-probe-v44-prop-origin-cs2-26798866
 ```
 
 </details>
 
-### v0.4.9 验证说明
+### v0.5.0 验证说明
 
-fix5 道具坐标稳定性与 body-fix2 防穿模状态已有早期用户实机确认。v0.4.9 加入按 Demo 渲染时间推进的录制修正、跨线程偏航历史共享，以及热补丁、扫描器和诊断锁的稳定性加固；后台原生回归及性能对照通过。尚未通过新的 1200 FPS 实录确认探员转身／下蹲／切刀残余抽搐已消除，本次没有追加实机 Demo、ReShade 共存或真实 FPS 测试。详见[稳定基线](./docs/2026-11-08-confirmed-stable-fix5.md)、[稳定性审查](./docs/2026-11-16-stability-audit.md)和[发布验证](./docs/2026-11-16-v0.4.9-release-validation.md)。
+fix5 道具坐标稳定性与 body-fix2 防穿模状态已有早期用户实机确认。v0.5.0 更新 CS2 1.42.0.0 的精确版本指纹及搬移的调用位置，保留 v0.4.9 的机位算法和稳定性修正。32 个 Schema 字段未变，新指纹下的旧地址仍被拒绝；后台原生回归及性能对照通过。尚未通过新的 1200 FPS 实录确认探员残余抽搐已消除，本次没有追加实机 Demo、ReShade 共存或真实 FPS 测试。详见[稳定基线](./docs/2026-11-08-confirmed-stable-fix5.md)、[稳定性审查](./docs/2026-11-16-stability-audit.md)和[发布验证](./docs/2026-11-21-v0.5.0-release-validation.md)。
 
 ## 🛠️ 从源码构建
 

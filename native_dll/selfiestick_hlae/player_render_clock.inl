@@ -1,9 +1,9 @@
-// Exact CS2 26598758 CSource2Client::SetGlobals[11]. The original method stores
+// Exact CS2 26798866 CSource2Client::SetGlobals[11]. The original method stores
 // the Globals pointer here; HLAE's vtable detour still calls the original.
 // This code only reads that pointer. It installs no additional hook.
-constexpr std::uint32_t kPlayerSetGlobalsRva = 0x00B75C50u;
-constexpr std::uint32_t kPlayerGlobalsStorageRva = 0x02221AB8u;
-constexpr std::uint32_t kPlayerDefaultGlobalsRva = 0x02221AE0u;
+constexpr std::uint32_t kPlayerSetGlobalsRva = 0x00B76760u;
+constexpr std::uint32_t kPlayerGlobalsStorageRva = 0x02223AD0u;
+constexpr std::uint32_t kPlayerDefaultGlobalsRva = 0x02223B80u;
 
 bool DecodePlayerRenderTime(int tick, int beforeFrame, int afterFrame, float interpolation,
     PlayerMotionClock& clock) {

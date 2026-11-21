@@ -1,54 +1,53 @@
-# CS2 Selfiestick v0.4.9
+# CS2 Selfiestick v0.5.0
 
 ## 对应版本 / Runtime target
 
-- **CS2：1.41.9.7 / Steam build 26598758**（2026-11-16 本机二进制复核）。
-- **HLAE：2.193.0 / AfxHookSource2 0.42.0**。
+- **CS2：1.42.0.0 / Steam build 26798866**（2026-11-21 本机版本复核）。
+- **HLAE：2.193.1 / AfxHookSource2 0.42.1**。
 - Windows x64，中文／English；正式版。
 
-## 相比 v0.4.8 的更新
+## 相比 v0.4.9 的更新
 
-- **录制时序**：人物偏航过渡改为按核验后的 Demo tick 与渲染插值推进，暂停停止计时；移除编码器墙钟耗时对相机滤波的影响。相同 1200 FPS 录制帧配不同编码延迟的后台测试，最大输出角度差为 **0.000000°**。
-- **跨线程人物机位**：偏航历史按目标完整句柄、实体地址、实体列表与启用会话共享，避免换线程从原始偏航重新开始。同帧真实跳板用例的旧角度差 **0.385986°**，修正后机位／角度差均在 **0.0001** 以内。
-- **热补丁保护**：线程打开、枚举、暂停或上下文检查失败时拒绝不安全写入；忙碌时先恢复线程再有界重试。覆盖失败后的句柄关闭与线程恢复。
-- **特征码扫描保护**：跳过不可读／Guard 页，合并相邻可读区；扫描期间保护变化则丢弃结果。增加 PE 头、负偏移、非法／残缺 pattern 和匹配上限校验。
-- **非阻塞人物诊断**：争用视模抑制锁时跳过诊断样本，不等待相机回调。缓存扩展为 **8,192 条、46 列**，包含精确渲染时间、原生输入机位、下蹲量与身体高度；导出仍由工作线程写盘。
-- **加载与体积**：初始化 worker 提前建立进程常驻保护，关闭初始化线程句柄。大诊断数组改为零初始化存储，容量保留；审查构建中文 DLL 从约 **2.89 MB 降至 1.19 MB**。
+本版适配 CS2 与 HLAE 更新，保留已有相机算法。
 
-## 保留功能
+- 更新 client.dll、engine2.dll 精确版本指纹；未知版本仍由保护逻辑拒绝，不放宽检查。
+- 核验 **32 个 Schema 字段**，本次偏移均保持一致，包括人物朝向 `0x3630`；现有七类特征码仍匹配。
+- 重新定位人物原生 SetUpView 最终覆写位置，验证完整重放指令、函数边界、栈对齐、最终历史写入与返回路径。
+- 更新人物渲染时钟的 SetGlobals 入口、Globals 存储和默认对象地址，保留按 Demo 渲染时间推进、暂停停止及跨线程共享偏航的录制防抖逻辑。
+- 更新道具／人物绝对坐标接口、脏变换重算入口、实体创建／移除目标和 Demo file getter。短寿命道具捕获、固定距离、自动接续、爆开后 **Demo 时间 2 秒**停留、无限锁定和手动返回保持。
+- 更新诊断标记为 `schema-probe-v44-prop-origin-cs2-26798866`，同步中英文说明和发布工具默认参数。
 
-人物身体固定局部机位、左右居中自拍、越肩预设、R/B/U 与角度微调、会话 FOV、防穿模安全距离保持。已确认稳定的道具坐标与构图、短寿命捕获、自动接续、爆开后 **Demo 时间 2 秒**停留、无限锁定和手动返回保持。Dear ImGui 面板继续使用 CPU/GDI 软件渲染，不新增 D3D/DXGI/Present Hook。
+## 保留功能与验证
 
-## 验证范围与边界
+- 人物身体固定机位、左右自拍、越肩预设、R/B/U 和角度微调、FOV 保持、防穿模间距，以及 0.4.9 的热补丁、扫描器和诊断争锁保护保留。
+- HLAE 官方 2.193.1 已适配 CS2 1.42.0.0。其实体句柄改为 uint32／无效值 0xFFFFFFFF；自拍杆原实现已使用该表示。
+- PowerShell 7 构建中英文 `/MT` DLL、Validation 和隐藏生产代码回归，全部通过；依赖检查通过。
+- 覆盖人物最终回调机器码、持枪／切刀／FOV、同帧跨线程、1200 FPS 时钟、暂停／跳转、道具／UI 回归；12 个确认稳定区段原样保留。
+- 新指纹下故意恢复旧人物尾部、时钟、实体和坐标地址的 **8 个负例均被拒绝**。
+- 本轮后台人物 1200 回调中位数／P95 均约 **0.003 ms**；未改变每帧相机算法。
 
-- PowerShell 7 构建中英文 `/MT` DLL、Validation 与隐藏生产代码测试，全部通过；DLL 依赖检查通过。
-- 本机 32 个 Schema 字段、人物尾部重放、Demo tick／暂停 ABI、渲染时钟检查通过。生产扫描器以只读、不可执行映射检查实际 client/schema 文件，签名匹配与独立检查一致。
-- 故障注入覆盖线程／热补丁失败、不可读页与保护变化、诊断争锁；人物跨线程同帧、1200 回调、持枪／切刀／FOV、暂停／跳转及道具／UI 回归通过。
-- 12 项稳定区段检查通过；道具 discovery/view/clock/lifecycle/diagnostics、人物身体原点与间距保护等已稳定部分保留。
-- 三轮交替后台对照：人物回调中位数／P95 均约 **0.003 ms**；道具扫描耗时处于相近范围。微基准不能替代真实游戏帧率测试。
-
-**本次仅后台验证，没有启动、注入或前台操作 CS2，也没有新增实机 Demo、ReShade 共存或真实 FPS 测试。尚未通过新的 1200 FPS 实录确认探员转身／下蹲／切刀残余抖动已消除。自动地图碰撞避让尚未实现。**
+**验证范围：本轮仅做后台／离线／隐藏进程检查，没有启动、注入或前台操作 CS2，未新增实机 Demo、ReShade 共存或真实 FPS 测试。剩余探员动画抽搐仍需真实 1200 FPS 录制确认，不能据后台回归承诺完全消除或零掉帧。自动地图碰撞避让尚未实现。**
 
 ## 升级和加载
 
-1. 完整退出并重启 HLAE/CS2，使用 **HLAE 2.193.0** 启动上述版本游戏并打开 Demo。
+1. 完整退出并重启 HLAE/CS2，使用 **HLAE 2.193.1** 启动上述 CS2 版本并打开 Demo。
 2. 只加载一个语言版本：`mirv_loadlibrary "<DLL 的绝对路径>"`。
-3. **Ins** 打开面板，**F8** 启用；build 应显示 **v0.4.9**。
-4. 个人 INI 可保留；ZIP 提供干净默认配置。不能通过覆盖文件热更新已经加载的 Hook。
-5. 如仍抖动，在人物模式复现后导出 `selfiestick_player_motion.csv`，并保留录制命令及原始短片段。
+3. **Ins** 打开面板，**F8** 启用；build 应显示 **v0.5.0**。
+4. 个人 INI 可保留；ZIP 提供干净默认配置。覆盖已加载 DLL 不会热更新旧 Hook。
+5. 人物诊断仍为最近 8,192 条／46 列；道具诊断为最近 1,024 条，均通过显式工作线程导出。
 
 ## English
 
-v0.4.9 targets **CS2 1.41.9.7 / build 26598758** and **HLAE 2.193.0 / AfxHookSource2 0.42.0**.
+v0.5.0 targets **CS2 1.42.0.0 / build 26798866** and **HLAE 2.193.1 / AfxHookSource2 0.42.1**.
 
-Player yaw now uses verified Demo render time rather than encoder wall time and shares history across callback threads. The release also hardens hotpatch failure handling, readable-page signature scanning, DLL lifetime and initializer handles. Player diagnostics are nonblocking on suppression contention and retain 8,192 samples across 46 columns. Zero-initialized storage reduces the DLL file size while retaining the buffer capacity. Stable player body placement, FOV and prop follow/handoff/hold behavior remain intact.
+Exact PE guards and relocated player final-view, render-clock, resolved-origin, lifecycle and Demo-file targets were updated. All 32 consumed schema fields and seven signature families were checked against the installed binaries. Existing body placement, recording-time/cross-thread yaw stabilization, FOV, short-lived prop capture, handoff and effect-hold behavior remain intact. Eight old-address fixtures remain rejected under the new build fingerprint.
 
-Bilingual native regressions, deterministic 1200 FPS clock tests, failure injection, installed-binary checks and offline benchmarks pass. Validation is background-only; there is no new live Demo, ReShade coexistence or real FPS test, and remaining actor jitter has not been confirmed resolved by a new 1200 FPS capture. Fully restart HLAE/CS2 when upgrading and load one language DLL.
+Bilingual native regressions, compatibility checks, failure guards and offline benchmarks pass. Validation is background-only: no new live-demo, ReShade coexistence, real FPS or 1200 FPS recording test was performed. Fully restart HLAE/CS2 when upgrading, then load one language DLL.
 
 ## 附件 / Assets
 
-- `Lyan_selfiestick-v0.4.9-zh-CN.dll` — 中文 DLL。
-- `Lyan_selfiestick-v0.4.9-EN.dll` — English DLL.
-- `Lyan_selfiestick-v0.4.9-CS2-26598758-HLAE-2.193.0-windows-x64.zip` — 双语 DLL、手册、默认配置和热键参考。
-- `Lyan_selfiestick-v0.4.9-source.zip` — 完整项目源码、许可、构建与验证工具。
+- `Lyan_selfiestick-v0.5.0-zh-CN.dll` — 中文 DLL。
+- `Lyan_selfiestick-v0.5.0-EN.dll` — English DLL.
+- `Lyan_selfiestick-v0.5.0-CS2-26798866-HLAE-2.193.1-windows-x64.zip` — 双语 DLL、手册、默认配置与热键参考。
+- `Lyan_selfiestick-v0.5.0-source.zip` — 完整项目源码、许可、构建与验证工具。
 - `SHA256SUMS.txt` — 上述四个附件的 SHA-256。

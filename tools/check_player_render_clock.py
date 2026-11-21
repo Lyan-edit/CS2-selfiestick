@@ -1,6 +1,6 @@
 """Check the exact client Globals storage using primary RTTI and SetGlobals code.
 
-The field layout is taken from HLAE v2.193.0 MirvTime.cpp: framecount +4,
+The field layout is taken from HLAE v2.193.1 MirvTime.cpp: framecount +4,
 interpolation_amount +14*4. No DLL is loaded or method called by this check.
 """
 import argparse
@@ -41,7 +41,7 @@ def check(client, source):
     target = struct.unpack_from("<Q", p.data, next(iter(tables)) + 11 * 8)[0] - base
     if target != setter or not p.is_executable_rva(setter): raise ValueError("SetGlobals slot 11 changed")
     body = p.data[raw(setter):raw(setter) + 49]
-    expected = bytes.fromhex("48 8b 0d 61 be 6a 01 4c 8d 05 82 be 6a 01 48 85 d2 48 8d 05 08 fb f2 ff 49 0f 44 d0 48 89 15 45 be 6a 01 48 89 42 28 33 c0 49 3b c8 48 0f 45 c1 c3")
+    expected = bytes.fromhex("48 8b 0d 69 d3 6a 01 4c 8d 05 12 d4 6a 01 48 85 d2 48 8d 05 08 fb f2 ff 49 0f 44 d0 48 89 15 4d d3 6a 01 48 89 42 28 33 c0 49 3b c8 48 0f 45 c1 c3")
     if body != expected: raise ValueError("SetGlobals native body changed")
     if setter + 7 + struct.unpack_from("<i", body, 3)[0] != storage or setter + 35 + struct.unpack_from("<i", body, 31)[0] != storage:
         raise ValueError("Globals load/store do not identify the same storage")

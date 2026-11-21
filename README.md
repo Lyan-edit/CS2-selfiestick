@@ -23,8 +23,8 @@
   [![License](https://img.shields.io/github/license/Lyan-edit/CS2-selfiestick?style=flat-square&labelColor=111827&color=35C5F0)](./LICENSE)
   <br />
   ![Windows x64](https://img.shields.io/badge/Windows-x64-35C5F0?style=flat-square&labelColor=111827&logo=windows11&logoColor=white)
-  ![HLAE](https://img.shields.io/badge/HLAE-2.193.0-35C5F0?style=flat-square&labelColor=111827)
-  ![CS2 build](https://img.shields.io/badge/CS2_build-26598758-F2A65A?style=flat-square&labelColor=111827)
+  ![HLAE](https://img.shields.io/badge/HLAE-2.193.1-35C5F0?style=flat-square&labelColor=111827)
+  ![CS2 build](https://img.shields.io/badge/CS2_build-26798866-F2A65A?style=flat-square&labelColor=111827)
   ![ReShade safe](https://img.shields.io/badge/ReShade-safe-35C5F0?style=flat-square&labelColor=111827)
 </div>
 
@@ -77,14 +77,14 @@ The current release also validates exact entity handles, fails closed on unknown
 ## 📦 Download
 
 > [!IMPORTANT]
-> Current stable release: **[v0.4.9](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.4.9)** for **CS2 build `26598758`** and **HLAE `2.193.0` / AfxHookSource2 `0.42.0`**.
+> Current stable release: **[v0.5.0](https://github.com/Lyan-edit/CS2-selfiestick/releases/tag/v0.5.0)** for **CS2 build `26798866`** and **HLAE `2.193.1` / AfxHookSource2 `0.42.1`**.
 
 Get the bilingual Windows package from **[GitHub Releases](https://github.com/Lyan-edit/CS2-selfiestick/releases/latest)**. It includes both DLLs, manuals, the default configuration, and the hotkey reference.
 
 | Asset | Use it for |
 | :-- | :-- |
-| `Lyan_selfiestick-v0.4.9-EN.dll` | English interface |
-| `Lyan_selfiestick-v0.4.9-zh-CN.dll` | 中文界面 |
+| `Lyan_selfiestick-v0.5.0-EN.dll` | English interface |
+| `Lyan_selfiestick-v0.5.0-zh-CN.dll` | 中文界面 |
 | `...windows-x64.zip` | Recommended complete bilingual package |
 | `...source.zip` | Reproducible source package and validation tools |
 | `SHA256SUMS.txt` | Release integrity verification |
@@ -95,7 +95,7 @@ The DLLs use the static MSVC runtime, so users do not need to install the Visual
 
 ## 🚀 Quick start
 
-1. Fully restart HLAE/CS2, launch **HLAE 2.193.0**, and open a demo in spectator mode.
+1. Fully restart HLAE/CS2, launch **HLAE 2.193.1**, and open a demo in spectator mode.
 2. Download and extract the latest Windows package.
 3. Load one language DLL from the HLAE console:
 
@@ -167,8 +167,8 @@ The panel hotkey is configurable and saved to `selfiestick.ini` next to the load
 
 | Component | Supported target |
 | :-- | :-- |
-| Counter-Strike 2 | Steam app `730`, buildid `26598758` |
-| HLAE | `2.193.0`, AfxHookSource2 `0.42.0` |
+| Counter-Strike 2 | Steam app `730`, buildid `26798866` |
+| HLAE | `2.193.1`, AfxHookSource2 `0.42.1` |
 | Platform | Windows x64 |
 | Workflow | HLAE demo playback and cinematic capture |
 
@@ -184,14 +184,14 @@ CS2 and HLAE update frequently. If schema, entity layout, or `SetUpView` changes
 <details>
 <summary><b><code>mirv_loadlibrary failed</code></b></summary>
 
-Fully restart HLAE/CS2 and verify the absolute DLL path. The v0.4.9 release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
+Fully restart HLAE/CS2 and verify the absolute DLL path. The v0.5.0 release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, `D3DCOMPILER_*.dll`, `D3D11.dll`, or `DXGI.dll`.
 
 </details>
 
 <details>
 <summary><b><code>SetUpView hook blocked by compatibility gate</code></b></summary>
 
-The DLL loaded successfully, but the current game/runtime fingerprint was rejected. Use CS2 build `26598758` with HLAE `2.193.0`, or rebuild only after validating the newer binaries.
+The DLL loaded successfully, but the current game/runtime fingerprint was rejected. Use CS2 build `26798866` with HLAE `2.193.1`, or rebuild only after validating the newer binaries.
 
 </details>
 
@@ -214,15 +214,15 @@ Existing INI values override new defaults.
 
 Expand **Runtime** and select **EXPORT MOTION DIAGNOSTICS**. The bounded buffers are written beside the DLL: `selfiestick_player_motion.csv` in Player mode (8,192 samples, 46 columns, including render Demo time, native camera input, stance and thread ID), or `selfiestick_prop_motion.csv` in Prop mode (1,024 samples). Export runs on a worker; contested player diagnostic locks drop samples rather than block the camera. For a debug trace, set `TraceEnabled=1`, restart HLAE/CS2, and reproduce the problem; output is written to `selfiestick_trace.log`.
 
-The expected v0.4.9 trace marker is:
+The expected v0.5.0 trace marker is:
 
 ```text
-schema-probe-v43-prop-origin-cs2-26598758
+schema-probe-v44-prop-origin-cs2-26798866
 ```
 
 </details>
 
-### v0.4.9 engineering notes
+### v0.5.0 engineering notes
 
 <details>
 <summary>Show implementation and validation details</summary>
@@ -238,7 +238,7 @@ schema-probe-v43-prop-origin-cs2-26598758
 - The production panel renders complete off-screen CPU/GDI frames and never creates a graphics device or Present hook.
 - Compatibility resolution uses the exact supported PE fingerprint and fails closed on unknown builds.
 
-The prop resolved-origin shake fix and body-fix2 clearance were confirmed in earlier live user tests. v0.4.9 adds recording-time and cross-thread yaw fixes plus stability hardening; deterministic native tests and background benchmarks pass. The remaining real-demo actor turning/crouching/knife jitter has not been confirmed resolved in a new 1200 FPS capture. No new live-demo, ReShade-coexistence, or real FPS test was performed. See the [stable baseline](./docs/2026-11-08-confirmed-stable-fix5.md), [stability audit](./docs/2026-11-16-stability-audit.md), and [release validation](./docs/2026-11-16-v0.4.9-release-validation.md).
+The prop resolved-origin shake fix and body-fix2 clearance were confirmed in earlier live user tests. v0.5.0 updates exact fingerprints and relocated entry points for CS2 1.42.0.0 while preserving v0.4.9 camera behavior and stability fixes. All 32 consumed schema fields remain unchanged; old addresses are still rejected under the new fingerprint. Native regressions and background benchmarks pass. Remaining actor jitter has not been confirmed resolved in a new 1200 FPS capture; no new live-demo, ReShade-coexistence or real FPS test was performed. See the [stable baseline](./docs/2026-11-08-confirmed-stable-fix5.md), [stability audit](./docs/2026-11-16-stability-audit.md), and [release validation](./docs/2026-11-21-v0.5.0-release-validation.md).
 
 </details>
 
@@ -275,8 +275,8 @@ The compatibility checker validates the PE fingerprint, signatures, attachment c
 <summary><b>Release packaging</b></summary>
 
 ```powershell
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.4.9 -Cs2Build 26598758 -HlaeVersion 2.193.0
-pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.4.9
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\New-SelfiestickRelease.ps1 -Version v0.5.0 -Cs2Build 26798866 -HlaeVersion 2.193.1
+pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\Publish-GitHubRelease.ps1 -Version v0.5.0
 ```
 
 The publisher creates a draft release, uploads the bilingual DLLs, Windows bundle, source bundle, and checksum file, then verifies remote sizes and SHA-256 hashes before publication. Authentication comes from Git Credential Manager and is never printed.

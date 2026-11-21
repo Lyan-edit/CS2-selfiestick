@@ -1,10 +1,10 @@
 // HLAE's ISource2EngineToClient001::GetDemoFile (69), IDemoFile::GetDemoTick
 // (3), and 64 Hz demo time. Never substitute wall time or a dormant pawn clock.
 // Guards verified against the installed engine2.dll; no additional hook.
-constexpr std::uint32_t kDemoEngineTimestamp = 0x6AF4A60Du;
+constexpr std::uint32_t kDemoEngineTimestamp = 0x6AFF86F1u;
 constexpr std::uint32_t kDemoEngineImageSize = 0x00A0A000u;
-constexpr std::uint32_t kDemoEngineChecksum = 0x00721DBDu;
-constexpr std::uint32_t kDemoGetFileRva = 0x00074380u;
+constexpr std::uint32_t kDemoEngineChecksum = 0x0072375Eu;
+constexpr std::uint32_t kDemoGetFileRva = 0x000743F0u;
 constexpr std::uint32_t kDemoGetTickRva = 0x00035970u;
 bool TryReadPropDemoSeconds(double& seconds) {
     seconds = -1.0;

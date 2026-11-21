@@ -1,10 +1,10 @@
 # CS2 Selfiestick Manual
 
-The current release is **v0.4.9**, targeting **CS2 1.41.9.7 / build 26598758** and **HLAE 2.193.0 / AfxHookSource2 0.42.0**. All 32 consumed schema fields, the final player callback and Demo render clock were checked against the installed binaries.
+The current release is **v0.5.0**, targeting **CS2 1.42.0.0 / build 26798866** and **HLAE 2.193.1 / AfxHookSource2 0.42.1**. All 32 consumed schema fields, the final player callback and Demo render clock were checked against the installed binaries.
 
 The player camera uses a fixed agent-body frame with mirrored lookback views and an over-shoulder preset. Hands, weapons and animated render-eye positions do not drive its geometry. Engine-resolved body position and movement-service stance control placement; the final native SetUpView stage applies the pose. FOV stays fixed for each target/enable session. Yaw transitions now advance with Demo render time, freeze on pause and share history across callback threads, reducing dependence on encoder wall time and thread migration.
 
-v0.4.9 also hardens hotpatch thread checks, signature scanning over unreadable pages, DLL lifetime and initializer handle management. Player diagnostic contention drops a sample instead of blocking the callback. The player CSV contains up to 8,192 samples and 46 columns, including precise render time, native camera input and stance; the prop CSV retains 1,024 samples. Explicit export workers write the files beside the DLL.
+v0.5.0 updates exact build fingerprints and relocated entry points while retaining v0.4.9 hotpatch, readable-page scanning and lifetime safeguards. Player diagnostic contention drops a sample instead of blocking the callback. The player CSV contains up to 8,192 samples and 46 columns, including precise render time, native camera input and stance; the prop CSV retains 1,024 samples. Explicit export workers write the files beside the DLL.
 
 The stable prop rig, short-lived capture, lookback, automatic handoff, two Demo-second effect hold, indefinite pin and manual return remain unchanged. Framing v6 still backs up old settings as `selfiestick.ini.pre-hand-anchor.bak` and resets obsolete player trim once; prop settings are preserved.
 
@@ -24,17 +24,17 @@ The DLL is built with the MSVC runtime statically linked. You do not need to ins
 
 ## Supported Versions
 
-This package targets the versions below. HLAE 2.193.0 was statically checked; no new live-demo validation was performed:
+This package targets the versions below. HLAE 2.193.1 was statically checked; no new live-demo validation was performed:
 
-- HLAE: `2.193.0` (AfxHookSource2 `0.42.0`)
-- Counter-Strike 2: Steam app `730`, buildid `26598758`
+- HLAE: `2.193.1` (AfxHookSource2 `0.42.1`)
+- Counter-Strike 2: Steam app `730`, buildid `26798866`
 
 Use it for HLAE demo/cinematic workflows only.
 
 ## Load The DLL
 
 1. Copy the `en-US` folder to a stable location.
-2. Start HLAE `2.193.0`, launch CS2, and open a demo in spectator mode.
+2. Start HLAE `2.193.1`, launch CS2, and open a demo in spectator mode.
 3. Run this in the HLAE console:
 
 ```cfg
@@ -51,11 +51,11 @@ If loading succeeds, the console prints a selfiestick ready message. Press `Ins`
 
 If HLAE prints `mirv_loadlibrary failed`, fully restart HLAE/CS2 and verify the absolute path. Current release DLLs do not depend on `MSVCP140.dll`, `VCRUNTIME140.dll`, UCRT `api-ms-win-crt-*` DLLs, or any `D3DCOMPILER_*.dll`.
 
-Current release DLLs also avoid heavy startup schema resolving and no longer install the SetUpView camera hotpatch during `mirv_loadlibrary`. The hotpatch is installed only when you press `F8` or click Enable. If HLAE 2.193.0 / AfxHookSource2 0.42.0 already patched the same site, the DLL chains HLAE's trampoline first and then runs the Selfiestick callback. If the current CS2 build is incompatible, the DLL stays loaded and shows a Runtime reason instead of taking the demo process down. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
+Current release DLLs also avoid heavy startup schema resolving and no longer install the SetUpView camera hotpatch during `mirv_loadlibrary`. The hotpatch is installed only when you press `F8` or click Enable. If HLAE 2.193.1 / AfxHookSource2 0.42.1 already patched the same site, the DLL chains HLAE's trampoline first and then runs the Selfiestick callback. If the current CS2 build is incompatible, the DLL stays loaded and shows a Runtime reason instead of taking the demo process down. Debug trace is off by default in the packaged `selfiestick.ini`; only enable `[Debug] TraceEnabled=1` when you need to send a diagnostic log.
 
 If you already have an old `selfiestick.ini` next to the DLL, delete it or set `[Debug] TraceEnabled=0` before testing this release.
 
-The current v0.4.9 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.4.9, then inspect the remaining graphics injectors independently.
+The current v0.5.0 DLL no longer imports `d3d11.dll` or `dxgi.dll`. If a new dump still passes through a ReShade-provided `dxgi.dll`, first verify that the loaded DLL is really v0.5.0, then inspect the remaining graphics injectors independently.
 
 Recommended setup speed: use the CS2 demo UI / HLAE playback controls, or the game console command below when available, to tune Prop Selfie shots at `0.1x` speed:
 
@@ -110,7 +110,7 @@ Behavior:
 
 - The target agent is still controlled by `Follow` / `Lock Current`.
 - The prop scanner only accepts projectiles thrown or owned by the current target.
-- The `v0.4.9` release retains the user-confirmed fix5 origin/rig implementation and orders throws by schema spawn time and persistent eligibility. Ownership arriving after 100 ms can still replace the previous automatic shot.
+- The `v0.5.0` release retains the user-confirmed fix5 origin/rig implementation and orders throws by schema spawn time and persistent eligibility. Ownership arriving after 100 ms can still replace the previous automatic shot.
 - AUTO HANDOFF follows through detonation, holds the final camera for 2 demo seconds, then returns to the agent's native view while awaiting future throws. Pause stops the timer; slow playback extends the wall-clock duration. New valid throws take over immediately without waiting for the hold to finish.
 - PIN CURRENT PROP protects the current shot and final view indefinitely. Row SELECT + PIN chooses a specific live candidate and uses the same pin policy. AUTO HANDOFF unpins; an elapsed effect hold returns immediately unless another shot takes over.
 - CLEAR LOCK / RETURN TO AGENT releases the view immediately without recapturing cleared/existing candidates. Future throws still auto-capture; explicit row selection can reopen a live cleared candidate. The lower target Clear Lock also releases the prop camera and restores Follow target selection.
